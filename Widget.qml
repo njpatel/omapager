@@ -395,16 +395,27 @@ BarWidget {
             foreground: pager.panelFg
             fontFamily: pager.fontFamily
             iconOpacity: pager.hasState ? 1.0 : 0.5
+            // A fixed square with the glyph centred in it. The hero anchors
+            // its labels to the right edge of whatever the icon loader turns
+            // out to be, and a bell, a crossed-out bell and a bell with a Z in
+            // it are three different widths - so swapping between them dragged
+            // the title back and forth every time the switch was used.
             iconComponent: Component {
-              Text {
-                text: pager.silenced ? pager.bellOff
-                    : (pager.globalSnoozed || pager.snoozed.length > 0) ? pager.bellSleep
-                    : pager.bell
-                color: pager.silenced ? pager.silencedColour
-                     : (pager.globalSnoozed || pager.snoozed.length > 0) ? pager.snoozedColour
-                     : pager.panelFg
-                font.family: pager.fontFamily
-                font.pixelSize: Style.font.display
+              Item {
+                implicitWidth: hero.iconSize
+                implicitHeight: hero.iconSize
+
+                Text {
+                  anchors.centerIn: parent
+                  text: pager.silenced ? pager.bellOff
+                      : (pager.globalSnoozed || pager.snoozed.length > 0) ? pager.bellSleep
+                      : pager.bell
+                  color: pager.silenced ? pager.silencedColour
+                       : (pager.globalSnoozed || pager.snoozed.length > 0) ? pager.snoozedColour
+                       : pager.panelFg
+                  font.family: pager.fontFamily
+                  font.pixelSize: hero.iconSize
+                }
               }
             }
 
