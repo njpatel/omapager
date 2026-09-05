@@ -95,7 +95,7 @@ SCENES = {
              body="Gurbinder: latest build is up, take a look https://axiom.co/preview/1841"),
         dict(web="app.slack.com", summary="Bank",
              body="Your verification code is 482913. Do not share it with anyone."),
-        dict(app="KDE Connect", icon="kdeconnect", summary="Messages",
+        dict(app="KDE Connect", summary="Messages",
              body="Seif: are you around later?",
              # Deliberately not called "Reply": that word belongs to the real
              # inline reply, which only appears when the phone offers a reply
@@ -107,9 +107,9 @@ SCENES = {
              # is a worse version of snoozing the source - offering it here
              # invites the comparison and loses it.
              actions=["read=Mark as read"]),
-        dict(app="KDE Connect", icon="kdeconnect", summary="Messages",
+        dict(app="KDE Connect", summary="Messages",
              body="G-728341 is your Google verification code"),
-        dict(app="KDE Connect", icon="kdeconnect", summary="Messages",
+        dict(app="KDE Connect", summary="Messages",
              body="Call me back on +44 7911 123456 when you get this",
              actions=["read=Mark as read"]),
         dict(app="kitty", icon="kitty", summary="Tests passed",
@@ -315,7 +315,7 @@ def reply_scene():
     with open(FAKE, "w") as fh:
         json.dump([dict(appName="WhatsApp", title=who, text=message,
                         isConversation=True)], fh)
-    return [dict(app="KDE Connect", icon="kdeconnect", summary="WhatsApp",
+    return [dict(app="KDE Connect", summary="WhatsApp",
                  body="%s: %s" % (who, message))]
 
 
