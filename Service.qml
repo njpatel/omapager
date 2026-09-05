@@ -1175,9 +1175,15 @@ Item {
     }
   }
 
+  // Housekeeping, once, at startup. History trims itself on every close, so
+  // this is really for the icon cache - nothing else ever looks at it, and
+  // without this it only ever grows.
+  Process { id: tidyProc; running: false; command: [service.storeBin, "tidy"] }
+
   Component.onCompleted: {
     restoreProc.running = true
     quietRestoreProc.running = true
+    tidyProc.running = true
   }
 
   // ------------------------------------------------------------- server

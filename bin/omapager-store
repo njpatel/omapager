@@ -2,12 +2,11 @@
 # omapager-store - the notification store, driven from Service.qml.
 #
 #   put              read one notification JSON on stdin, write it to live/
-#   close KEY WHY    move live/KEY.json into history/, trimmed to HISTORY_MAX
+#   close KEY WHY    move live/KEY.json into history/, trimmed to size and age
 #   drop KEY         forget a live notification without recording it
 #   restore          print the live notifications, oldest first
 #   history [N]      print the newest N history entries, newest first
-#   image KEY SRC    copy a sender's image into images/, print where it landed
-#   sweep            delete images no live or history entry refers to
+#   tidy             drop history past its age, and icons nothing has wanted
 #   quiet            print the quiet state: snoozed sources, and silencing
 #   quiet-save       read the quiet state as JSON on stdin
 #   held [N]         print the newest N that were never shown, newest first
@@ -27,14 +26,26 @@ import time
 ROOT = os.path.expanduser("~/.local/state/omarchy/omapager")
 LIVE = os.path.join(ROOT, "live")
 HISTORY = os.path.join(ROOT, "history")
-IMAGES = os.path.join(ROOT, "images")
+ICONS = os.path.join(ROOT, "icons")
 QUIET = os.path.join(ROOT, "quiet.json")
 SNOOZES = os.path.join(ROOT, "snoozes.json")     # what quiet.json used to be
-HISTORY_MAX = 300
+# What history is for: replaying the last few onto the screen, and showing what
+# a snooze or a silence held back. Both want the recent past, neither wants a
+# fortnight of it - and every entry is the text of a message somebody sent you,
+# so keeping it past its usefulness is a cost with nothing on the other side.
+# Whichever of the two limits bites first wins.
+HISTORY_MAX = 200
+HISTORY_DAYS = 7
+
+# Resolved icons are keyed by source and cost a lookup - sometimes a web
+# request - to rebuild, so they outlive the notifications that prompted them,
+# but not forever. Anything nothing has wanted for this long is a source you no
+# longer have, and it resolves again by itself if you turn out to still have it.
+ICON_DAYS = 60
 
 
 def ensure():
-    for d in (LIVE, HISTORY, IMAGES):
+    for d in (LIVE, HISTORY, ICONS):
         os.makedirs(d, exist_ok=True)
 
 
@@ -95,12 +106,43 @@ def cmd_drop(key):
 
 
 def trim_history():
+    """Names start with the closing timestamp, so sorting is chronological and
+    the age test never has to open a file."""
     files = sorted(f for f in os.listdir(HISTORY) if f.endswith(".json"))
-    for name in files[:-HISTORY_MAX]:
+    cutoff = (time.time() - HISTORY_DAYS * 86400) * 1000
+    doomed = set(files[:-HISTORY_MAX]) if len(files) > HISTORY_MAX else set()
+    for name in files:
+        try:
+            if int(name.split("-", 1)[0]) < cutoff:
+                doomed.add(name)
+        except ValueError:
+            pass
+    for name in doomed:
         try:
             os.remove(os.path.join(HISTORY, name))
         except OSError:
             pass
+    return len(doomed)
+
+
+def trim_icons():
+    """Resolved icons live under icons/, written by omapager-icon."""
+    cutoff = time.time() - ICON_DAYS * 86400
+    dropped = 0
+    for name in os.listdir(ICONS):
+        path = os.path.join(ICONS, name)
+        try:
+            if os.path.getmtime(path) < cutoff:
+                os.remove(path)
+                dropped += 1
+        except OSError:
+            pass
+    return dropped
+
+
+def cmd_tidy():
+    sys.stdout.write("%d history, %d icons" % (trim_history(), trim_icons()))
+    return 0
 
 
 def listing(directory, limit=None, newest_first=False):
@@ -115,30 +157,6 @@ def listing(directory, limit=None, newest_first=False):
         if entry is not None:
             out.append(entry)
     return out
-
-
-def cmd_image(key, src):
-    """Copy a sender's image. Chromium deletes its avatar the moment the
-    notification closes, so anything we intend to show later needs a copy."""
-    if not src:
-        return 0
-    path = src[7:] if src.startswith("file://") else src
-    if not os.path.isfile(path):
-        return 0
-    ext = os.path.splitext(path)[1][:5] or ".png"
-    dest = os.path.join(IMAGES, safe(key) + ext)
-    try:
-        shutil.copyfile(path, dest)
-    except OSError:
-        return 0
-    sys.stdout.write(dest)
-    return 0
-
-
-# What was kept from you, as opposed to what you saw and dealt with. The
-# distinction is the closing reason, which is recorded for every entry: only
-# these two mean "this never reached the screen".
-HELD_REASONS = ("snoozed", "silenced")
 
 
 def cmd_held(limit):
@@ -185,21 +203,6 @@ def read_quiet():
     return {"snoozes": read_json(SNOOZES) or {}}
 
 
-def cmd_sweep():
-    wanted = set()
-    for entry in listing(LIVE) + listing(HISTORY):
-        stored = entry.get("stored_image")
-        if stored:
-            wanted.add(os.path.basename(stored))
-    for name in os.listdir(IMAGES):
-        if name not in wanted:
-            try:
-                os.remove(os.path.join(IMAGES, name))
-            except OSError:
-                pass
-    return 0
-
-
 def main():
     ensure()
     args = sys.argv[1:]
@@ -229,10 +232,8 @@ def main():
         return 0
     if verb == "quiet-save":
         return cmd_quiet_save()
-    if verb == "image":
-        return cmd_image(args[1], args[2] if len(args) > 2 else "")
-    if verb == "sweep":
-        return cmd_sweep()
+    if verb == "tidy":
+        return cmd_tidy()
     return 2
 
 

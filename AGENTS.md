@@ -128,9 +128,16 @@ Crop to the card and check a corner pixel is the card's own colour.
 
 ## State
 
-`~/.local/state/omarchy/omapager/` — `live/`, `history/` (one file per
-notification, capped), `images/`, `quiet.json` (snoozes + silencing). It is
-state, not cache: it survives `rm -rf ~/.cache`.
+`~/.local/state/omarchy/omapager/` — `live/` (what is on screen, for restoring
+across a restart), `history/` (one file per notification), `icons/` (resolved
+per source), `quiet.json` (snoozes + silencing). It is state, not cache: it
+survives `rm -rf ~/.cache`.
+
+Every history entry is the text of a message somebody sent, so it is trimmed by
+**age as well as count** — 7 days or 200 entries, whichever bites first, on
+every close. Icons are pruned at 60 days by `tidy`, which the daemon runs at
+startup. Nothing is written to the journal: no `console.log` anywhere, and the
+Python helpers speak on stdout, which is the IPC channel.
 
 ## Conventions
 

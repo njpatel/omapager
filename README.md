@@ -134,6 +134,12 @@ resets `shell.json` to defaults.)
 | `sourceLimit` | `8` | how many quietened sources the panel lists |
 | `heldPerSource` | `10` | how many held notifications it shows per source |
 
+Every history entry is the text of a message somebody sent you, so it is
+trimmed by age as well as count: **7 days or 200 entries**, whichever comes
+first. That is enough for replaying the last few and for showing what a snooze
+held back, which is all history is for. Resolved icons are dropped after 60
+days without use, and nothing is ever written to the system log.
+
 Settings live on the bar widget's entry in `shell.json`, and it hands them to
 the daemon — so they are all set in the one place, next to `id`:
 
