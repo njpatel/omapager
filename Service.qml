@@ -62,6 +62,13 @@ Item {
   // is dropped by default and can be put back.
   property bool hideSettingsAction: true
 
+  // A verification code is the one thing quiet cannot afford to swallow: you
+  // asked for it thirty seconds ago, it expires in five minutes, and no amount
+  // of "I'll look later" applies. Codes are only ever detected from a keyword
+  // sitting next to a plausible shape, so this is a narrow hole rather than an
+  // exception anything can walk through - and it can be closed.
+  property bool codesBypassQuiet: true
+
   property bool doNotDisturb: false
   property double silencedSince: 0
   function setDoNotDisturb(value) {
@@ -668,6 +675,7 @@ Item {
     // Critical is never muted - that is what critical means.
     var muted = doNotDisturb ? "silenced"
               : (globalSnoozeUntil || snoozedUntil(row.groupKey)) ? "snoozed" : ""
+    if (muted && codesBypassQuiet && String(row.code || "")) muted = ""
     if (muted && notification.urgency !== NotificationUrgency.Critical) {
       Store.write(storeProc, storeBin, "put", row)
       Store.write(storeProc, storeBin, "close", null, [key, muted])

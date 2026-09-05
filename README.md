@@ -59,6 +59,15 @@ the useful unit on some desktops and half a day on others. The panel snoozes
 *everything* for the same lengths, which is usually the one you want: not for
 the next hour, rather than not until you remember you turned it off.
 
+**Lets the code through anyway.** A snooze or a silence holds everything back
+except a notification carrying a verification code. You asked for that code
+thirty seconds ago and it expires in five minutes, so "I'll look at it later"
+is not a thing you can do with it — and being locked out of your own login
+because you'd quietened Slack is exactly the failure that makes people stop
+snoozing anything. Codes are only ever detected from a keyword sitting next to
+a plausible shape, so this is a narrow hole rather than an exception anything
+can walk through, and `codesBypassQuiet` closes it.
+
 **Shows you what quiet cost.** Silence is only tolerable if you can see what it
 kept from you. While anything is being held back — silenced, snoozed wholesale,
 or one source at a time — the panel lists the sources that caught something and
@@ -105,6 +114,8 @@ resets `shell.json` to defaults.)
 | `snoozeDurations` | `30, 60, 240, tomorrow` | what the snooze menus offer — minutes, or `tomorrow` |
 | `wakeHour` | `8` | the hour "until tomorrow" wakes a source at |
 | `alwaysShow` | `false` | keep the bar slot even when nothing is held back, so the centre of the bar never shifts |
+| `codesBypassQuiet` | `true` | let a notification carrying a verification code through a snooze or a silence |
+| `timeFormat` | `system` | `system` follows `LC_TIME`; `24h` and `12h` pin it |
 | `sourceLimit` | `8` | how many quietened sources the panel lists |
 | `heldPerSource` | `10` | how many held notifications it shows per source |
 

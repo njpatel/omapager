@@ -41,7 +41,9 @@
       "wakeHour": 8,
       "sourceLimit": 8,
       "heldPerSource": 10,
-      "alwaysShow": false
+      "alwaysShow": false,
+      "codesBypassQuiet": true,
+      "timeFormat": "system"
     },
     "schema": [
       {
@@ -153,6 +155,25 @@
         "label": "Always show",
         "description": "Keep the slot in the bar even when nothing is being held back. The icon appearing is the one moment the bar's centre shifts; this trades a permanently dim bell for a clock that never moves.",
         "defaultValue": false
+      },
+      {
+        "key": "codesBypassQuiet",
+        "type": "boolean",
+        "label": "Let verification codes through",
+        "description": "A snooze or a silence holds everything back except a notification carrying a verification code. You asked for that code thirty seconds ago and it expires in five minutes, so \"I'll look later\" does not apply to it.",
+        "defaultValue": true
+      },
+      {
+        "key": "timeFormat",
+        "type": "enum",
+        "label": "Clock",
+        "options": [
+          "system",
+          "24h",
+          "12h"
+        ],
+        "defaultValue": "system",
+        "description": "How wake times are written. system follows LC_TIME; Omarchy's own clock widget takes an explicit format string instead, so pin this if the two disagree."
       }
     ]
   }

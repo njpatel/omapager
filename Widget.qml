@@ -70,6 +70,7 @@ BarWidget {
     var align = String(setting("actionsAlign", "right"))
     if (align === "left" || align === "right") service.actionsAlign = align
     service.hideSettingsAction = setting("hideSettingsAction", true) !== false
+    service.codesBypassQuiet = setting("codesBypassQuiet", true) !== false
     service.wakeHour = Number(setting("wakeHour", 8)) || 8
     service.sourceLimit = Number(setting("sourceLimit", 8)) || 8
     service.heldPerSource = Number(setting("heldPerSource", 10)) || 10
@@ -162,9 +163,40 @@ BarWidget {
     else toggleSilence()
   }
 
-  // "in 24m", "in 3h", "until 08:00" once it is far enough out that the
-  // remaining minutes stop being the useful half.
+  // The system's own clock, not one hardcoded here: 24-hour on this desktop,
+  // "8:00 am" on a locale that does it that way. Qt takes it from LC_TIME.
+  // "system" follows LC_TIME, which is what "12 or 24 hour" means on a Linux
+  // desktop. It is worth knowing that Omarchy's clock widget does not: it
+  // takes an explicit format string, so a bar pinned to 24-hour on a 12-hour
+  // locale is a normal thing to have. Hence the override.
+  readonly property string timeFormat: String(setting("timeFormat", "system"))
+
+  function clockTime(when) {
+    if (timeFormat === "24h") return Qt.formatTime(when, "HH:mm")
+    if (timeFormat === "12h") return Qt.formatTime(when, "h:mm ap")
+    // Through the locale object, not by handing Qt.formatTime an enum: that
+    // takes its second argument as a format string, quietly makes nothing of
+    // it, and falls back to a full clock - which is how a wake time came out
+    // as "10:05:21". Nobody snoozes to the second.
+    return when.toLocaleTimeString(Qt.locale(), Locale.ShortFormat)
+  }
+
+  // A wake time on another day carries the day offset the way a flight arrival
+  // does. The question anyone is actually asking is "which night", and a date
+  // answers a question nobody asked.
+  function dayOffset(when) {
+    var today = new Date(); today.setHours(0, 0, 0, 0)
+    var then = new Date(when.getTime()); then.setHours(0, 0, 0, 0)
+    var days = Math.round((then.getTime() - today.getTime()) / 86400000)
+    if (days <= 0) return ""
+    var superscripts = ["", "\u00b9", "\u00b2", "\u00b3"]
+    return "\u207a" + (days < superscripts.length ? superscripts[days] : days)
+  }
+
+  // "in 24m", "in 3h", and then the time itself once the remaining minutes
+  // stop being the useful half of the answer.
   function waking(until) {
+    var when = new Date(until * 1000)
     var left = Math.max(0, until - Date.now() / 1000)
     // Rounded minutes, unless rounding them lands on the hour - an hour's
     // snooze read "back in 60m" for its first few seconds, which is a strange
@@ -172,7 +204,14 @@ BarWidget {
     var minutes = Math.max(1, Math.round(left / 60))
     if (minutes < 60) return "in " + minutes + "m"
     if (left < 8 * 3600) return "in " + Math.max(1, Math.round(left / 3600)) + "h"
-    return "until " + Qt.formatDateTime(new Date(until * 1000), "HH:mm")
+    return "until " + clockTime(when) + dayOffset(when)
+  }
+
+  // The same, said as a time rather than as a wait - which is what the line
+  // under the title wants when the wait is the whole story.
+  function wakingAt(until) {
+    var when = new Date(until * 1000)
+    return "Snoozed until " + clockTime(when) + dayOffset(when)
   }
 
   // The other panels put a line under their title that cycles while the thing
@@ -190,7 +229,6 @@ BarWidget {
     "Banking interruptions"
   ]
   property int phraseIndex: 0
-  readonly property bool rotatingPhrases: opened && hasState
 
   // When it ends, in the hero's own pill beside the title. It cannot go in the
   // line underneath: that line rotates a phrase while anything is being held
@@ -198,19 +236,29 @@ BarWidget {
   // thing you opened the panel to find out was the one thing it never showed.
   // A pill does not rotate.
   readonly property string endsAt: {
-    if (globalSnoozed) return "back " + waking(globalUntil)
+    // Not while everything is snoozed: the line underneath says it in full,
+    // and the two together crowded the title down to "Noti...".
+    if (globalSnoozed) return ""
     if (!silenced && snoozed.length === 1) return "back " + waking(snoozed[0].until)
     return ""      // silence has no end, and several sources each show their own
   }
 
+  // A snooze has an end, and the end is the whole story - so it says so, in
+  // the colour of the state, and it does not rotate. The phrases are for the
+  // states that have nothing more useful to say.
+  readonly property bool rotatingPhrases: opened && hasState && !globalSnoozed
+
   readonly property string stateLine: {
+    if (globalSnoozed) return wakingAt(globalUntil)
     if (rotatingPhrases) return quietPhrases[phraseIndex % quietPhrases.length]
     if (silenced) return "Silenced"
-    if (globalSnoozed) return "Everything snoozed, back " + waking(globalUntil)
     if (snoozed.length === 1) return snoozed[0].label + ", back " + waking(snoozed[0].until)
     if (snoozed.length > 1) return snoozed.length + " sources snoozed"
     return "Everything comes through"
   }
+
+  readonly property color stateColour: globalSnoozed ? snoozedColour
+                                     : silenced ? silencedColour : dim
 
   Timer {
     interval: 2800
@@ -402,12 +450,13 @@ BarWidget {
           width: parent.width
           spacing: Style.space(12)
 
-          PanelHero {
+          QuietHero {
             id: hero
             width: parent.width
             title: "Notifications"
             detail: pager.endsAt
             meta: pager.stateLine
+            metaColour: pager.stateColour
             foreground: pager.panelFg
             fontFamily: pager.fontFamily
             iconOpacity: pager.hasState ? 1.0 : 0.5
@@ -471,25 +520,42 @@ BarWidget {
           }
 
           // The lengths, revealed by the snooze button rather than sitting
-          // under the title the whole time.
-          Row {
+          // under the title the whole time - with a note about the one thing
+          // that still gets through, because a snooze you cannot predict is
+          // one you will not use.
+          Column {
             width: parent.width
             spacing: Style.space(5)
             visible: pager.globalChoosing && !pager.globalSnoozed
 
-            Repeater {
-              model: pager.globalChoosing && pager.service ? pager.service.snoozeOptions : []
+            Text {
+              visible: pager.service && pager.service.codesBypassQuiet
+              width: parent.width
+              text: "Verification codes still come through."
+              color: pager.dim
+              font.family: pager.fontFamily
+              font.pixelSize: Style.font.caption
+              wrapMode: Text.WordWrap
+            }
 
-              Button {
-                required property var modelData
-                text: String(modelData.short)
-                bordered: true
-                foreground: pager.panelFg
-                accent: pager.panelFg
-                fontFamily: pager.fontFamily
-                fontSize: Style.font.caption
-                verticalPadding: 1
-                onClicked: pager.snoozeEverything(Number(modelData.seconds))
+            Row {
+              width: parent.width
+              spacing: Style.space(5)
+
+              Repeater {
+                model: pager.globalChoosing && pager.service ? pager.service.snoozeOptions : []
+
+                Button {
+                  required property var modelData
+                  text: String(modelData.short)
+                  bordered: true
+                  foreground: pager.panelFg
+                  accent: pager.panelFg
+                  fontFamily: pager.fontFamily
+                  fontSize: Style.font.caption
+                  verticalPadding: 1
+                  onClicked: pager.snoozeEverything(Number(modelData.seconds))
+                }
               }
             }
           }
@@ -709,6 +775,122 @@ BarWidget {
           }
         }
       }
+    }
+  }
+
+  // PanelHero with one thing added: the line under the title can be coloured.
+  //
+  // Upstream draws it in the hero's own dim, which is right for a line that
+  // says "Untangling wires" and wrong for one that says when your notifications
+  // come back - that line is the state, and the state has a colour everywhere
+  // else in this plugin. Everything below is upstream's layout and upstream's
+  // tokens, so the two stay interchangeable; if PanelHero ever grows a
+  // metaColor, this goes.
+  component QuietHero: Item {
+    id: heroRoot
+
+    property Component iconComponent: null
+    property Component trailingControl: null
+    property string title: ""
+    property string meta: ""
+    property string detail: ""
+    property color foreground: Color.foreground
+    property color metaColour: Qt.darker(foreground, 1.4)
+    property string fontFamily: Style.font.family
+    property real iconSize: Style.font.display
+    property real iconOpacity: 1.0
+    property alias metaOpacity: metaText.opacity
+
+    readonly property color dim: Qt.darker(foreground, 1.4)
+    readonly property real trailingInset: trailingLoader.item && trailingLoader.item.visible
+                                          ? trailingLoader.width + Style.space(12) : 0
+
+    width: parent ? parent.width : implicitWidth
+    implicitHeight: Math.max(iconLoader.implicitHeight, heroLabels.implicitHeight,
+                             trailingLoader.implicitHeight)
+
+    Loader {
+      id: iconLoader
+      sourceComponent: heroRoot.iconComponent
+      anchors.left: parent.left
+      anchors.verticalCenter: parent.verticalCenter
+      opacity: heroRoot.iconOpacity
+    }
+
+    Column {
+      id: heroLabels
+      anchors.left: iconLoader.right
+      anchors.leftMargin: Style.space(14)
+      anchors.right: parent.right
+      anchors.rightMargin: heroRoot.trailingInset
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(2)
+
+      Row {
+        id: titleRow
+        visible: heroRoot.title !== "" || detailPill.visible
+        width: parent.width
+
+        Text {
+          id: titleText
+          visible: heroRoot.title !== ""
+          text: heroRoot.title
+          width: Math.min(implicitWidth,
+                          Math.max(0, parent.width - (detailPill.visible
+                                                      ? detailPill.implicitWidth + Style.space(8) : 0)))
+          color: heroRoot.foreground
+          font.family: heroRoot.fontFamily
+          font.pixelSize: Style.font.title
+          font.bold: true
+          elide: Text.ElideRight
+        }
+
+        Item {
+          width: Math.max(0, parent.width - titleText.width - detailPill.implicitWidth)
+          height: 1
+        }
+
+        BorderSurface {
+          id: detailPill
+          visible: heroRoot.detail !== ""
+          implicitWidth: detailText.implicitWidth + Style.space(10)
+          implicitHeight: detailText.implicitHeight + Style.space(4)
+          anchors.verticalCenter: parent.verticalCenter
+          color: "transparent"
+          borderSpec: Border.controlSpec("normal", heroRoot.foreground, Color.accent)
+          radius: Style.cornerRadius
+
+          Text {
+            id: detailText
+            anchors.centerIn: parent
+            text: heroRoot.detail
+            color: heroRoot.dim
+            font.family: heroRoot.fontFamily
+            font.pixelSize: Style.font.body
+            font.bold: true
+          }
+        }
+      }
+
+      Text {
+        id: metaText
+        width: parent.width
+        text: heroRoot.meta.toUpperCase()
+        visible: text !== ""
+        color: heroRoot.metaColour
+        font.family: heroRoot.fontFamily
+        font.pixelSize: Style.font.caption
+        font.bold: true
+        font.letterSpacing: 1.2
+        elide: Text.ElideRight
+      }
+    }
+
+    Loader {
+      id: trailingLoader
+      sourceComponent: heroRoot.trailingControl
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
     }
   }
 }
