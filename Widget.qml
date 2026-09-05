@@ -267,11 +267,13 @@ BarWidget {
     return "Everything comes through"
   }
 
-  // The hero's own dim when there is nothing to colour - darker(1.4), which is
-  // what PanelHero uses, not the 1.55 the panel body uses for secondary text.
+  // Coloured only when the line is carrying the state. While silenced it is
+  // carrying a rotating phrase, and "Absorbing alerts" in alarm-red reads as
+  // something being wrong rather than as something being chosen - the red
+  // crossed bell and the switch already say silenced. Otherwise the hero's own
+  // dim: darker(1.4), which is PanelHero's, not the 1.55 the body uses.
   readonly property color stateColour: globalSnoozed ? snoozedColour
-                                     : silenced ? silencedColour
-                                     : Qt.darker(panelFg, 1.4)
+                                                     : Qt.darker(panelFg, 1.4)
 
   Timer {
     interval: 2800
