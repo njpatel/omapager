@@ -106,6 +106,20 @@ it behaves like one:
 `omarchy-restart-shell` to pick it up. (Not `omarchy-refresh-shell` — that
 resets `shell.json` to defaults.)
 
+### Removing it
+
+```bash
+omarchy plugin remove njpatel.omapager
+```
+
+Then undo the three lines above: take `omarchy.notifications` back out of
+`disabledPlugins` so the built-in service can claim the bus again, and drop
+`njpatel.omapager` from the bar layout. `omarchy-restart-shell` to apply.
+
+State is left behind on purpose, in case you are only reinstalling —
+`rm -rf ~/.local/state/omarchy/omapager` clears the history and the resolved
+icons for good.
+
 ## Settings
 
 | key | default | what it does |
