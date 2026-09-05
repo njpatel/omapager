@@ -39,8 +39,11 @@ answer goes back to the conversation on the device.
 
 **Sends you back where it came from.** Clicking a card runs the sender's
 default action; failing that it focuses the window that source is already
-showing in — Omarchy's web apps carry their host in their Hyprland class — and
-only opens something new if there's nothing to go back to.
+showing in, and only opens something new if there's nothing to go back to.
+Omarchy's web apps carry their host in their Hyprland class, so those match
+outright; a site open as a tab in an ordinary browser doesn't, so the brand is
+matched against browser window titles instead — a Slack notification lands in
+the Chrome that's already showing Slack rather than in a new tab.
 
 **Resolves real icons.** Local icon themes first, so your own overrides win,
 then the site's own icon for web notifications, with dark and light variants.

@@ -559,6 +559,30 @@ Item {
   // Hyprland class ("chrome-web.whatsapp.com__-Default"), so a notification
   // that identified itself as web.whatsapp.com can be matched to the window
   // showing it. Only if there is no such window do we open anything new.
+  // Whole words only: "slack" must not match "slackline", and a brand that
+  // happens to be a substring of a longer word is not a sighting of it.
+  function wordIn(text, word) {
+    var at = text.indexOf(word)
+    while (at >= 0) {
+      var before = at === 0 ? "" : text.charAt(at - 1)
+      var after = text.charAt(at + word.length)
+      if (!/[a-z0-9]/.test(before) && !/[a-z0-9]/.test(after)) return true
+      at = text.indexOf(word, at + 1)
+    }
+    return false
+  }
+
+  function openTitles() {
+    var list = Hyprland.toplevels ? Hyprland.toplevels.values : []
+    if (!list.length && Hyprland.clients) list = Hyprland.clients.values
+    var out = []
+    for (var i = 0; i < list.length; i++) {
+      var ipc = list[i].lastIpcObject
+      out.push(String((ipc && ipc.title) || ""))
+    }
+    return out
+  }
+
   function openClasses() {
     var list = Hyprland.toplevels ? Hyprland.toplevels.values : []
     if (!list.length && Hyprland.clients) list = Hyprland.clients.values
@@ -571,18 +595,54 @@ Item {
     return out
   }
 
+  // The distinctive part of a host: "app.slack.com" -> "slack",
+  // "web.whatsapp.com" -> "whatsapp", "linear.app" -> "linear". Subdomains
+  // people put in front of everything, and the suffix, carry no brand.
+  readonly property var genericLabels: ({ www: 1, app: 1, web: 1, my: 1, m: 1,
+                                          com: 1, org: 1, net: 1, io: 1, co: 1,
+                                          dev: 1, ai: 1, so: 1, site: 1 })
+
+  function brandOf(host) {
+    var labels = String(host || "").toLowerCase().split(".")
+    for (var i = 0; i < labels.length; i++) {
+      var label = labels[i]
+      if (label.length >= 4 && !genericLabels[label]) return label
+    }
+    return ""
+  }
+
+  readonly property var browserClasses: /^(chrome|chromium|firefox|zen|brave|edge|vivaldi)/
+
   function windowForSource(source) {
     var name = String(source || "").toLowerCase()
     if (!name) return null
     var classes = openClasses()
+    var titles = openTitles()
     var i
 
     // Compare in lower case, return the class as it actually is: Hyprland's
     // class filter is an exact match, so the lowercased form
     // ("...__-default") would never find the window ("...__-Default").
     if (name.indexOf(".") > 0) {
+      // The host in the class - an Omarchy web app, which names itself
+      // "chrome-web.whatsapp.com__-Default".
       for (i = 0; i < classes.length; i++)
         if (classes[i].toLowerCase().indexOf(name) >= 0) return classes[i]
+
+      // Failing that, the brand in a browser window's title. A site open as a
+      // tab in an ordinary browser window has nothing of itself in the class -
+      // Slack in a second Chrome instance is just "chrome-work" - so the only
+      // trace of where it is showing is what the window is called. Restricted
+      // to browsers, because "slack" appearing in some editor's title is a
+      // filename, not a place to go.
+      var brand = brandOf(name)
+      if (brand) {
+        for (i = 0; i < classes.length; i++) {
+          if (!browserClasses.test(classes[i].toLowerCase())) continue
+          var title = String(titles[i] || "").toLowerCase()
+          if (wordIn(title, brand)) return classes[i]
+        }
+      }
       return null
     }
 
