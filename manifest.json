@@ -40,7 +40,8 @@
       ],
       "wakeHour": 8,
       "sourceLimit": 8,
-      "heldPerSource": 10
+      "heldPerSource": 10,
+      "alwaysShow": false
     },
     "schema": [
       {
@@ -145,6 +146,13 @@
         "max": 25,
         "step": 1,
         "defaultValue": 10
+      },
+      {
+        "key": "alwaysShow",
+        "type": "boolean",
+        "label": "Always show",
+        "description": "Keep the slot in the bar even when nothing is being held back. The icon appearing is the one moment the bar's centre shifts; this trades a permanently dim bell for a clock that never moves.",
+        "defaultValue": false
       }
     ]
   }

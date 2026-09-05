@@ -104,6 +104,7 @@ resets `shell.json` to defaults.)
 | `hideSettingsAction` | `true` | drop the browser's "Settings" button, which is on every web notification and is never the one you wanted |
 | `snoozeDurations` | `30, 60, 240, tomorrow` | what the snooze menus offer — minutes, or `tomorrow` |
 | `wakeHour` | `8` | the hour "until tomorrow" wakes a source at |
+| `alwaysShow` | `false` | keep the bar slot even when nothing is held back, so the centre of the bar never shifts |
 | `sourceLimit` | `8` | how many quietened sources the panel lists |
 | `heldPerSource` | `10` | how many held notifications it shows per source |
 

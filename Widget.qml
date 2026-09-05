@@ -49,7 +49,13 @@ BarWidget {
   // Shown when there is something to say, while the panel is open, and on the
   // same bar-centre gesture that reveals Omarchy's own inactive indicators -
   // otherwise there would be no way back to silence once you left it.
-  readonly property bool revealed: hasState || opened
+  // `alwaysShow` keeps the slot whether or not there is anything to report -
+  // the same setting, and the same name, Omarchy's own Indicators widget has.
+  // The icon appearing at all is the one moment the bar's centre still shifts,
+  // because a widget that was not there is now taking a slot; holding the slot
+  // open costs a permanently dim bell and buys a clock that never moves.
+  readonly property bool alwaysShow: setting("alwaysShow", false) === true
+  readonly property bool revealed: hasState || opened || alwaysShow
     || (bar && bar.centerSectionRevealHeld === true && bar.centerHoverRevealSuppressed !== true)
 
   // ------------------------------------------------------------- settings
