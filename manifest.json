@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "id": "njpatel.omapager",
+  "name": "Omapager",
+  "version": "0.1.0",
+  "author": "Neil Patel",
+  "license": "Apache-2.0",
+  "description": "Notifications for Omarchy: a stacking, grouping replacement for the built-in service, with markup parsing and resolved source icons.",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "keepLoaded": true,
+  "activation": "on-demand",
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "Widget.qml"
+  },
+  "barWidget": {
+    "displayName": "Omapager",
+    "description": "The notification bell: what is on screen now. Left-click dismisses it, right-click silences.",
+    "category": "System",
+    "aliases": [
+      "notifications",
+      "notify",
+      "bell",
+      "pager"
+    ],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "stacking": "source",
+      "actionsAlign": "right"
+    },
+    "schema": [
+      {
+        "key": "stacking",
+        "type": "enum",
+        "label": "Live notifications stack",
+        "options": [
+          "all",
+          "source"
+        ],
+        "defaultValue": "source",
+        "description": "all = one deck in the corner, same-source notifications grouped inside it; source = a separate deck per source, each expanding on its own."
+      },
+      {
+        "key": "actionsAlign",
+        "type": "enum",
+        "label": "Notification buttons",
+        "options": [
+          "right",
+          "left"
+        ],
+        "defaultValue": "right",
+        "description": "Which end of a card its action buttons sit at."
+      }
+    ]
+  }
+}

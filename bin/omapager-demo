@@ -1,0 +1,408 @@
+#!/usr/bin/env python3
+# omapager-demo - a realistic run of notifications, for looking at the thing.
+#
+#   omapager-demo              the default scene, paced for watching
+#   omapager-demo --fast       same scene, tighter, for a recording
+#   omapager-demo --scene chat only one part of it
+#   omapager-demo --scene interactive   codes, links and the sender's buttons
+#   omapager-demo --scene routing       where a click sends you, per source
+#   omapager-demo --scene reply         inline reply, against a stand-in phone
+#   omapager-demo --list       what scenes there are
+#   omapager-demo --loop       keep going until interrupted
+#
+# The senders here are the ones that actually notify this desktop - Chrome
+# announcing a web app through a leading anchor, KDE Connect naming a device in
+# the summary, a terminal, a backup job - because those shapes are what the
+# grouping and the markup parsing have to cope with. The words are invented;
+# nothing here is anybody's real message.
+import argparse
+import json
+import os
+import random
+import subprocess
+import sys
+import time
+
+STORE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "omapager-store")
+
+# Chrome puts a link to the origin on the front of every web notification, and
+# that anchor is what tells app.slack.com apart from mail.google.com.
+def web(host, body):
+    return '<a href="https://%s/">%s</a>\n\n%s' % (host, host, body)
+
+
+SCENES = {
+    # People. Chrome announces a web app through a leading anchor, and that
+    # anchor is the only thing that tells app.slack.com from web.whatsapp.com -
+    # both of them are "Google Chrome" as far as the bus is concerned.
+    "chat": [
+        dict(web="app.slack.com", summary="#design",
+             body="Gurbinder: new spacing is in Figma, worth a look before standup"),
+        dict(web="web.whatsapp.com", summary="Seif Lotfy",
+             body="I have to show you this thing I built, are you around later?"),
+        dict(web="app.slack.com", summary="Dominic",
+             body="can you sanity check the quota panel numbers?"),
+        dict(web="x.com", summary="Elon Musk",
+             body="replied to your post: this is the part everyone gets wrong"),
+        # A channel going off. Four from one source, arriving faster than the
+        # scene's pace, so the stack builds in front of you - which is the
+        # thing worth watching and the thing a one-notification-per-source
+        # demo never shows.
+        dict(web="app.slack.com", summary="#design", gap=0.7,
+             body="Gurbinder: pushed the spacing pass, take a look"),
+        dict(web="app.slack.com", summary="#design", gap=0.7,
+             body="Dominic: the two-line ones finally breathe"),
+        dict(web="app.slack.com", summary="#design", gap=0.7,
+             body="Gurbinder: one more go at the icon size and I think that is it"),
+        dict(web="app.slack.com", summary="#design",
+             body="Dominic: shipping it before standup then"),
+    ],
+    # Work: the things that arrive while you are in the middle of something.
+    "work": [
+        dict(web="linear.app", summary="AXM-412 assigned to you",
+             body="Deck stutters when a notification lands during hover"),
+        dict(web="github.com", summary="Review requested",
+             body="axiomhq/axiom-web #1841 - <b>tighten the toast layout</b>"),
+        dict(app="kitty", icon="kitty", summary="Tests passed",
+             body="412 passed, 0 failed in <b>2m 14s</b>"),
+        dict(web="app.slack.com", summary="#releases",
+             body="0.43 tagged and pushed"),
+    ],
+    # The machine talking about itself. Named after things this desktop
+    # actually has an icon for - a notification with a letter tile in a demo
+    # reads as a bug rather than as a fallback.
+    "system": [
+        dict(app="Omarchy", icon="system-software-update", summary="Updates available",
+             body="14 packages, including linux 6.17.4 and hyprland 0.52"),
+        dict(app="Snapshots", icon="LimineSnapperSync", summary="Snapshot complete",
+             body="pre-update root snapshot written in 4s"),
+        dict(app="ApexShot", icon="apexshot", summary="Screenshot saved",
+             body="~/Screenshots/ApexShot-2026-09-03_22-41-08.png"),
+    ],
+    # The interactive one: everything a card can offer you, and the shapes that
+    # must NOT offer anything. A Slack message with a link, a bank code, a
+    # phone number, a forwarded message carrying the phone's own Reply and
+    # Mark as read - then a build number, an issue reference and a version,
+    # which should stay plain. If any of those last three grows a button, the
+    # detector has regressed.
+    # Filled in at run time by routing_scene(): which sites have a window open
+    # is not something that can be written down in advance.
+    "routing": [],
+    # Also filled in at run time: it has to write the stand-in phone first.
+    "reply": [],
+    "interactive": [
+        dict(web="app.slack.com", summary="#design",
+             body="Gurbinder: latest build is up, take a look https://axiom.co/preview/1841"),
+        dict(web="app.slack.com", summary="Bank",
+             body="Your verification code is 482913. Do not share it with anyone."),
+        dict(app="KDE Connect", icon="kdeconnect", summary="Messages",
+             body="Seif: are you around later?",
+             # Deliberately not called "Reply": that word belongs to the real
+             # inline reply, which only appears when the phone offers a reply
+             # channel. A demo button that looks like it and merely closes the
+             # card reads as the feature being broken.
+             actions=["read=Mark as read", "mute=Mute chat"]),
+        dict(app="KDE Connect", icon="kdeconnect", summary="Messages",
+             body="G-728341 is your Google verification code"),
+        dict(app="KDE Connect", icon="kdeconnect", summary="Messages",
+             body="Call me back on +44 7911 123456 when you get this",
+             actions=["read=Mark as read"]),
+        dict(app="kitty", icon="kitty", summary="Tests passed",
+             body="412 passed, 0 failed in 2m 14s"),
+        dict(web="github.com", summary="Review requested",
+             body="axiomhq/axiom-web #1841 - tighten the toast layout"),
+    ],
+    # Off the clock.
+    "personal": [
+        dict(app="Spotify", icon="spotify", summary="Now playing",
+             body="Money for Nothing - Dire Straits"),
+        dict(web="x.com", summary="3 people liked your post",
+             body="\u201cthe notification daemon is the whole desktop in miniature\u201d"),
+        dict(web="web.whatsapp.com", summary="Seif Lotfy",
+             body="seriously, you are going to want to see this one"),
+    ],
+}
+
+
+def slug(text):
+    out = ""
+    for ch in str(text or "").lower():
+        out += ch if ch.isalnum() else "-"
+    return "-".join(part for part in out.split("-") if part)
+
+
+def identity(n):
+    """What the daemon will make of this one: the key it groups under and the
+    fields the icon resolver needs. Kept here so the demo can warm the icon
+    cache before it starts - a demo whose first card of every source is a
+    letter tile is showing the loading state, not the product."""
+    if n.get("web"):
+        return dict(key="web:" + n["web"], source=n["web"],
+                    app="Google Chrome", icon="google-chrome")
+    app = n.get("app") or "notify-send"
+    return dict(key="app:" + slug(app), source=app, app=app, icon=n.get("icon") or "")
+
+
+def scheme():
+    """dark or light, as the daemon will ask for it."""
+    path = os.path.expanduser("~/.local/state/omarchy/current/theme/colors.toml")
+    try:
+        with open(path) as fh:
+            for line in fh:
+                if line.strip().startswith("mode"):
+                    return "light" if "light" in line else "dark"
+    except OSError:
+        pass
+    return "dark"
+
+
+ICON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "omapager-icon")
+
+
+def warm(items):
+    """Resolve every icon these notifications will want, before sending any.
+
+    Resolution is a subprocess and sometimes a network fetch, so the first
+    notification from a source arrives before its icon does. That is honest
+    behaviour and invisible in normal use; in a demo it is the first thing you
+    see."""
+    seen, wanted = set(), []
+    for n in items:
+        who = identity(n)
+        if who["key"] in seen:
+            continue
+        seen.add(who["key"])
+        wanted.append(who)
+    if not wanted:
+        return
+    print("warming %d icons..." % len(wanted), file=sys.stderr)
+    for who in wanted:
+        subprocess.run([ICON, "--key", who["key"], "--source", who["source"],
+                        "--app", who["app"], "--app-icon", who["icon"],
+                        "--scheme", scheme(), "--fetch"],
+                       capture_output=True, check=False)
+
+
+# The default run: enough sources to group, enough singles to stack, and one
+# critical at the end so the deck is left holding something.
+DEFAULT = ["chat", "work", "personal", "system"]
+
+
+def send(n, timeout=None):
+    who = identity(n)
+    body = n.get("body", "")
+    if n.get("web"):
+        body = web(n["web"], body)
+    cmd = ["notify-send", "-a", who["app"], n["summary"], body]
+    if who["icon"]:
+        cmd += ["-i", who["icon"], "-h", "string:desktop-entry:" + who["icon"]]
+    if n.get("urgency"):
+        cmd += ["-u", n["urgency"]]
+    if timeout is not None:
+        cmd += ["-t", str(timeout)]
+    for action in n.get("actions", []):
+        cmd += ["-A", action]
+    if n.get("actions"):
+        # notify-send waits around for an action to be invoked, which is the
+        # only way the buttons keep working - so it has to be left running.
+        subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        subprocess.run(cmd, check=False)
+
+
+def replay(limit, match):
+    """Send real notifications from the store again, exactly as they arrived.
+
+    Invented examples only exercise the shapes I thought of. Replaying what a
+    machine actually received is how you find out that KDE Connect puts the
+    originating app in the summary, or that a site you have never configured
+    has no icon."""
+    try:
+        raw = subprocess.run([STORE, "history", str(limit)],
+                             capture_output=True, text=True, check=False).stdout
+        rows = json.loads(raw or "[]")
+    except Exception:
+        rows = []
+    needle = (match or "").lower()
+    out = []
+    for r in reversed(rows):                 # oldest first, as they happened
+        if needle:
+            blob = " ".join(str(r.get(k) or "") for k in
+                            ("app", "source", "summary", "body")).lower()
+            if needle not in blob:
+                continue
+        out.append(dict(app=r.get("app") or "notify-send",
+                        icon=r.get("appIcon") or "",
+                        summary=r.get("summary") or "",
+                        # The raw body where we have it: the stored one has had
+                        # the source anchor lifted off, and replaying that makes
+                        # every Chrome notification look like it came from
+                        # Chrome rather than from the site.
+                        body=r.get("rawBody") or r.get("body") or ""))
+    return out
+
+
+def open_web_hosts():
+    """Sites that already have a window on this desktop.
+
+    Omarchy's web apps carry their host in the Hyprland class -
+    "chrome-web.whatsapp.com__-Default" - which is exactly how the daemon
+    decides that a notification from web.whatsapp.com belongs to that window."""
+    try:
+        raw = subprocess.run(["hyprctl", "-j", "clients"],
+                             capture_output=True, text=True, check=False).stdout
+        clients = json.loads(raw or "[]")
+    except Exception:
+        return []
+    hosts = []
+    for c in clients:
+        wm = str(c.get("class") or "")
+        if not wm.startswith("chrome-"):
+            continue
+        host = wm[len("chrome-"):].split("__")[0]
+        if "." in host and host not in hosts:
+            hosts.append(host)
+    return hosts
+
+
+# Candidates for the "nothing open" case, in preference order. Whichever is not
+# currently on screen gets used.
+CLOSED_CANDIDATES = ("linear.app", "notion.com", "app.slack.com", "github.com",
+                     "figma.com", "example.com")
+
+
+def routing_scene():
+    """One notification per way a click can be routed.
+
+    Built from what is actually open, because the interesting case - a site
+    that already has a window - cannot be written down in advance."""
+    live = open_web_hosts()
+    items = []
+    for host in live[:2]:
+        items.append(dict(web=host, summary=host.split(".")[0].title(),
+                          body="click me: the window showing %s should come forward" % host,
+                          expect="focus the existing %s window" % host))
+    closed = next((h for h in CLOSED_CANDIDATES if h not in live), "example.com")
+    items.append(dict(web=closed, summary=closed.split(".")[0].title(),
+                      body="click me: nothing is showing %s, so it should open" % closed,
+                      expect="open https://%s/ (no window for it)" % closed))
+    items.append(dict(app="kitty", icon="kitty", summary="Tests passed",
+                      body="click me: a local app, so its own default action runs",
+                      expect="the sender's own default action"))
+    return items
+
+
+# Where the helper looks for a stand-in phone.
+FAKE = os.path.join(os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state")),
+                    "omarchy", "omapager", "kdeconnect-fake.json")
+FAKE_LOG = FAKE.replace(".json", ".log")
+
+
+def reply_scene():
+    """A message you can actually answer.
+
+    Inline reply needs a phone holding a conversation open, which cannot be
+    arranged on demand - so this writes a fixture the helper treats as a
+    repliable notification, and sends the matching card. Replies go to a log
+    file rather than to a person, which is what makes it safe to demo."""
+    who, message = "Seif Lotfy", "did you get the build working in the end?"
+    os.makedirs(os.path.dirname(FAKE), exist_ok=True)
+    with open(FAKE, "w") as fh:
+        json.dump([dict(appName="WhatsApp", title=who, text=message,
+                        isConversation=True)], fh)
+    return [dict(app="KDE Connect", icon="kdeconnect", summary="WhatsApp",
+                 body="%s: %s" % (who, message))]
+
+
+def clear():
+    subprocess.run(["omarchy-shell", "-q", "omapager", "clear"], check=False)
+
+
+def run(scenes, gap, timeout, shuffle):
+    for name in scenes:
+        items = list(SCENES[name])
+        if shuffle:
+            random.shuffle(items)
+        for n in items:
+            send(n, timeout)
+            # A notification can ask to be followed quickly: a burst from one
+            # source is how a stack forms, and at the scene's normal pace the
+            # first card has half faded before the second lands.
+            time.sleep(min(gap, n["gap"]) if "gap" in n else gap)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--scene", action="append", choices=sorted(SCENES),
+                    help="just this one (repeatable); default is all of them")
+    ap.add_argument("--fast", action="store_true", help="tighter pacing, for recording")
+    ap.add_argument("--gap", type=float, help="seconds between notifications")
+    ap.add_argument("--timeout", type=int, help="how long each stays up, ms")
+    ap.add_argument("--loop", action="store_true")
+    ap.add_argument("--shuffle", action="store_true")
+    ap.add_argument("--keep", action="store_true", help="do not clear first")
+    ap.add_argument("--list", action="store_true")
+    ap.add_argument("--replay", type=int, metavar="N",
+                    help="re-send the last N real notifications from the store")
+    ap.add_argument("--match", help="only replay ones mentioning this")
+    args = ap.parse_args()
+
+    if args.list:
+        for name, items in sorted(SCENES.items()):
+            print("%-9s %d notifications" % (name, len(items)))
+        return 0
+
+    # Slow enough to actually read a card before the next one lands on it;
+    # --fast keeps the tight pacing that recordings want.
+    gap = args.gap if args.gap is not None else (0.9 if args.fast else 3.2)
+    scenes = args.scene or DEFAULT
+
+    if args.scene and "reply" in args.scene:
+        scenes = [n for n in scenes if n != "reply"]
+        SCENES["reply"] = reply_scene()
+        scenes.append("reply")
+        print("hover the card, press Reply, type something and hit Enter.",
+              file=sys.stderr)
+        print("it goes to %s - not to anyone." % FAKE_LOG, file=sys.stderr)
+
+    if args.scene and "routing" in args.scene:
+        scenes = [n for n in scenes if n != "routing"]
+        SCENES["routing"] = routing_scene()
+        scenes.append("routing")
+        print("what each one should do when you click it:", file=sys.stderr)
+        for n in SCENES["routing"]:
+            print("   %-22s %s" % (n["summary"], n["expect"]), file=sys.stderr)
+
+    items = []
+    for name in scenes:
+        items += SCENES[name]
+    if not args.replay:
+        warm(items)
+
+    if not args.keep:
+        clear()
+        time.sleep(0.4)
+
+    if args.replay:
+        items = replay(args.replay, args.match)
+        if not items:
+            print("nothing in the store matches", file=sys.stderr)
+            return 1
+        print("replaying %d" % len(items))
+        for n in items:
+            send(n, args.timeout)
+            time.sleep(gap)
+        return 0
+
+    try:
+        run(scenes, gap, args.timeout, args.shuffle)
+        while args.loop:
+            time.sleep(gap * 2)
+            run(scenes, gap, args.timeout, args.shuffle)
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

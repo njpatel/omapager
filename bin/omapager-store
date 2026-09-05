@@ -1,0 +1,196 @@
+#!/usr/bin/env python3
+# omapager-store - the notification store, driven from Service.qml.
+#
+#   put              read one notification JSON on stdin, write it to live/
+#   close KEY WHY    move live/KEY.json into history/, trimmed to HISTORY_MAX
+#   drop KEY         forget a live notification without recording it
+#   forget KEY       remove one entry from history
+#   restore          print the live notifications, oldest first
+#   history [N]      print the newest N history entries, newest first
+#   image KEY SRC    copy a sender's image into images/, print where it landed
+#   sweep            delete images no live or history entry refers to
+#
+# Everything lives in ~/.local/state/omarchy/omapager/. It is state, not cache:
+# what you were told should survive a `rm -rf ~/.cache`. History is a log, not
+# an inbox - there was a `pending`/`ack` pair here once, for a notification
+# centre that listed what you had not dealt with, and it went when the centre
+# did: nothing on this desktop tells us you read the message in the app, so
+# "not dealt with" was never true for long. Keeping it in files (rather than one big JSON) means a
+# half-written entry costs one notification instead of the lot, and the daemon
+# can be killed at any point without a save step.
+import json
+import os
+import shutil
+import sys
+import time
+
+ROOT = os.path.expanduser("~/.local/state/omarchy/omapager")
+LIVE = os.path.join(ROOT, "live")
+HISTORY = os.path.join(ROOT, "history")
+IMAGES = os.path.join(ROOT, "images")
+HISTORY_MAX = 300
+
+
+def ensure():
+    for d in (LIVE, HISTORY, IMAGES):
+        os.makedirs(d, exist_ok=True)
+
+
+def safe(name):
+    """A key is ours, not the sender's, but never trust it with a path."""
+    return "".join(c for c in str(name) if c.isalnum() or c in "-_.")[:120]
+
+
+def write_json(path, value):
+    tmp = path + ".part"
+    with open(tmp, "w") as f:
+        json.dump(value, f, separators=(",", ":"))
+    os.replace(tmp, path)          # a reader never sees a half-written file
+
+
+def read_json(path):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def cmd_put():
+    entry = json.load(sys.stdin)
+    key = safe(entry.get("key"))
+    if not key:
+        return 1
+    write_json(os.path.join(LIVE, key + ".json"), entry)
+    return 0
+
+
+def cmd_close(key, why):
+    key = safe(key)
+    src = os.path.join(LIVE, key + ".json")
+    entry = read_json(src)
+    if entry is None:
+        return 0
+    entry["closed_ts"] = time.time()
+    entry["closed_reason"] = why
+    # Named for when it closed, so the directory sorts into reading order.
+    stamp = "%013d" % int(entry["closed_ts"] * 1000)
+    write_json(os.path.join(HISTORY, "%s-%s.json" % (stamp, key)), entry)
+    try:
+        os.remove(src)
+    except OSError:
+        pass
+    trim_history()
+    return 0
+
+
+def cmd_drop(key):
+    try:
+        os.remove(os.path.join(LIVE, safe(key) + ".json"))
+    except OSError:
+        pass
+    return 0
+
+
+def trim_history():
+    files = sorted(f for f in os.listdir(HISTORY) if f.endswith(".json"))
+    for name in files[:-HISTORY_MAX]:
+        try:
+            os.remove(os.path.join(HISTORY, name))
+        except OSError:
+            pass
+
+
+def listing(directory, limit=None, newest_first=False):
+    files = sorted(f for f in os.listdir(directory) if f.endswith(".json"))
+    if newest_first:
+        files.reverse()
+    if limit:
+        files = files[:limit]
+    out = []
+    for name in files:
+        entry = read_json(os.path.join(directory, name))
+        if entry is not None:
+            out.append(entry)
+    return out
+
+
+def cmd_image(key, src):
+    """Copy a sender's image. Chromium deletes its avatar the moment the
+    notification closes, so anything we intend to show later needs a copy."""
+    if not src:
+        return 0
+    path = src[7:] if src.startswith("file://") else src
+    if not os.path.isfile(path):
+        return 0
+    ext = os.path.splitext(path)[1][:5] or ".png"
+    dest = os.path.join(IMAGES, safe(key) + ext)
+    try:
+        shutil.copyfile(path, dest)
+    except OSError:
+        return 0
+    sys.stdout.write(dest)
+    return 0
+
+
+def cmd_forget(key):
+    """Drop one entry from history - the centre clearing a single row."""
+    key = safe(key)
+    for name in os.listdir(HISTORY):
+        if name.endswith("-%s.json" % key):
+            try:
+                os.remove(os.path.join(HISTORY, name))
+            except OSError:
+                pass
+    return 0
+
+
+def cmd_sweep():
+    wanted = set()
+    for entry in listing(LIVE) + listing(HISTORY):
+        stored = entry.get("stored_image")
+        if stored:
+            wanted.add(os.path.basename(stored))
+    for name in os.listdir(IMAGES):
+        if name not in wanted:
+            try:
+                os.remove(os.path.join(IMAGES, name))
+            except OSError:
+                pass
+    return 0
+
+
+def main():
+    ensure()
+    args = sys.argv[1:]
+    if not args:
+        return 2
+    verb = args[0]
+    if verb == "put":
+        return cmd_put()
+    if verb == "close":
+        return cmd_close(args[1], args[2] if len(args) > 2 else "")
+    if verb == "drop":
+        return cmd_drop(args[1])
+    if verb == "restore":
+        json.dump(listing(LIVE), sys.stdout, separators=(",", ":"))
+        return 0
+    if verb == "history":
+        limit = int(args[1]) if len(args) > 1 else 60
+        json.dump(listing(HISTORY, limit, newest_first=True), sys.stdout,
+                  separators=(",", ":"))
+        return 0
+    if verb == "forget":
+        return cmd_forget(args[1])
+    if verb == "image":
+        return cmd_image(args[1], args[2] if len(args) > 2 else "")
+    if verb == "sweep":
+        return cmd_sweep()
+    return 2
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except BrokenPipeError:
+        pass

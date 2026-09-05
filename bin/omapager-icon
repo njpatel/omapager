@@ -1,0 +1,473 @@
+#!/usr/bin/env python3
+# omapager-icon - work out what picture belongs to a notification.
+#
+#   omapager-icon --key web:app.slack.com --app "Google Chrome" \
+#                 --app-icon google-chrome --source app.slack.com \
+#                 --scheme dark [--fetch]
+#
+# Prints a path, or nothing. The order is deliberate: anything you have put
+# there yourself wins, then anything already installed on the machine, and only
+# then the site itself - which is the one step that touches the network, and so
+# the one step that has to be asked for.
+import argparse
+import glob
+import json
+import os
+import re
+import sys
+import time
+import urllib.parse
+import urllib.request
+
+CONFIG = os.path.expanduser("~/.config/omarchy/omapager/icons")
+CACHE = os.path.expanduser("~/.local/state/omarchy/omapager/icons")
+INDEX = os.path.join(CACHE, "index.json")
+RETRY_AFTER = 7 * 86400          # do not hammer a site that has no icon
+TIMEOUT = 6
+AGENT = "Mozilla/5.0 (X11; Linux x86_64) omapager"
+
+ICON_DIRS = [
+    os.path.expanduser("~/.local/share/icons"),
+    "/usr/share/icons",
+    "/usr/share/pixmaps",
+]
+APP_DIRS = [
+    os.path.expanduser("~/.local/share/applications"),
+    "/usr/share/applications",
+]
+EXTS = (".png", ".svg", ".jpg", ".jpeg", ".webp", ".ico")
+
+
+NORM = 128          # every icon ends up this size, however it arrived
+
+
+def is_mono_glyph(im, opaque):
+    """Is this a one-colour mark on nothing?
+
+    KDE Connect's Messages icon is a black speech bubble on transparency. On a
+    dark card it is a black shape on a black background - technically present,
+    practically invisible, and the same in reverse for a white glyph on a light
+    theme. A mark like that carries no colour information worth keeping, so it
+    can be redrawn in the theme's text colour and always read. A mark that has
+    its own backdrop, or any real colour in it, is left alone."""
+    if opaque:
+        return False                       # it brought its own background
+    small = im.resize((32, 32))   # default resampling: PIL is imported inside normalise
+    spread = 0
+    lums = []
+    for r, g, b, a in small.getdata():
+        if a < 40:
+            continue
+        spread += max(r, g, b) - min(r, g, b)
+        lums.append((r * 299 + g * 587 + b * 114) // 1000)
+    n = len(lums)
+    if n < 24:                             # too little ink to judge
+        return False
+    spread /= float(n)
+    mean = sum(lums) / float(n)
+    variance = sum((l - mean) ** 2 for l in lums) / float(n)
+    coverage = n / float(32 * 32)
+    # One colour means one colour: low saturation is not enough on its own.
+    # X's mark is a white glyph on a black square - no hue anywhere, an average
+    # luminance down in the dark end, and repainting it in the theme colour
+    # turned the whole logo into a filled square. What separates that from a
+    # genuine one-tone glyph is spread of *brightness*, and how much of the
+    # canvas is covered: a mark with its own filled backdrop covers nearly all
+    # of it, a bare glyph does not.
+    return (spread < 26
+            and variance < 1600                # ~40 luminance levels of spread
+            and coverage < 0.82
+            and (mean < 90 or mean > 170))
+
+
+def normalise(path):
+    """Render an icon to one consistent shape.
+
+    Icons arrive in three habits: a full-bleed opaque square (Linear), a
+    transparent glyph with no padding (Slack), a circle (Spotify). Drawn at the
+    same box they read as three different sizes, because what varies is not the
+    file's dimensions but how much of them the mark actually fills. This trims
+    each one to its own content, fits it into a common canvas with a margin,
+    and rounds the corners of the ones that carry their own background."""
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError:
+        return path
+    if path.lower().endswith(".svg"):
+        return path                        # left to Qt, which renders SVG well
+    try:
+        im = Image.open(path).convert("RGBA")
+    except Exception:
+        # If PIL cannot read it, Qt very likely cannot either - a favicon
+        # served as HTML, an .ico in a variant nobody supports. Handing the
+        # path over anyway produced a card with a broken-image box and a stream
+        # of decoding errors in the log. Better to have no icon.
+        return None
+    if im.width < 8 or im.height < 8:
+        return None
+
+    box = im.getbbox()                     # drop transparent padding
+    if box:
+        im = im.crop(box)
+
+    alpha = im.getchannel("A")
+    opaque = alpha.getextrema()[0] > 250   # no transparency: it has a backdrop
+    mono = is_mono_glyph(im, opaque)
+
+    # A mark with its own background keeps more of the canvas and gets rounded
+    # corners; a bare glyph is inset a little further so it does not out-weigh
+    # the boxed ones sitting above and below it.
+    fill = 0.94 if opaque else 0.82
+    side = int(NORM * fill)
+    # Resize, not thumbnail: thumbnail only ever shrinks, so a 32px favicon
+    # stayed 32px on a 128px canvas and came out a quarter the size of the
+    # icon next to it. That was the whole "different sizes" problem.
+    scale = side / float(max(im.width, im.height))
+    im = im.resize((max(1, int(im.width * scale)), max(1, int(im.height * scale))),
+                   Image.LANCZOS)
+
+    if opaque:
+        mask = Image.new("L", im.size, 0)
+        ImageDraw.Draw(mask).rounded_rectangle([0, 0, im.width - 1, im.height - 1],
+                                               radius=int(min(im.size) * 0.22), fill=255)
+        im.putalpha(mask)
+
+    canvas = Image.new("RGBA", (NORM, NORM), (0, 0, 0, 0))
+    canvas.paste(im, ((NORM - im.width) // 2, (NORM - im.height) // 2), im)
+
+    # The name carries the finding: a monochrome glyph is drawn in the theme's
+    # own text colour instead of as-is, and the drawing happens in QML, which
+    # cannot look at pixels. A suffix is the whole protocol.
+    dest = os.path.join(CACHE, "norm-" + slug(os.path.basename(path))
+                        + ("-mono" if mono else "") + ".png")
+    try:
+        os.makedirs(CACHE, exist_ok=True)
+        canvas.save(dest)
+    except Exception:
+        return None
+    return dest
+
+
+def slug(text):
+    return re.sub(r"[^a-z0-9._-]+", "-", str(text or "").lower()).strip("-")
+
+
+# ---------------------------------------------------------------- 1. yours
+def from_config(names):
+    """~/.config/omarchy/omapager/icons/<name>.png - drop a file in, done."""
+    for name in names:
+        for ext in EXTS:
+            path = os.path.join(CONFIG, slug(name) + ext)
+            if os.path.isfile(path):
+                return path
+    return None
+
+
+# ---------------------------------------------------------------- 2. installed
+def from_icon_theme(names):
+    """Whatever the machine already has for this name."""
+    for name in names:
+        # The name as given, then the slugged form. Icon files are not all
+        # lowercase - "LimineSnapperSync.png" is on this machine - and a glob
+        # on a case-sensitive filesystem does not care what the spec says
+        # names ought to look like.
+        for n in [str(name or "").strip(), slug(name)]:
+            if not n:
+                continue
+            for base in ICON_DIRS:
+                # Biggest first: these get drawn at 38px, and downscaling
+                # beats up.
+                for pattern in ("%s/hicolor/512x512/apps/%s.*", "%s/hicolor/256x256/apps/%s.*",
+                                "%s/hicolor/128x128/apps/%s.*", "%s/hicolor/scalable/apps/%s.*",
+                                "%s/hicolor/64x64/apps/%s.*", "%s/*/*/apps/%s.*", "%s/%s.*"):
+                    for hit in sorted(glob.glob(pattern % (base, n))):
+                        if hit.lower().endswith(EXTS):
+                            return hit
+    return None
+
+
+def from_desktop_entries(names):
+    """A .desktop file that answers to this name, and the icon it declares.
+
+    This is what catches "app.slack.com" -> the installed Slack: the entry's
+    name, its window class or its exec line all mention slack."""
+    wanted = [slug(n) for n in names if slug(n)]
+    if not wanted:
+        return None
+    for base in APP_DIRS:
+        for path in glob.glob(base + "/*.desktop"):
+            try:
+                with open(path, errors="replace") as f:
+                    text = f.read()
+            except OSError:
+                continue
+            fields = {}
+            for key in ("Name", "Icon", "StartupWMClass", "Exec"):
+                m = re.search(r"^%s=(.+)$" % key, text, re.M)
+                if m:
+                    fields[key] = m.group(1).strip()
+            if "Icon" not in fields:
+                continue
+            haystack = " ".join([slug(os.path.basename(path)[:-8]),
+                                 slug(fields.get("Name")),
+                                 slug(fields.get("StartupWMClass")),
+                                 slug(fields.get("Exec"))])
+            for want in wanted:
+                if len(want) < 3:
+                    continue
+                if want in haystack.split("-") or ("-" + want + "-") in ("-" + haystack + "-"):
+                    found = from_icon_theme([fields["Icon"]])
+                    if found:
+                        return found
+                    if os.path.isabs(fields["Icon"]) and os.path.isfile(fields["Icon"]):
+                        return fields["Icon"]
+    return None
+
+
+# ---------------------------------------------------------------- 3. the site
+def load_index():
+    try:
+        with open(INDEX) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_index(data):
+    os.makedirs(CACHE, exist_ok=True)
+    tmp = INDEX + ".part"
+    with open(tmp, "w") as f:
+        json.dump(data, f, separators=(",", ":"))
+    os.replace(tmp, INDEX)
+
+
+def get(url):
+    req = urllib.request.Request(url, headers={"User-Agent": AGENT})
+    with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+        return r.read(600000), r.geturl()
+
+
+def icon_links(html, base, scheme):
+    """Every icon the page offers, best first.
+
+    A site that ships a light and a dark mark says so with a media query on the
+    link, so the one that suits the current theme is preferred over the one
+    that happens to come first."""
+    out, themed = [], []
+    for m in re.finditer(r"<link\s+([^>]+)>", html, re.I):
+        attrs = dict(re.findall(r'(\w[\w-]*)\s*=\s*["\']([^"\']*)["\']', m.group(1)))
+        rel = (attrs.get("rel") or "").lower()
+        href = attrs.get("href")
+        if not href:
+            continue
+        media = (attrs.get("media") or "").lower()
+        url = urllib.parse.urljoin(base, href)
+        if "apple-touch-icon" in rel:
+            (themed if scheme in media else out).append((0, url))
+        elif "icon" in rel and "mask" not in rel:
+            size = attrs.get("sizes", "")
+            n = 1
+            try:
+                n = -int(size.split("x")[0])
+            except Exception:
+                pass
+            (themed if scheme in media else out).append((n, url))
+        elif rel == "manifest":
+            out.append((50, ("manifest", url)))
+    return [u for _, u in sorted(themed)] + [u for _, u in sorted(out)]
+
+
+def from_manifest(url, base):
+    try:
+        raw, _ = get(url)
+        data = json.loads(raw.decode("utf-8", "replace"))
+    except Exception:
+        return []
+    icons = data.get("icons") or []
+    def area(i):
+        try:
+            return -int(str(i.get("sizes", "0x0")).split("x")[0])
+        except Exception:
+            return 0
+    return [urllib.parse.urljoin(base, i["src"]) for i in sorted(icons, key=area)
+            if i.get("src")]
+
+
+def fetch_site(host, scheme):
+    """Ask the site for its own icon. This is the only step that leaves the
+    machine, which is why it is opt-in: it tells that host you were notified."""
+    base = "https://" + host + "/"
+    candidates = []
+    try:
+        raw, final = get(base)
+        html = raw.decode("utf-8", "replace")
+        for entry in icon_links(html, final, scheme):
+            if isinstance(entry, tuple) and entry[0] == "manifest":
+                candidates.extend(from_manifest(entry[1], final))
+            else:
+                candidates.append(entry)
+    except Exception:
+        pass
+    candidates.append(urllib.parse.urljoin(base, "/favicon.ico"))
+
+    os.makedirs(CACHE, exist_ok=True)
+    for url in candidates[:6]:
+        try:
+            data, _ = get(url)
+        except Exception:
+            continue
+        if len(data) < 80:
+            continue
+        ext = os.path.splitext(urllib.parse.urlparse(url).path)[1].lower()
+        if ext not in EXTS:
+            ext = ".png"
+        dest = os.path.join(CACHE, "web-%s-%s%s" % (slug(host), scheme, ext))
+        try:
+            with open(dest, "wb") as f:
+                f.write(data)
+        except OSError:
+            continue
+        return dest
+    return None
+
+
+# ---------------------------------------------------------------- resolve
+def host_names(source):
+    """app.slack.com -> slack, app.slack.com. The middle label is almost always
+    the name of the thing."""
+    s = str(source or "").strip().lower()
+    if "." not in s or " " in s:
+        return []
+    labels = [l for l in s.split(".") if l not in ("www", "app", "web", "my", "m")]
+    names = [s]
+    if len(labels) >= 2:
+        names.append(labels[-2])
+    if labels:
+        names.append(labels[0])
+    return names
+
+
+# Public-suffix handling, kept deliberately small: enough to know that the
+# owner of "mail.company.co.uk" is "company.co.uk" and not "co.uk".
+SECOND_LEVEL = ("co", "com", "org", "net", "ac", "gov", "edu")
+
+
+def hosts_to_try(host):
+    labels = [l for l in str(host or "").split(".") if l]
+    out = [host]
+    if len(labels) > 2:
+        keep = 3 if labels[-2] in SECOND_LEVEL else 2
+        root = ".".join(labels[-keep:])
+        if root != host:
+            out.append(root)
+    return out
+
+
+def resolve(args):
+    web = host_names(args.source)
+    app = [n for n in [args.app_icon, args.source, args.app] if n]
+
+    # Anything you dropped in the config directory wins outright.
+    hit = from_config(web + app + ([args.key] if args.key else []))
+    if hit:
+        return hit, "from_config"
+
+    # For a web notification, the site comes first and the browser last: the
+    # other way round hands Slack, Gmail and Calendar three identical Chromes.
+    # Only an exact icon-theme name is trusted here - matching .desktop entries
+    # on a domain label is how "mail.google.com" ends up wearing the icon for
+    # Google Contacts.
+    if web:
+        hit = from_icon_theme(web)
+        if hit:
+            return hit, "from_icon_theme:web"
+
+    # The name the sender itself passed, if this machine has it. This has to
+    # come before any guessing at websites: a sender that says `-i kitty` or
+    # `-i LimineSnapperSync` has told us exactly what it wants, and the machine
+    # either has that icon or it does not - there is nothing to guess about.
+    # Not for a web notification, though: every one of those is `-i
+    # google-chrome`, and the browser showing the page is the one thing the
+    # icon must not be. The site wins there.
+    if args.app_icon and not web:
+        hit = from_icon_theme([args.app_icon])
+        if hit:
+            return hit, "from_icon_theme:hint"
+
+    # A bare app name has no host to ask. Most of these are products whose
+    # site is the name plus a common suffix, so try a few - once, then cached
+    # forever, including the failure.
+    if args.fetch and not web:
+        bare = slug(args.source) or slug(args.app)
+        if bare and "." not in bare and len(bare) >= 3:
+            index = load_index()
+            note = index.get(bare) or {}
+            cached = note.get(args.scheme)
+            if cached and os.path.isfile(cached):
+                return cached, "cache"
+            if note.get("failed_at", 0) < time.time() - RETRY_AFTER:
+                for tld in (".app", ".com", ".io", ".dev"):
+                    hit = fetch_site(bare + tld, args.scheme)
+                    if hit:
+                        note[args.scheme] = hit
+                        index[bare] = note
+                        save_index(index)
+                        return hit, "guessed:" + bare + tld
+                note["failed_at"] = time.time()
+                index[bare] = note
+                save_index(index)
+
+    if args.fetch and web:
+        index = load_index()
+        # The subdomain first, then whatever it is a subdomain of. A workspace
+        # host often serves nothing useful - a login page with a generic mark,
+        # or a 403 - while the root domain has the brand's own icon. Slack is
+        # the one that made this obvious.
+        for host in hosts_to_try(web[0]):
+            note = index.get(host) or {}
+            cached = note.get(args.scheme)
+            if cached and os.path.isfile(cached):
+                return cached, "cache"
+            if note.get("failed_at", 0) > time.time() - RETRY_AFTER:
+                continue
+            hit = fetch_site(host, args.scheme)
+            note.setdefault("failed_at", 0)
+            if hit:
+                note[args.scheme] = hit
+            else:
+                note["failed_at"] = time.time()
+            index[host] = note
+            save_index(index)
+            if hit:
+                return hit, "fetched:" + host
+
+    # Whatever delivered it, as a last resort before the letter tile.
+    for step in (from_icon_theme, from_desktop_entries):
+        hit = step(app)
+        if hit:
+            return hit, step.__name__ + ":app"
+    return None, "none"
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--key", default="")
+    ap.add_argument("--app", default="")
+    ap.add_argument("--app-icon", default="")
+    ap.add_argument("--source", default="")
+    ap.add_argument("--scheme", default="dark", choices=["dark", "light"])
+    ap.add_argument("--fetch", action="store_true")
+    ap.add_argument("--why", action="store_true", help="print where it came from")
+    args = ap.parse_args()
+    path, how = resolve(args)
+    if path:
+        path = normalise(path)
+    if path:
+        sys.stdout.write(path + ("\t" + how if args.why else ""))
+    elif args.why:
+        sys.stdout.write("\t" + how)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
