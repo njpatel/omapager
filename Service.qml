@@ -102,9 +102,18 @@ Item {
     if (size > 0) return size
     return barVertical ? Style.bar.sizeVertical : Style.bar.sizeHorizontal
   }
-  // Down from the top edge, and in from the right one.
+  // How far the deck sits from the edges it hangs off. One number for both,
+  // because two of them is what you see: the cards were 6 under the bar and 14
+  // in from the screen edge, which reads as a mistake even when you cannot say
+  // which side is wrong.
+  readonly property int deckInset: Style.space(14)
+
+  // Where the surface is clipped, which is the bar's own edge - a card
+  // arriving is revealed as it comes out from under the bar rather than seen
+  // sliding across it. The inset is applied to the deck inside the clip, not
+  // here, or cards would pop into existence in the middle of the gap.
   readonly property int barClearance: (barPosition === "top" ? barThickness : 0) + Style.gapsOut
-  readonly property int edgeClearance: (barPosition === "right" ? barThickness : 0) + Style.space(14)
+  readonly property int edgeClearance: (barPosition === "right" ? barThickness : 0) + deckInset
 
   readonly property int lowDuration: 5000
   readonly property int normalDuration: 8000
@@ -1234,7 +1243,9 @@ Item {
         doNotDisturb: service.doNotDisturb, snoozed: service.liveSnoozes(),
         snoozeOptions: service.snoozeOptions,
         decks: service.layout.decks.length, layoutH: service.layout.height,
-        barClearance: service.barClearance
+        barClearance: service.barClearance, edgeClearance: service.edgeClearance,
+        gapsOut: Style.gapsOut, barThickness: service.barThickness,
+        deckInset: service.deckInset
       })
     }
     function clear(): string { service.clearAll("cleared"); return "ok" }
@@ -1533,7 +1544,7 @@ Item {
 
         Item {
           id: deck
-          y: Style.space(6)
+          y: service.deckInset
         x: clipper.shadowRoom
         width: Style.space(340)
         height: service.layout.height
