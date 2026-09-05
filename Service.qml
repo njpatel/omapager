@@ -496,7 +496,7 @@ Item {
     id: collapseGrace
     interval: 120
     onTriggered: {
-      service.expanded = false; service.openDeck = ""
+      service.commit(function() { service.expanded = false; service.openDeck = "" })
       service.releaseHeld()
     }
   }
@@ -534,8 +534,11 @@ Item {
 
   function pointerEntered(deckKey) {
     collapseGrace.stop()
-    expanded = true
-    if (deckKey !== undefined) openDeck = deckKey
+    if (expanded && (deckKey === undefined || openDeck === deckKey)) return
+    commit(function() {
+      service.expanded = true
+      if (deckKey !== undefined) service.openDeck = deckKey
+    })
   }
   function pointerLeft() { collapseGrace.restart() }
 
@@ -547,10 +550,7 @@ Item {
 
   function noteHeight(key, h) {
     if (Math.abs((heights[key] || 0) - h) < 0.5) return
-    var snap = snapshot(), deckNow = deckHeight
-    heights[key] = h
-    heightNotes += 1
-    retarget(undefined, undefined, snap, deckNow)
+    commit(function() { service.heights[key] = h; service.heightNotes += 1 })
   }
 
   // ------------------------------------------------------- the scene clock
@@ -610,6 +610,21 @@ Item {
       snap[key] = { y: at(key, "y"), scale: at(key, "scale"),
                     opacity: at(key, "opacity"), height: at(key, "height") }
     return snap
+  }
+
+  // Anything that moves the deck goes through here: take the snapshot, make
+  // the change, start one move for all of it.
+  //
+  // This is the whole discipline. The layout is a binding on `expanded`,
+  // `openDeck`, `stacking` and the model, so writing any of them recomputes
+  // every placement *immediately* - and if the clock is not started in the
+  // same breath, the cards are simply already there. Expanding the deck did
+  // exactly that: it was one frame, because nothing told the scene it had
+  // happened.
+  function commit(change) {
+    var snap = snapshot(), deckNow = deckHeight
+    change()
+    retarget(undefined, undefined, snap, deckNow)
   }
 
   function retarget(seedKey, seed, snap, deckNow) {
@@ -1382,7 +1397,11 @@ Item {
     // Drive the deck without a pointer: a headless session has no cursor, and
     // a recording needs the expansion to happen on cue rather than by hand.
     function expand(): string {
-      if (service.expanded) { service.expanded = false; service.openDeck = ""; service.hoverKey = "" }
+      if (service.expanded) {
+        service.commit(function() {
+          service.expanded = false; service.openDeck = ""; service.hoverKey = ""
+        })
+      }
       else if (toasts.count > 0) {
         // Stand in for the pointer being on the front card: its deck opens and
         // it counts as hovered, so anything that only appears under a pointer
@@ -1496,7 +1515,8 @@ Item {
     }
 
     function stack(mode: string): string {
-      if (mode === "all" || mode === "source") service.stacking = mode
+      if (mode === "all" || mode === "source")
+        service.commit(function() { service.stacking = mode })
       return service.stacking
     }
   }

@@ -67,7 +67,8 @@ BarWidget {
   function applySettings() {
     if (!service) return
     var stacking = String(setting("stacking", "source"))
-    if (stacking === "all" || stacking === "source") service.stacking = stacking
+    if (stacking === "all" || stacking === "source" && service.stacking !== stacking)
+      service.commit(function() { service.stacking = stacking })
     var align = String(setting("actionsAlign", "right"))
     if (align === "left" || align === "right") service.actionsAlign = align
     service.hideSettingsAction = setting("hideSettingsAction", true) !== false
