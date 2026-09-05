@@ -944,7 +944,12 @@ Item {
       var wmClass = String((ipc && ipc["class"]) || "")
       if (wmClass) out.push({ wmClass: wmClass,
                               title: String((ipc && ipc.title) || ""),
-                              address: String((ipc && ipc.address) || "") })
+                              address: String((ipc && ipc.address) || ""),
+                              pid: Number((ipc && ipc.pid) || 0),
+                              // 0 is the window you are in, 1 the one before
+                              // it, and so on back through the session.
+                              focusOrder: Number(ipc && ipc.focusHistoryID !== undefined
+                                                 ? ipc.focusHistoryID : 9999) })
     }
     return out
   }
@@ -988,6 +993,40 @@ Item {
     return out
   }
 
+  // The window belonging to the process that sent the notification.
+  //
+  // This is the only identity that is never a guess. A terminal announces
+  // itself as "kitty" and there are five of those open; a class cannot tell
+  // them apart, and the first one Hyprland lists is almost never the one you
+  // were looking at. The sender's pid can, whenever the sender is the thing
+  // that owns a window - which is the case for a terminal relaying a
+  // notification from something running inside it, and that is where this
+  // matters most.
+  function windowForPid(pid) {
+    var want = Number(pid || 0)
+    if (!want) return null
+    var windows = openWindows()
+    for (var i = 0; i < windows.length; i++)
+      if (windows[i].pid === want) return windows[i]
+    return null
+  }
+
+  // Of several windows that all match, the one you were in most recently.
+  //
+  // A class is not an identity: five terminals are all "kitty", and the
+  // notification that says "waiting for your input" came from exactly one of
+  // them. Hyprland remembers the order you last focused things in, and the
+  // terminal you were last in is a far better answer than the first one it
+  // happens to list - which, as it turned out, was reliably the one you had
+  // touched least recently.
+  function mostRecent(candidates) {
+    if (!candidates.length) return null
+    var best = candidates[0]
+    for (var i = 1; i < candidates.length; i++)
+      if (candidates[i].focusOrder < best.focusOrder) best = candidates[i]
+    return best
+  }
+
   function windowForSource(source) {
     var name = String(source || "").toLowerCase()
     if (!name) return null
@@ -997,9 +1036,11 @@ Item {
     var windows = openWindows()
     var i
 
+    var found = []
     if (name.indexOf(".") > 0) {
       for (i = 0; i < windows.length; i++)
-        if (windows[i].wmClass.toLowerCase().indexOf(name) >= 0) return windows[i]
+        if (windows[i].wmClass.toLowerCase().indexOf(name) >= 0) found.push(windows[i])
+      if (found.length) return mostRecent(found)
 
       // No class carries it, so the site is a tab in a browser that named
       // itself after something else. Browsers only: "slack" in an editor's
@@ -1007,11 +1048,13 @@ Item {
       if (!smartRaise) return null
       var brands = brandsOf(name)
       for (var b = 0; b < brands.length; b++) {
+        found = []
         for (i = 0; i < windows.length; i++) {
           if (!browserClasses.test(windows[i].wmClass.toLowerCase())) continue
           var title = windows[i].title.toLowerCase().replace(browserSuffix, "")
-          if (wordIn(title, brands[b])) return windows[i]
+          if (wordIn(title, brands[b])) found.push(windows[i])
         }
+        if (found.length) return mostRecent(found)
       }
       return null
     }
@@ -1024,15 +1067,16 @@ Item {
     // otherwise match half the desktop.
     var slug = name.replace(/[^a-z0-9]+/g, "")
     if (slug.length < 4) return null
+    found = []
     for (i = 0; i < windows.length; i++) {
       var lower = windows[i].wmClass.toLowerCase()
-      if (lower === slug) return windows[i]                    // a native app
+      if (lower === slug) { found.push(windows[i]); continue }   // a native app
       if (lower.indexOf("chrome-") !== 0) continue
       var labels = lower.substring(7).split("__")[0].split(".")
       for (var l = 0; l < labels.length; l++)
-        if (labels[l] === slug) return windows[i]
+        if (labels[l] === slug) { found.push(windows[i]); break }
     }
-    return null
+    return mostRecent(found)
   }
 
   // By address, because a class is not an identity: this desktop runs two
@@ -1071,7 +1115,8 @@ Item {
         // notifications, where the wrong order would have sent 20 clicks to
         // the wrong place - including a Slack card that would have opened
         // axiom.co.
-        var win = windowForSource(row.source)
+        // The sender's own window first, then the source's, then the site.
+        var win = windowForPid(row.senderPid) || windowForSource(row.source)
         if (win) focusWindow(win)
         else if (String(row.source || "").indexOf(".") > 0)
           Qt.openUrlExternally("https://" + String(row.source) + "/")
@@ -1352,7 +1397,8 @@ Item {
       var route = "nothing"
       if (toasts.count > 0) {
         var front = toasts.get(0)
-        var win = service.windowForSource(front.source)
+        var win = service.windowForPid(front.senderPid)
+                  || service.windowForSource(front.source)
         route = win ? ("focus " + win.wmClass + " [" + win.address + "]")
               : (String(front.source || "").indexOf(".") > 0
                  ? ("open https://" + front.source + "/")

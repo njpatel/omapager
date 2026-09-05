@@ -99,9 +99,14 @@ SCENES = {
              body="Seif: are you around later?",
              # Deliberately not called "Reply": that word belongs to the real
              # inline reply, which only appears when the phone offers a reply
-             # channel. A demo button that looks like it and merely closes the
-             # card reads as the feature being broken.
-             actions=["read=Mark as read", "mute=Mute chat"]),
+             # channel (see the reply scene, which sets one up). A demo button
+             # that looks like it and merely closes the card reads as the
+             # feature being broken.
+             #
+             # And only one action, not two: "Mute chat" was the second, which
+             # is a worse version of snoozing the source - offering it here
+             # invites the comparison and loses it.
+             actions=["read=Mark as read"]),
         dict(app="KDE Connect", icon="kdeconnect", summary="Messages",
              body="G-728341 is your Google verification code"),
         dict(app="KDE Connect", icon="kdeconnect", summary="Messages",
