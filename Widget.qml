@@ -290,14 +290,17 @@ BarWidget {
     property color colour: pager.panelFg
     bar: pager.bar
     foreground: colour
-    // BarIconButton's own metrics, which is to say the bar's: icon-font in an
-    // icon-canvas, in an icon-slot. This started on BarIndicator's smaller
-    // status-slot metrics, on the theory that it is an indicator - but an
-    // indicator is a thing inside Omarchy's Indicators widget, sized to sit in
-    // a row with its siblings. Standing on its own in the bar, its neighbours
-    // are whole widgets: the weather, the clock, the update check. At 10px
-    // among 13px ones it read as a smaller, blurrier icon than everything
-    // around it, which it was.
+    // BarIndicator's metrics, not BarIconButton's: caption font in a status
+    // slot. These are smaller than a bar widget's - the weather's sun and the
+    // update check's refresh sit at icon-font in an icon-slot - and next to
+    // those this looks undersized. It is not: the things it belongs with are
+    // the other status glyphs, which are all this size, and the one to reach
+    // for a comparison against is whichever of those happens to be showing.
+    fontSize: Style.font.caption
+    horizontalMargin: 5
+    verticalPadding: 5
+    fixedWidth: pager.vertical ? -1 : Style.bar.statusSlot
+    fixedHeight: pager.vertical ? Style.bar.statusSlot : -1
     useActiveColor: false
     dimmed: quiet
     onPressed: function(buttonCode) { pager.pressed(buttonCode) }
