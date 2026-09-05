@@ -659,21 +659,34 @@ BarWidget {
                       elide: Text.ElideRight
                     }
 
-                    Text {
+                    // Two facts, and both are worth saying: when it comes
+                    // back, and what it has cost so far. Split into two so the
+                    // wake time can carry the snooze colour - it is the same
+                    // fact the bar glyph is amber for, and reading it in the
+                    // same colour is how you know they are the same thing.
+                    Row {
                       width: parent.width
-                      // Two facts, and both are worth saying: when it comes
-                      // back, and what it has cost so far.
-                      text: {
-                        var count = line.modelData.held.length
-                        var caught = count === 0 ? "" : (count === 1 ? "1 held" : count + " held")
-                        if (!line.snoozedByName) return caught
-                        var back = "back " + pager.waking(line.modelData.until)
-                        return caught ? (back + " · " + caught) : back
+                      spacing: 0
+
+                      Text {
+                        visible: line.snoozedByName
+                        text: "back " + pager.waking(line.modelData.until)
+                        color: pager.snoozedColour
+                        font.family: pager.fontFamily
+                        font.pixelSize: Style.font.caption
                       }
-                      color: pager.dim
-                      font.family: pager.fontFamily
-                      font.pixelSize: Style.font.caption
-                      elide: Text.ElideRight
+
+                      Text {
+                        readonly property int count: line.modelData.held.length
+                        visible: count > 0
+                        width: Math.min(implicitWidth, Math.max(0, parent.width - x))
+                        text: (line.snoozedByName ? " · " : "")
+                              + (count === 1 ? "1 held" : count + " held")
+                        color: pager.dim
+                        font.family: pager.fontFamily
+                        font.pixelSize: Style.font.caption
+                        elide: Text.ElideRight
+                      }
                     }
                   }
 
