@@ -697,8 +697,18 @@ Item {
 
   // The layout above only knows about cards that are staying. Everything on
   // its way out is pinned where it was, fading, taking no room.
+  //
+  // Copied, not borrowed. `layout.placements` belongs to the binding above,
+  // and writing the leaving cards straight into it meant this binding mutated
+  // its own input while reading it: Qt saw `layout` change mid-evaluation,
+  // re-ran `placements`, and the two chased each other - a hundred binding-loop
+  // warnings per scene, and the work behind them on the frames the animation
+  // is trying to keep smooth. It also left cards that had finished leaving
+  // sitting inside `layout.placements` until the next retarget cleared them.
   readonly property var placements: {
-    var out = layout.placements
+    var out = {}
+    var base = layout.placements
+    for (var k in base) out[k] = base[k]
     for (var key in leaving) out[key] = restingPlace(key)
     return out
   }

@@ -243,7 +243,22 @@ Item {
   scale: scene ? scene.at(row.key, "scale") : 1
   opacity: place.hidden ? 0 : (scene ? scene.at(row.key, "opacity") : 1)
   transformOrigin: Item.Top
-  visible: opacity > 0.01
+
+  // `visible` is deliberately not bound to anything. It used to be
+  // `opacity > 0.01`, and that closed a circle: toggling visible changes what
+  // the card contributes to the layout, the layout is measured back into
+  // `heights`, and `heights` is where the scene gets opacity from - a hundred
+  // binding-loop warnings for every scene of cards arriving, and the wasted
+  // re-evaluation behind them, on exactly the frames the animation is trying
+  // to keep smooth. Deriving it from `place.hidden` instead only moved the
+  // loop, because `place` is layout output too. Anything the layout produces
+  // is the wrong side of this fence.
+  //
+  // Nothing is lost. A hidden card is already at opacity 0, and the scene
+  // graph skips a fully transparent subtree, so it costs no drawing. What
+  // `visible: false` did do is refuse the pointer, and `enabled` says that on
+  // its own without being part of any measurement.
+  enabled: !place.hidden
 
   // The card is drawn in two pieces. This one is the plate: the background,
   // the border and - crucially - the shadow, with no children at all. A
