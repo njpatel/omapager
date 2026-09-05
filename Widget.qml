@@ -242,22 +242,12 @@ BarWidget {
   ]
   property int phraseIndex: 0
 
-  // When it ends, in the hero's own pill beside the title. It cannot go in the
-  // line underneath: that line rotates a phrase while anything is being held
-  // back, which is the whole time this fact is worth knowing - so the one
-  // thing you opened the panel to find out was the one thing it never showed.
-  // A pill does not rotate.
-  readonly property string endsAt: {
-    // Not while everything is snoozed: the line underneath says it in full,
-    // and the two together crowded the title down to "Noti...".
-    if (globalSnoozed) return ""
-    if (!silenced && snoozed.length === 1) return "back " + waking(snoozed[0].until)
-    return ""      // silence has no end, and several sources each show their own
-  }
-
-  // A snooze has an end, and the end is the whole story - so it says so, in
-  // the colour of the state, and it does not rotate. The phrases are for the
-  // states that have nothing more useful to say.
+  // The wake time used to sit in a pill beside the title. It is gone: when
+  // everything is snoozed the line below says it in full, and when one source
+  // is, that source's own row says it and what it has caught. All the pill did
+  // was say it a second time and squeeze the title down to "Notificati...".
+  // A snooze has an end, and the end is the whole story, so it says so and does
+  // not rotate. The phrases are for the states with nothing more useful to say.
   readonly property bool rotatingPhrases: opened && hasState && !globalSnoozed
 
   readonly property string stateLine: {
@@ -284,8 +274,13 @@ BarWidget {
     onTriggered: phraseSwap.restart()
   }
 
+  // The crossfade leaves metaOpacity wherever it was interrupted - closing the
+  // panel mid-swap and reopening it showed a title with nothing under it.
+  onRotatingPhrasesChanged: if (!rotatingPhrases) phraseSwap.stop()
+
   SequentialAnimation {
     id: phraseSwap
+    onStopped: hero.metaOpacity = 1
     PropertyAnimation { target: hero; property: "metaOpacity"
                         to: 0.0; duration: 180; easing.type: Easing.OutQuad }
     ScriptAction { script: pager.phraseIndex = (pager.phraseIndex + 1) % pager.quietPhrases.length }
@@ -403,6 +398,7 @@ BarWidget {
   property bool globalChoosing: false
   onOpenedChanged: {
     cursorAt = 0; cursorLive = false; expandedKey = ""; globalChoosing = false
+    phraseSwap.stop()          // never reopen onto a half-faded line
     // What has been held back, as of now - read on opening rather than kept
     // up to date, because the panel is the only thing that ever asks.
     if (opened && service) service.refreshHeld()
@@ -471,7 +467,6 @@ BarWidget {
             id: hero
             width: parent.width
             title: "Notifications"
-            detail: pager.endsAt
             meta: pager.stateLine
             metaColour: pager.stateColour
             foreground: pager.panelFg

@@ -227,6 +227,12 @@ Item {
   function snoozeSource(groupKey, label, seconds, fromNow) {
     var key = String(groupKey || "")
     if (!key || !(seconds > 0)) return 0
+    // Snoozing everything supersedes silencing it. It is the same quiet with
+    // an end on it, and the end is the entire point - so it becomes the state,
+    // rather than hiding behind a silence that outranks it in every place the
+    // state is drawn. Leaving both on showed a red bell over a countdown
+    // nobody could see.
+    if (key === globalKey) setDoNotDisturb(false)
     var from = fromNow ? Date.now() / 1000
                        : Math.max(Date.now() / 1000, snoozedUntil(key))
     var next = {}

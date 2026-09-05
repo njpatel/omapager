@@ -159,6 +159,12 @@ def listing(directory, limit=None, newest_first=False):
     return out
 
 
+# What was kept from you, as opposed to what you saw and dealt with. The
+# distinction is the closing reason, recorded for every entry: only these two
+# mean "this never reached the screen".
+HELD_REASONS = ("snoozed", "silenced")
+
+
 def cmd_held(limit):
     out = []
     for name in sorted(os.listdir(HISTORY), reverse=True):
