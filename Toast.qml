@@ -106,7 +106,12 @@ Item {
     if (String(row.link || "")) out.push(row.meeting ? "\u{f0567}" : "\u{f0339}")
     if (String(row.phone || "")) out.push("\u{f03f2}")
     if (String(row.filePath || "")) out.push("\u{f0214}")
-    if (actions.length > 0) out.push("\u{f01d9}")
+    // A cursor mid-click, not the vertical dots this used to be: at the size
+    // these are drawn, dots read as punctuation or as a line that got
+    // truncated, and the whole point of a mark is to be noticed. The rest of
+    // the family names the thing being carried - a key, a link, a phone, a
+    // file - and this one names what you can do with it.
+    if (actions.length > 0) out.push("\u{f0cfd}")
     return out
   }
 
