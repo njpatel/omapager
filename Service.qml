@@ -544,9 +544,12 @@ Item {
   // collapsed cards could share the tallest one - it went with the shared
   // height itself, which padded one-line cards out to match two-line ones and
   // made the whole deck resize whenever a card grew for its buttons.
+  property int heightNotes: 0        // how often a measured height moved the layout
+
   function noteHeight(key, h) {
     if (Math.abs((heights[key] || 0) - h) < 0.5) return
     heights[key] = h
+    heightNotes += 1
     layoutRevision += 1
   }
 
@@ -1243,6 +1246,7 @@ Item {
         doNotDisturb: service.doNotDisturb, snoozed: service.liveSnoozes(),
         snoozeOptions: service.snoozeOptions,
         decks: service.layout.decks.length, layoutH: service.layout.height,
+        layoutRevision: service.layoutRevision, heightNotes: service.heightNotes,
         barClearance: service.barClearance, edgeClearance: service.edgeClearance,
         gapsOut: Style.gapsOut, barThickness: service.barThickness,
         deckInset: service.deckInset
@@ -1485,6 +1489,16 @@ Item {
       id: surface
       required property var modelData
       screen: modelData
+      // Always mapped, even with nothing to draw. It used to appear with the
+      // first notification and vanish with the last, and a layer surface
+      // coming and going makes the compositor re-evaluate focus each time -
+      // which on a scrolling layout drags the viewport somewhere else the
+      // moment you dismiss the last card. The surface is the canvas; the deck
+      // is what is painted on it, and an empty canvas costs a transparent
+      // buffer nobody composites over.
+      //
+      // Input is unaffected: the mask follows the deck, and an empty deck is a
+      // zero-area mask, which is click-through everywhere.
       visible: toasts.count > 0
       color: "transparent"
 
