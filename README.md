@@ -32,80 +32,57 @@ usually past the ellipsis.
 
 ![A card showing a Copy code button](assets/actions.png)
 
-A message carrying two codes — "your code is 482913, your backup code is
-771204" — gets a button each, labelled with the digits, because "Copy code"
-twice is a coin toss. Copying one of those leaves the card alone; the other one
-is still in there.
-
-Detection is deliberately conservative — a rule that fires wrongly is worse
-than one that doesn't fire. A code needs a keyword (*code*, *OTP*,
-*verification*, *passcode*, *2FA*) **near** a plausible shape, so
-`412 passed, 0 failed` stays silent, and so does `Claude Code build 1841`,
-where the word is half a product name.
+A message carrying two codes gets a button each, labelled with the digits,
+because "Copy code" twice is a coin toss. Detection is deliberately
+conservative: `412 passed, 0 failed` is not a code, and neither is
+`Claude Code build 1841`.
 
 **Shows the sender's own actions.** The freedesktop spec has carried actions
 all along; most desktops draw none of them. Reply, Mark as read, whatever the
 app offered, appear as buttons on hover.
 
 **Replies to your phone.** Phone notifications reach the desktop through KDE
-Connect, which keeps a reply channel for the ones that have one. When it does, the card grows a text field and the
-answer goes back to the conversation on the device — and the notification is
-dismissed on the phone too, because you have dealt with it. Escape puts the
-buttons back; while you are typing, nothing new lands on the deck and nothing
-already on it expires, so the field cannot move out from under you mid-sentence.
+Connect, and the ones carrying a reply channel grow a text field on the card.
+The answer goes back to the conversation, and the notification is dismissed on
+the phone too. Nothing new lands and nothing expires while you are typing, so
+the field cannot move out from under you mid-sentence.
 
 ![Typing a reply into a notification](assets/reply.png)
 
-**Sends you back where it came from.** Clicking a card runs the sender's
-default action; failing that it focuses the window that source is already
-showing in, and only opens something new if there's nothing to go back to.
-Omarchy's web apps carry their host in their Hyprland class, so those match
-outright; a site open as a tab in an ordinary browser doesn't, so the brand is
-matched against browser window titles instead — a Slack notification lands in
-the Chrome that's already showing Slack rather than in a new tab. That second
-rule can only see the window's *title*, which is the active tab: with Slack
-sitting in a background tab there is nothing to match, and the site opens
-instead. `smartRaise` turns the rule off if you would rather it never guessed.
+**Sends you back where it came from.** Clicking a card focuses the window that
+source is already showing in — a Slack notification lands in the Chrome you
+already have Slack open in, rather than a new tab — and opens something new
+only when there is nothing to go back to. It can only see the tab a browser is
+actually showing, so a site sitting in a background tab opens fresh.
 
 **Quietens one source at a time.** Right-click a card and pick how long. It is
-the *source* that goes quiet, not the app that relayed it — so snoozing a Slack
-notification that arrived through Chrome silences `app.slack.com`, not every
-website you have open. The same holds for a phone: KDE Connect forwards
-everything as one app, so omapager groups by the app it *came from* — snoozing
-a noisy shopping app leaves WhatsApp alone. Snoozed notifications are still
-recorded; they go to history without ever being on screen.
+the *source* that goes quiet, not the app that relayed it: snoozing a Slack
+notification that arrived through Chrome silences `app.slack.com` and nothing
+else, and snoozing a noisy shopping app on your phone leaves WhatsApp alone.
+Snoozed notifications are still recorded — they go to history without ever
+being on screen.
 
-The lengths on offer are yours: 30 minutes, an hour, 4 hours and until tomorrow
-morning by default, and whatever you like in `snoozeDurations` — half an hour is
-the useful unit on some desktops and half a day on others. The panel snoozes
-*everything* for the same lengths, which is usually the one you want: not for
-the next hour, rather than not until you remember you turned it off.
+The panel does the same for everything at once. Both offer the lengths in
+`snoozeDurations`, which are yours to change.
 
 **Lets the code through anyway.** A snooze or a silence holds everything back
 except a notification carrying a verification code. You asked for that code
-thirty seconds ago and it expires in five minutes, so "I'll look at it later"
-is not a thing you can do with it — and being locked out of your own login
-because you'd quietened Slack is exactly the failure that makes people stop
-snoozing anything. Codes are only ever detected from a keyword sitting next to
-a plausible shape, so this is a narrow hole rather than an exception anything
-can walk through — and the key beside the panel's snooze button closes it, for
-the times you would rather nothing at all came through. Copying the code
-dismisses the notification, because a code notification exists to carry six
-digits to a login box and there is nothing left in it afterwards.
+thirty seconds ago and it expires in five minutes — and being locked out of a
+login because you had quietened Slack is exactly the failure that makes people
+stop snoozing anything. The key beside the panel's snooze button closes the
+hole for the times you want nothing at all. Copying a code dismisses its
+notification; there is nothing left in it afterwards.
 
 **Shows you what quiet cost.** Silence is only tolerable if you can see what it
-kept from you. While anything is being held back — silenced, snoozed wholesale,
-or one source at a time — the panel lists the sources that caught something and
-opens each one to show what it caught, newest first. Both ends are capped
-(`sourceLimit`, `heldPerSource`) so a fortnight of silence doesn't turn a panel
-into a log file.
+kept from you. While anything is being held back, the panel lists the sources
+that caught something and opens each one to show what it caught, newest first —
+capped at both ends, so a fortnight of silence doesn't turn a panel into a log
+file.
 
 ![The bar indicator and the panel behind it](assets/quiet.png)
 
-**Resolves real icons.** Local icon themes first, so your own overrides win,
-then the site's own icon for web notifications, with dark and light variants.
-A one-colour glyph is redrawn in the theme's text colour so it doesn't
-disappear into a dark card.
+**Resolves real icons.** Your own icon themes win; web notifications fall back
+to the site's own icon, in dark and light variants to suit the theme.
 
 ## Install
 
@@ -115,8 +92,8 @@ git clone https://github.com/njpatel/omapager.git \
 ```
 
 Then in `~/.config/omarchy/shell.json`, turn off the built-in service, add the
-plugin, and put the indicator in the bar — beside the other status glyphs in
-the centre is where it belongs, since it behaves like one:
+plugin, and put the indicator in the bar beside the other status glyphs, since
+it behaves like one:
 
 ```json
 {
@@ -147,12 +124,11 @@ resets `shell.json` to defaults.)
 
 Every history entry is the text of a message somebody sent you, so it is
 trimmed by age as well as count: **7 days or 200 entries**, whichever comes
-first. That is enough for replaying the last few and for showing what a snooze
-held back, which is all history is for. Resolved icons are dropped after 60
-days without use, and nothing is ever written to the system log.
+first. Resolved icons are dropped after 60 days unused, and nothing is ever
+written to the system log.
 
-Settings live on the bar widget's entry in `shell.json`, and it hands them to
-the daemon — so they are all set in the one place, next to `id`:
+Settings live on the bar widget's entry in `shell.json`, all in one place
+next to `id`:
 
 ```json
 { "id": "njpatel.omapager", "snoozeDurations": ["60", "480"], "wakeHour": 9 }
@@ -162,39 +138,29 @@ the daemon — so they are all set in the one place, next to `id`:
 
 omapager takes a slot in the bar only while it is keeping something from you,
 and nothing at all the rest of the time. Hovering the centre of the bar reveals
-it the way it reveals Omarchy's own inactive indicators — that's the way back
+it, the way Omarchy reveals its own inactive indicators — that is the way back
 into silence when nothing is showing.
 
 | | |
 | --- | --- |
 | crossed-out bell, in the theme's urgent colour | silenced |
 | bell with a `z` in it, in amber | snoozed — everything, or a source |
-| crossed-out bell, dimmed | nothing held back; only visible while the bar's indicators are revealed |
+| crossed-out bell, dimmed | nothing held back |
 
-The crossed-out bell is the glyph Omarchy's own DND indicator uses, so a
-silenced desktop looks the same whichever service is running. The colour is an
-addition: silence is a state you can forget you're in, and the cost of
-forgetting is a missed message. Amber rather than red for a snooze, because a
-snooze ends by itself.
+Same crossed-out bell as Omarchy's own indicator, so a silenced desktop looks
+the same whichever service is running. Amber rather than red for a snooze,
+because a snooze ends by itself.
 
-Left-click silences and unsilences — the fastest thing anyone wants from a
-notification indicator is for it to stop, and then for it to start again — so
-that is the plain click.
-
-Right-click opens the panel: the switch (on means notifications are coming
-through), a button beside it that snoozes everything for a while, and the list
-of what is being kept from you — when each source comes back, how much it has
+**Left-click** silences and unsilences. **Right-click** opens the panel: the
+switch, a button beside it that snoozes everything for a while, and the list of
+what is being kept from you — when each source comes back, how much it has
 caught, and the messages themselves when you open one.
 
 ## Keybindings
 
-Omarchy ships five global bindings on the comma key, and every one of them
-talks to the IPC target `notifications`. Disabling the built-in service to run
-this one takes that target away with it, so all five go quietly dead: the keys
-still fire, the shell answers "target not found", and nothing says why.
-
-So omapager answers to that target as well, and they keep working unchanged —
-no rebinding, nothing to configure:
+Omarchy's five stock bindings on the comma key keep working unchanged.
+omapager answers the same IPC target the built-in service did, so there is
+nothing to rebind and nothing to configure:
 
 | | |
 | --- | --- |
@@ -206,27 +172,24 @@ no rebinding, nothing to configure:
 
 ### Worth adding
 
-Three things omapager can do that the stock bindings have no key for. The two
-about quiet join Omarchy's own on the comma key; copying a code gets a shorter
-chord, because it is the one you reach for in a hurry. All three are free on a
-stock install — check yours with `omarchy menu keybindings --print`, and
-`hl.unbind` first if you have moved things around.
+Three things the stock bindings have no key for. All three are free on a stock
+install — check yours with `omarchy menu keybindings --print`, and `hl.unbind`
+first if you have moved things around.
 
 In `~/.config/hypr/bindings.lua`:
 
 ```lua
--- A code arrives, you copy it without touching the mouse, and the
--- notification takes itself away.
+-- Copy a code without touching the mouse. The notification takes itself away.
 o.bind("SUPER + ALT + C", "Copy code from newest notification",
        "omarchy-shell omapager offer code")
 
--- Next to SUPER + CTRL + comma, which silences. This one is quiet for an
--- hour, rather than quiet until you remember you turned it off.
+-- Next to SUPER + CTRL + comma, which silences. Quiet for an hour, rather
+-- than quiet until you remember you turned it off.
 o.bind("SUPER + CTRL + ALT + comma", "Snooze all notifications for an hour",
        "omarchy-shell omapager snoozeAll 60")
 
--- What is snoozed, what it has held, and the way back. Worth a key because
--- the bar icon is not there at all when nothing is being held back.
+-- What is snoozed, what it has held, and the way back. Worth a key: the bar
+-- icon is not there at all when nothing is being held back.
 o.bind("SUPER + CTRL + SHIFT + comma", "Notification options",
        "omarchy-shell omapager.panel toggle")
 ```
@@ -276,41 +239,20 @@ Omarchy (Quickshell 0.3.x, Hyprland), and Python 3 for the helpers in `bin/`.
 
 Two more things are worth having, and they are not the same kind of thing.
 
-### `wl-clipboard` — recommended
+**`wl-clipboard` — recommended.** Not an Omarchy dependency, so check before you
+assume it: `command -v wl-copy`. The copy buttons work either way, but with it a
+copied verification code is marked sensitive and Omarchy's clipboard history
+skips it. Either way the code is cleared again 90 seconds later, unless you have
+copied something else since — that stays.
+
+**KDE Connect — the whole phone half.** Without it there are no phone
+notifications at all: it is the bridge that puts them on the bus in the first
+place, so the reply field, `Mark as read` and the grouping by the app a message
+really came from all go with it.
 
 ```bash
-sudo pacman -S wl-clipboard   # check first: command -v wl-copy
+sudo pacman -S wl-clipboard kdeconnect   # kdeconnect also needs the phone app
 ```
-
-Not an Omarchy dependency. It may already be on your machine because something
-else pulled it in, or it may not be there at all.
-
-`Copy code` and `Copy number` work either way — with it, through `wl-copy
---sensitive`; without it, Qt holds the selection instead. The difference is one
-tag. `--sensitive` marks the selection `x-kde-passwordManagerHint`, and
-Omarchy's clipboard history skips anything carrying it, so a verification code
-is pasteable but never recorded. Qt cannot set that tag.
-
-In practice you lose little, because Omarchy's history is `wl-paste --watch` and
-cannot be running either if `wl-copy` is missing — there is no history for the
-code to land in. It matters if you run a clipboard manager that reads the
-Wayland protocol directly rather than shelling out to `wl-paste`. Install
-`wl-clipboard` and the question does not arise.
-
-Either way the code is cleared again 90 seconds later, and only if it is still
-the thing on the clipboard: something you copied since is left alone.
-
-### KDE Connect — the whole phone half
-
-```bash
-sudo pacman -S kdeconnect     # and the app on the phone; pair once
-```
-
-Without it there are no phone notifications at all. KDE Connect is the bridge
-that puts them on the bus in the first place, so everything downstream goes with
-it: the reply field, `Mark as read`, the grouping by the app a message really
-came from, snoozing one chat app without silencing the rest. omapager does not
-talk to your phone — it makes something of what KDE Connect forwards.
 
 ## Licence
 
