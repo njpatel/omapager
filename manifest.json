@@ -43,7 +43,8 @@
       "heldPerSource": 10,
       "alwaysShow": false,
       "codesBypassQuiet": true,
-      "timeFormat": "system"
+      "timeFormat": "system",
+      "smartRaise": true
     },
     "schema": [
       {
@@ -174,6 +175,13 @@
         ],
         "defaultValue": "system",
         "description": "How wake times are written. system follows LC_TIME; Omarchy's own clock widget takes an explicit format string instead, so pin this if the two disagree."
+      },
+      {
+        "key": "smartRaise",
+        "type": "boolean",
+        "label": "Raise the window a site is open in",
+        "description": "Match a notification's site against browser window titles, so a Slack notification lands in the browser already showing Slack rather than opening a new tab. Off, only a window whose class carries the site is raised.",
+        "defaultValue": true
       }
     ]
   }

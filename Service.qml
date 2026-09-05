@@ -390,7 +390,15 @@ Item {
   property string iconWanted: ""
 
   function wantIcon(row) {
-    if (String(row.image || "")) return                 // the sender sent one
+    // A file the sender handed over is an icon we can keep. A live handle is
+    // not: "image://qsimage/12/1" is raw pixels held inside this shell, it
+    // dies with it, and KDE Connect sends one for every notification it
+    // forwards - 111 of 122 here. Skipping the lookup for those meant the
+    // phone's apps never resolved an icon of their own, so anything the handle
+    // could not draw fell back to a letter for good. Resolve one anyway; the
+    // card prefers the sender's pixels while they work and keeps this in
+    // reserve.
+    if (String(row.image || "").indexOf("image://") !== 0 && String(row.image || "")) return
     var key = String(row.groupKey || row.source || row.app || "")
     if (!key) return
     if (iconCache[key] !== undefined) {
@@ -861,6 +869,14 @@ Item {
     return out
   }
 
+  // Matching a site against a browser window's *title* is the guessy half of
+  // routing: the class half is exact, this one is inference. It is what finds
+  // Slack when Slack is a tab rather than a web app, and it is the difference
+  // between landing in the conversation and opening a second copy of it in a
+  // new tab - so it is on. Turn it off and a source with no window of its own
+  // opens its site instead of raising a window that might be the wrong one.
+  property bool smartRaise: true
+
   readonly property var browserClasses: /^(chrome|chromium|firefox|zen|brave|edge|vivaldi)/
 
   // Every Chrome window title ends "- Google Chrome", every Firefox one
@@ -908,6 +924,7 @@ Item {
       // No class carries it, so the site is a tab in a browser that named
       // itself after something else. Browsers only: "slack" in an editor's
       // title is a filename, not a place to go.
+      if (!smartRaise) return null
       var brands = brandsOf(name)
       for (var b = 0; b < brands.length; b++) {
         for (i = 0; i < windows.length; i++) {
@@ -1184,7 +1201,12 @@ Item {
         // deck comes back in the order it was in before the restart.
         for (var i = 0; i < rows.length; i++) {
           var row = Store.restored(rows[i])
-          if (row) toasts.insert(0, row)
+          if (!row) continue
+          // Restored rows need an icon too. Their sender is gone and any live
+          // handle it left died with the last shell, so without this every
+          // card that came back wore a letter.
+          service.wantIcon(row)
+          toasts.insert(0, row)
         }
       }
     }

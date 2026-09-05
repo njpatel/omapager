@@ -50,13 +50,18 @@ showing in, and only opens something new if there's nothing to go back to.
 Omarchy's web apps carry their host in their Hyprland class, so those match
 outright; a site open as a tab in an ordinary browser doesn't, so the brand is
 matched against browser window titles instead — a Slack notification lands in
-the Chrome that's already showing Slack rather than in a new tab.
+the Chrome that's already showing Slack rather than in a new tab. That second
+rule can only see the window's *title*, which is the active tab: with Slack
+sitting in a background tab there is nothing to match, and the site opens
+instead. `smartRaise` turns the rule off if you would rather it never guessed.
 
 **Quietens one source at a time.** Right-click a card and pick how long. It is
 the *source* that goes quiet, not the app that relayed it — so snoozing a Slack
 notification that arrived through Chrome silences `app.slack.com`, not every
-website you have open. Snoozed notifications are still recorded; they go to
-history without ever being on screen.
+website you have open. The same holds for a phone: KDE Connect forwards
+everything as one app, so omapager groups by the app it *came from* — snoozing
+a noisy shopping app leaves WhatsApp alone. Snoozed notifications are still
+recorded; they go to history without ever being on screen.
 
 The lengths on offer are yours: 30 minutes, an hour, 4 hours and until tomorrow
 morning by default, and whatever you like in `snoozeDurations` — half an hour is
@@ -121,6 +126,7 @@ resets `shell.json` to defaults.)
 | `hideSettingsAction` | `true` | drop the browser's "Settings" button, which is on every web notification and is never the one you wanted |
 | `snoozeDurations` | `30, 60, 240, tomorrow` | what the snooze menus offer — minutes, or `tomorrow` |
 | `wakeHour` | `8` | the hour "until tomorrow" wakes a source at |
+| `smartRaise` | `true` | match a site against browser window titles, so a click lands in the window already showing it |
 | `alwaysShow` | `false` | keep the bar slot even when nothing is held back, so the centre of the bar never shifts |
 | `codesBypassQuiet` | `true` | let a notification carrying a verification code through a snooze or a silence |
 | `timeFormat` | `system` | `system` follows `LC_TIME`; `24h` and `12h` pin it |

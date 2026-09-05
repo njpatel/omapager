@@ -118,22 +118,26 @@ function oneLine(body) {
     .trim()
 }
 
-// KDE Connect names the device and the app in the summary, separated by a
-// middle dot: "Pixel · Calendar". The device belongs in the chip, not in the
-// headline you are trying to read.
-function splitDevice(app, summary) {
+// KDE Connect is a multiplexer: every notification on the phone arrives here
+// as one app called "KDE Connect", with the app it really came from in the
+// summary and "Sender: message" in the body. That summary is the most useful
+// thing about it - it is what the notification is really from, it finds the
+// right icon, and it is what "snooze this" has to mean. Snoozing the phone
+// would be snoozing everything on it.
+function forwardedApp(app, summary) {
   var text = String(summary || "")
-  if (!/kde\s*connect/i.test(String(app || ""))) return { device: "", summary: text }
-  // "Pixel · Calendar": device first, app second.
+  if (!/kde\s*connect/i.test(String(app || ""))) return { name: "", summary: text }
+  // "Pixel · Calendar": the phone first, the app second. The app is the half
+  // worth keeping; grouping by phone puts every app on it into one pile.
   var m = text.match(/^(.{1,28}?)\s*[·|]\s*(.+)$/)
-  if (m) return { device: m[1].trim(), summary: m[2].trim() }
-  // More often it is just the originating app: a Linear notification forwarded
-  // from the phone arrives as summary "Linear". That name is the most useful
-  // thing about it - it is what the notification is really from, and the only
-  // thing that will find the right icon - so it becomes the source.
-  if (text && text.length <= 28 && text.indexOf(" ") === -1)
-    return { device: text, summary: text }
-  return { device: "", summary: text }
+  if (m) text = m[2].trim()
+  // Everything else is the app name on its own. This used to require a single
+  // word, which quietly sent every multi-word app - "Amazon Shopping", "HSBC
+  // UAE", "Prime Video", "Samsung Health" - into one shared KDE Connect group
+  // where snoozing any of them snoozed the lot. A short summary with no
+  // sentence punctuation in it is a name, not a headline.
+  if (text && text.length <= 28 && !/[.!?:]$/.test(text)) return { name: text, summary: text }
+  return { name: "", summary: text }
 }
 
 // Where a notification came from, in the terms a person would use. The
@@ -143,20 +147,20 @@ function splitDevice(app, summary) {
 function identify(row, hints) {
   var app = String(row.app || "")
   var lifted = liftSource(row.body)
-  var device = splitDevice(app, row.summary)
+  var forwarded = forwardedApp(app, row.summary)
 
-  var source = lifted.source || device.device || app
+  var source = lifted.source || forwarded.name || app
 
   var key
   if (lifted.source) key = "web:" + lifted.source          // per site, not per browser
-  else if (device.device) key = "kdeconnect:" + device.device
+  else if (forwarded.name) key = "kdeconnect:" + forwarded.name
   else key = "app:" + slug(app)
 
   return {
     source: source,
     groupKey: key,
     body: lifted.body,
-    summary: device.summary || row.summary
+    summary: forwarded.summary || row.summary
   }
 }
 

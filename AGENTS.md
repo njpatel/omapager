@@ -97,6 +97,19 @@ Crop to the card and check a corner pixel is the card's own colour.
   profiles both called `chrome-work`) and only one is showing the thing that
   notified you.
 - Use `Hyprland.toplevels`, not `Hyprland.clients`.
+- A window title is the **active tab**. Matching a site against browser titles
+  finds it only while it is the tab in front; there is no way to see the rest.
+
+**This desktop's senders**
+
+- KDE Connect is a multiplexer: everything from the phone arrives as one app,
+  with the app it really came from in the summary and `Sender: message` in the
+  body. Group and snooze on that summary, or "snooze this" means "snooze the
+  phone". It also sends raw pixels as an `image://qsimage/...` handle that dies
+  with the shell, so an icon is resolved alongside it and kept in reserve.
+- Chrome announces every web app as "Google Chrome" and glues an anchor to its
+  own origin onto the front of the body. That anchor is the only thing telling
+  its sites apart, which is what `Markup.liftSource` is for.
 
 ## IPC targets
 

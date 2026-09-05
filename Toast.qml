@@ -392,16 +392,27 @@ Item {
 
         readonly property bool mono: String(picture.source).indexOf("-mono.png") >= 0
 
-        readonly property string sent: {
-          var src = String(card.row.stored_image || card.row.image || "")
-          if (!src) return ""
-          return src.indexOf("file://") === 0 || src.indexOf("image://") === 0 ? src : "file://" + src
+        function asUrl(src) {
+          var value = String(src || "")
+          if (!value) return ""
+          return value.indexOf("file://") === 0 || value.indexOf("image://") === 0
+                 ? value : "file://" + value
         }
-        // The sender's own picture, or whatever omapager-icon resolved for
-        // this source - which includes looking up the name the sender gave.
-        // Nothing else: Quickshell.iconPath happily returns a provider URL for
-        // an icon that does not exist, and that draws as a checkerboard.
-        readonly property string best: sent
+
+        // What the sender handed over, and what omapager-icon resolved for
+        // this source. Nothing else: Quickshell.iconPath happily returns a
+        // provider URL for an icon that does not exist, and that draws as a
+        // checkerboard.
+        readonly property string sent: asUrl(card.row.image)
+        readonly property string resolved: asUrl(card.row.stored_image)
+
+        // The sender's own picture wins while it works - for a message
+        // forwarded from a phone that is often the contact's photo, which
+        // beats any app icon. When it will not draw, the resolved one takes
+        // over rather than the card falling back to a letter.
+        property bool sentFailed: false
+        onSentChanged: sentFailed = false
+        readonly property string best: (sent && !sentFailed) ? sent : resolved
 
         Rectangle {
           anchors.fill: parent
@@ -437,6 +448,7 @@ Item {
           anchors.fill: parent
           visible: status === Image.Ready && !thumb.mono
           source: thumb.best
+          onStatusChanged: if (status === Image.Error && source == thumb.sent) thumb.sentFailed = true
           fillMode: Image.PreserveAspectCrop
           sourceSize.width: Style.space(64)
           sourceSize.height: Style.space(64)
