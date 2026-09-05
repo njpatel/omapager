@@ -144,4 +144,13 @@ Python helpers speak on stdout, which is the IPC channel.
 Comments say **why**, and especially why not the obvious thing — most of them
 are a bug that took a while to find. Keep them when you move code; delete them
 when they stop being true. No new runtime dependencies: Quickshell, Hyprland,
-Python 3, and `wl-clipboard`/KDE Connect only where they are optional.
+Python 3.
+
+`wl-clipboard` is **not** an Omarchy dependency and may simply be absent, so
+nothing may assume `wl-copy`. The copy buttons probe once at startup
+(`service.hasWlCopy`, reported by `probe`) and fall back to Qt's own clipboard,
+which loses `--sensitive` and nothing else — Omarchy's clipboard history is
+`wl-paste --watch`, so it cannot be running either. A button that says "Copied"
+and copied nothing is the outcome to rule out. KDE Connect is different: it is
+the bridge that puts phone notifications on the bus at all, so without it that
+half of the feature set has no input, not a degraded one.

@@ -47,8 +47,8 @@ where the word is half a product name.
 all along; most desktops draw none of them. Reply, Mark as read, whatever the
 app offered, appear as buttons on hover.
 
-**Replies to your phone.** KDE Connect keeps a reply channel for the
-notifications that have one. When it does, the card grows a text field and the
+**Replies to your phone.** Phone notifications reach the desktop through KDE
+Connect, which keeps a reply channel for the ones that have one. When it does, the card grows a text field and the
 answer goes back to the conversation on the device — and the notification is
 dismissed on the phone too, because you have dealt with it. Escape puts the
 buttons back; while you are typing, nothing new lands on the deck and nothing
@@ -274,12 +274,43 @@ and logs the reply to a file rather than sending it to a person.
 
 Omarchy (Quickshell 0.3.x, Hyprland), and Python 3 for the helpers in `bin/`.
 
-Two things are optional, and each one only disables what it powers:
+Two more things are worth having, and they are not the same kind of thing.
 
-| | for |
-| --- | --- |
-| `wl-clipboard` | the `Copy code` and `Copy number` buttons. Codes are copied with `wl-copy --sensitive`, so Omarchy's clipboard history skips them, and they are cleared again after 90 seconds if nothing else has been copied since. Without it those buttons do nothing. |
-| KDE Connect | replying to a phone notification from the card. Without it, cards from your phone still arrive; they just have no reply field. |
+### `wl-clipboard` — recommended
+
+```bash
+sudo pacman -S wl-clipboard   # check first: command -v wl-copy
+```
+
+Not an Omarchy dependency. It may already be on your machine because something
+else pulled it in, or it may not be there at all.
+
+`Copy code` and `Copy number` work either way — with it, through `wl-copy
+--sensitive`; without it, Qt holds the selection instead. The difference is one
+tag. `--sensitive` marks the selection `x-kde-passwordManagerHint`, and
+Omarchy's clipboard history skips anything carrying it, so a verification code
+is pasteable but never recorded. Qt cannot set that tag.
+
+In practice you lose little, because Omarchy's history is `wl-paste --watch` and
+cannot be running either if `wl-copy` is missing — there is no history for the
+code to land in. It matters if you run a clipboard manager that reads the
+Wayland protocol directly rather than shelling out to `wl-paste`. Install
+`wl-clipboard` and the question does not arise.
+
+Either way the code is cleared again 90 seconds later, and only if it is still
+the thing on the clipboard: something you copied since is left alone.
+
+### KDE Connect — the whole phone half
+
+```bash
+sudo pacman -S kdeconnect     # and the app on the phone; pair once
+```
+
+Without it there are no phone notifications at all. KDE Connect is the bridge
+that puts them on the bus in the first place, so everything downstream goes with
+it: the reply field, `Mark as read`, the grouping by the app a message really
+came from, snoozing one chat app without silencing the rest. omapager does not
+talk to your phone — it makes something of what KDE Connect forwards.
 
 ## Licence
 

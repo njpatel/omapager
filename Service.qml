@@ -1236,6 +1236,19 @@ Item {
   // and the offer is a click, never automatic.
   Process { id: clipProc; running: false }
 
+  // wl-copy is not an Omarchy dependency - it arrives with some other package
+  // or it does not arrive at all - so the copy buttons cannot assume it. Probed
+  // once at startup: the answer cannot change while the shell is running, and a
+  // button that has to shell out before it knows whether it works is a button
+  // that stutters.
+  property bool hasWlCopy: false
+  Process {
+    id: clipProbe
+    running: true
+    command: ["sh", "-c", "command -v wl-copy >/dev/null && command -v wl-paste >/dev/null"]
+    onExited: function(code, status) { service.hasWlCopy = code === 0 }
+  }
+
   // A verification code is not clipboard history material. wl-copy's
   // --sensitive marks it, and Omarchy's clipboard capture skips anything
   // carrying that hint - so the code is pasteable but never recorded. It is
@@ -1245,6 +1258,19 @@ Item {
   function copyText(text, sensitive) {
     var value = String(text || "")
     if (!value) return
+
+    // Without wl-copy, Qt holds the selection instead. That loses --sensitive,
+    // but it loses nothing real: Omarchy's clipboard history is wl-paste
+    // --watch, as is every other Wayland clipboard manager here, so if wl-copy
+    // is absent there is no history for the code to land in. What matters is
+    // that the button still works - saying "Copied" and copying nothing is the
+    // one outcome worth ruling out.
+    if (!hasWlCopy) {
+      Quickshell.clipboardText = value
+      if (sensitive) { secretHeld = value; secretLife.restart() }
+      return
+    }
+
     var args = ["wl-copy"]
     if (sensitive) args.push("--sensitive")
     args.push("--")
@@ -1258,7 +1284,12 @@ Item {
   Timer {
     id: secretLife
     interval: 90000
-    onTriggered: clipReader.running = true
+    onTriggered: {
+      if (service.hasWlCopy) { clipReader.running = true; return }
+      if (service.secretHeld && Quickshell.clipboardText === service.secretHeld)
+        Quickshell.clipboardText = ""
+      service.secretHeld = ""
+    }
   }
 
   // Only clear it if it is still the thing on the clipboard: taking away
@@ -1438,7 +1469,7 @@ Item {
         })(),
         barClearance: service.barClearance, edgeClearance: service.edgeClearance,
         gapsOut: Style.gapsOut, barThickness: service.barThickness,
-        deckInset: service.deckInset
+        deckInset: service.deckInset, hasWlCopy: service.hasWlCopy
       })
     }
     function clear(): string { service.clearAll("cleared"); return "ok" }
