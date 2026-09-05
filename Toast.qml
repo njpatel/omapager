@@ -214,9 +214,14 @@ Item {
   // buttons appear. Summed explicitly rather than taken from the laid-out
   // height minus the action area, because that area's height is derived from
   // the card's - and subtracting it back out is a binding loop.
+  // The words, without whatever the deeds are doing underneath them. Both the
+  // card's resting height and the icon beside it are measured from this, so
+  // they cannot drift apart.
+  readonly property real textBlock:
+      headline.height + (bodyBox.visible ? column.spacing + bodyBox.height : 0)
+
   readonly property real fixedHeight: Style.space(12) * 2
-      + Math.max(thumb.height,
-                 headline.height + (bodyBox.visible ? column.spacing + bodyBox.height : 0))
+      + Math.max(thumb.height, textBlock)
 
   // The height this card's *state* implies. The deck lays out from this and
   // only this: feeding a rendered, mid-animation height back into the layout
@@ -348,8 +353,11 @@ Item {
         width: Style.space(32)
         height: width
         // Centred against the text beside it: pinned to the top, it floats
-        // above nothing on a two-line card.
-        y: Math.max(0, (layout.implicitHeight - height) / 2)
+        // above nothing on a two-line card. Against the *text*, not against the
+        // column - the column grows when the buttons or the reply field open,
+        // and centring on that walked the icon down every time you hovered.
+        // The one fixed thing on the card should be fixed.
+        y: Math.max(0, (card.textBlock - height) / 2)
         opacity: card.showsContent ? 1 : 0
         Behavior on opacity { NumberAnimation { duration: card.fade } }
 
