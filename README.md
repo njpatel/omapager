@@ -24,9 +24,9 @@ without leaving the card.
 deck. Hovering expands it. Nothing is hidden behind a "3 more" summary —
 every notification is a real card you can act on.
 
-**Reads the contents.** A verification code, a link, a phone number or a file
-path in the body becomes a labelled button: `Copy code`, `Open link`,
-`Copy number`, `Open file`. A mark on the headline tells you a card is
+**Reads the contents.** A verification code, a link or a phone number in the
+body becomes a labelled button: `Copy code`, `Open link`, `Copy number`. A mark
+on the headline tells you a card is
 carrying something before you hover, because the useful part of a message is
 usually past the ellipsis.
 
@@ -215,7 +215,7 @@ omarchy-shell omapager count            how many are on screen
 omarchy-shell omapager clear            dismiss them
 omarchy-shell omapager dnd              toggle Do Not Disturb
 omarchy-shell omapager expand           open the deck, as hovering would
-omarchy-shell omapager offer code       take the front card's offer (code|link|phone|path)
+omarchy-shell omapager offer code       take the front card's offer (code|link|phone)
 omarchy-shell omapager act reply        invoke one of the sender's actions
 omarchy-shell omapager reply "text"     answer the front card ("" opens the field)
 omarchy-shell omapager snooze 60        quieten the front card's source, in minutes

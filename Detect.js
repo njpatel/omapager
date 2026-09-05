@@ -124,20 +124,6 @@ function isMeeting(url) {
   return MEETING.test(String(url || ""))
 }
 
-// "~/Screenshots/shot.png", "/home/you/notes.md" - a sender telling you where
-// it put something.
-function paths(text) {
-  var out = [], seen = {}, m
-  var re = /((?:~|\/home\/[\w.-]+|\/tmp|\/var\/log)\/[^\s<>"']+)/g
-  while ((m = re.exec(String(text || ""))) !== null) {
-    var path = String(m[1]).replace(/[.,;:!?)\]}'"]+$/, "")
-    if (seen[path]) continue
-    seen[path] = true
-    out.push(path)
-  }
-  return out
-}
-
 // Phone numbers are the easiest thing to detect badly: a version string, an
 // order id and a bank balance are all digits with punctuation in them. So only
 // three shapes count, each one committing to something a bare number does not:
@@ -174,7 +160,6 @@ function scan(summary, body) {
   var text = String(summary || "") + "\n" + String(body || "")
   var code = codes(text)
   var link = links(text)
-  var path = paths(text)
   var phone = phones(text)
   return {
     code: code.length ? code[0] : "",
@@ -184,7 +169,6 @@ function scan(summary, body) {
     codes: code.join(" "),
     link: link.length ? link[0] : "",
     meeting: link.length ? isMeeting(link[0]) : false,
-    path: path.length ? path[0] : "",
     phone: phone.length ? phone[0] : ""
   }
 }

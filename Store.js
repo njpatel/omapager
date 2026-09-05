@@ -57,7 +57,6 @@ function snapshot(n, key, urgencyEnum) {
     replyTo: "",
     link: found.link,
     meeting: found.meeting,
-    filePath: found.path,
     phone: found.phone,
     image: img,
     urgency: typeof n.urgency === "number" ? n.urgency : urgencyEnum.Normal,
@@ -71,7 +70,7 @@ function snapshot(n, key, urgencyEnum) {
 var ROLES = ["originalId", "senderPid", "app", "appIcon", "summary", "body", "rawBody", "bodyRich",
              "bodyLine", "source", "groupKey", "image", "urgency",
              "expireTimeout", "duration", "ts",
-             "code", "codes", "link", "meeting", "filePath", "phone", "replyPath", "replyTo"]
+             "code", "codes", "link", "meeting", "phone", "replyPath", "replyTo"]
 
 function applyTo(model, index, row) {
   var current = model.get(index)
@@ -97,7 +96,7 @@ var RESTORE_GRACE = 20000     // 20s for a notification that outlived its sender
 var SHAPE = {
   key: "", originalId: 0, senderPid: 0, app: "", appIcon: "", summary: "", body: "",
   bodyRich: "", bodyLine: "", rawBody: "", source: "", groupKey: "", image: "",
-  code: "", codes: "", link: "", meeting: false, filePath: "", phone: "", replyPath: "", replyTo: "",
+  code: "", codes: "", link: "", meeting: false, phone: "", replyPath: "", replyTo: "",
   stored_image: "", urgency: 1, expireTimeout: 0, duration: 0, ts: 0,
   restored: false
 }
