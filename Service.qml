@@ -539,24 +539,131 @@ Item {
   }
   function pointerLeft() { collapseGrace.restart() }
 
-  // Every card is measured and laid out at its own height, collapsed or not.
-  // There was a second map here holding each card's height "at rest" so that
-  // collapsed cards could share the tallest one - it went with the shared
-  // height itself, which padded one-line cards out to match two-line ones and
-  // made the whole deck resize whenever a card grew for its buttons.
-  property int heightNotes: 0        // how often a measured height moved the layout
+  // A card's target height: what its state implies, never what it currently
+  // measures. This moves on a state change - a hover, a reply opening - and
+  // not on a frame, so the layout is recomputed on events rather than while
+  // things are in flight.
+  property int heightNotes: 0        // how often a target height moved the layout
 
   function noteHeight(key, h) {
     if (Math.abs((heights[key] || 0) - h) < 0.5) return
+    var snap = snapshot(), deckNow = deckHeight
     heights[key] = h
     heightNotes += 1
-    layoutRevision += 1
+    retarget(undefined, undefined, snap, deckNow)
+  }
+
+  // ------------------------------------------------------- the scene clock
+  //
+  // One clock for the whole deck. Every card's position, scale, opacity and
+  // height is a function of three things: where the layout wants it, where it
+  // was when that last changed, and how far through the move we are. Cards
+  // animate nothing themselves.
+  //
+  // What this replaces: a Behavior per property per card, each starting
+  // whenever its own binding happened to re-evaluate. Because the layout was
+  // recomputed from heights that were themselves animating, those Behaviors
+  // were retargeted every frame - and a Behavior restarts with its full
+  // duration each time, so a card played only the slow opening of its curve
+  // until the heights settled, and then jumped.
+  readonly property var sceneCurve: [0.21, 1.02, 0.73, 1.0, 1.0, 1.0]
+  readonly property int sceneDuration: 320
+
+  property real t: 1                 // 0..1, eased, shared by every card
+  property var was: ({})             // where each card was when the target moved
+  property real deckWas: 0
+
+  NumberAnimation {
+    id: sceneRun
+    target: service; property: "t"; from: 0; to: 1
+    duration: service.sceneDuration
+    easing.type: Easing.Bezier
+    easing.bezierCurve: service.sceneCurve
+    onFinished: service.sceneSettled()
+  }
+
+  // One value of one card, right now. `t` is already eased by the animation
+  // above, so this interpolates linearly through it.
+  function at(key, what) {
+    var target = placements[key]
+    if (!target) return 0
+    var to = target[what]
+    if (t >= 1) return to
+    var from = was[key]
+    if (!from || from[what] === undefined) return to
+    return from[what] + (to - from[what]) * t
+  }
+
+  readonly property real deckHeight: t >= 1 ? layout.height
+                                            : deckWas + (layout.height - deckWas) * t
+
+  // Everything that changes the scene comes through here: snapshot where every
+  // card is *now*, let the layout recompute, and start one move for all of
+  // them from the same instant.
+  // Where everything is at this instant. This has to be taken *before* the
+  // thing that changes the scene - inserting a row, marking one as leaving -
+  // because the layout is a binding on those, and after them "where it was"
+  // and "where it is going" are the same number, so nothing moves at all.
+  function snapshot() {
+    var snap = {}
+    for (var key in placements)
+      snap[key] = { y: at(key, "y"), scale: at(key, "scale"),
+                    opacity: at(key, "opacity"), height: at(key, "height") }
+    return snap
+  }
+
+  function retarget(seedKey, seed, snap, deckNow) {
+    if (!snap) { snap = snapshot(); deckNow = deckHeight }
+    // A card that has just arrived has nowhere to have been, so it is told:
+    // under the bar, transparent. It comes down in the same move everything
+    // else is making rather than in an animation of its own.
+    if (seedKey) snap[seedKey] = seed
+    deckWas = deckNow
+    was = snap
+    layoutRevision += 1          // the layout is a binding on this
+    t = 0
+    sceneRun.restart()
+  }
+
+  // Where a leaving card sits while it fades: exactly where it was. The others
+  // close over it in the same move.
+  function restingPlace(key) {
+    var prev = was[key]
+    // front: true so it keeps its text on the way out. A card behind the front
+    // one in a collapsed deck draws no content - correct while it is a peek of
+    // an edge, wrong for one that is fading in place, which blanked itself for
+    // a frame and read as a flash.
+    return { y: prev ? prev.y : 0, scale: prev ? prev.scale : 1, opacity: 0,
+             height: prev ? prev.height : 0, z: 2000, front: true,
+             hidden: false, count: 1 }
+  }
+
+  // A row on its way out keeps its place in the model until the move that
+  // closes the gap has finished, so the fade and the gap are one motion
+  // rather than a fade, then a hole, then a jump.
+  function sceneSettled() {
+    var keys = []
+    for (var key in leaving) keys.push(key)
+    if (!keys.length) return
+    for (var i = 0; i < keys.length; i++) finishClose(keys[i], leaving[keys[i]])
+    // Nothing should move now: the gap closed while they faded, so the rows
+    // that remain are already where the recomputed layout wants them. Pin
+    // them there, or the recompute reads as a move from a stale snapshot.
+    var snap = {}
+    for (var k in placements)
+      snap[k] = { y: placements[k].y, scale: placements[k].scale,
+                  opacity: placements[k].opacity, height: placements[k].height }
+    was = snap
+    t = 1
   }
 
   readonly property var layout: {
-    layoutRevision                      // recompute when a card is measured
+    layoutRevision                      // recompute when the scene retargets
     var rows = []
-    for (var i = 0; i < toasts.count; i++) rows.push(toasts.get(i))
+    for (var i = 0; i < toasts.count; i++) {
+      var row = toasts.get(i)
+      if (!leaving[row.key]) rows.push(row)   // a card on its way out takes no space
+    }
     return Layout.compute(rows, {
       stacking: stacking,
       expanded: expanded,
@@ -567,10 +674,14 @@ Item {
     })
   }
 
-  Connections {
-    target: toasts
-    function onCountChanged() { service.layoutRevision += 1 }
+  // The layout above only knows about cards that are staying. Everything on
+  // its way out is pinned where it was, fading, taking no room.
+  readonly property var placements: {
+    var out = layout.placements
+    for (var key in leaving) out[key] = restingPlace(key)
+    return out
   }
+
 
   // Our own identity for a notification. The sender's id is reused (that is
   // what replaces_id is for), so it identifies a slot, not an event.
@@ -657,10 +768,22 @@ Item {
     var key = String(row.key || "")
     Qt.callLater(function() {
       var at = service.rowIndexFor(key)
+      var snap = service.snapshot(), deckNow = service.deckHeight
       if (at >= 0) {
         Store.applyTo(toasts, at, row)      // an update, in place
+        service.retarget(undefined, undefined, snap, deckNow)
       } else {
         toasts.insert(0, row)
+        // Where it comes from: under the bar, transparent. The layout has
+        // already made room for it, so this is the only thing the arrival
+        // needs - the drop is the same move everything else is making.
+        var landing = service.layout.placements[key]
+        service.retarget(key, {
+          y: (landing ? landing.y : 0) - Style.space(30),
+          scale: landing ? landing.scale : 1,
+          opacity: 0,
+          height: landing ? landing.height : 0
+        }, snap, deckNow)
       }
     })
   }
@@ -679,39 +802,29 @@ Item {
   // is asked to play its exit and the row goes when it has finished.
   property var leaving: ({})
 
+  // Marking it, not removing it. The row keeps its slot in the model until the
+  // move finishes; the layout stops giving it room immediately, so the gap
+  // closes while it fades. There used to be a fade, then a 200ms hole, then a
+  // jump - three motions for one event, and the hole was visible in every
+  // recording.
   function closeToast(key, reason) {
-    var at = rowIndexFor(key)
-    if (at < 0 || leaving[key]) return
-    leaving[key] = true
-    exitTimer.pending.push({ key: key, reason: reason, at: Date.now() })
-    exitTimer.start()
-    cardExit(key, reason !== "expired")
-    return
+    if (rowIndexFor(key) < 0 || leaving[key]) return
+    // Where it is *before* the layout stops giving it room. Marking it first
+    // and asking afterwards gets the answer the pinned placement invented,
+    // which is wherever it happened to come in from.
+    var snap = snapshot(), deckNow = deckHeight
+    var next = {}
+    for (var k in leaving) next[k] = leaving[k]
+    next[key] = reason || "dismissed"
+    leaving = next
+    retarget(key, snap[key], snap, deckNow)
   }
-
-  Timer {
-    id: exitTimer
-    property var pending: []
-    interval: 210
-    repeat: true
-    running: pending.length > 0
-    onTriggered: {
-      var now = Date.now()
-      var keep = []
-      for (var i = 0; i < pending.length; i++) {
-        if (now - pending[i].at >= 200) service.finishClose(pending[i].key, pending[i].reason)
-        else keep.push(pending[i])
-      }
-      pending = keep
-      if (pending.length === 0) stop()
-    }
-  }
-
-  signal cardExit(string key, bool byHand)
 
   function finishClose(key, reason) {
     if (replyingKey === key) replyingKey = ""
-    delete leaving[key]
+    var rest = {}
+    for (var k in leaving) if (k !== key) rest[k] = leaving[k]
+    leaving = rest
     var at = rowIndexFor(key)
     if (at < 0) return
     var ref = refs[key]
@@ -727,6 +840,7 @@ Item {
     toasts.remove(at)
     delete heights[key]
     Store.write(storeProc, storeBin, "close", null, [key, reason])
+    layoutRevision += 1        // the row is gone; nothing moves, the gap already closed
   }
 
   function clearAll(reason) {
@@ -1247,6 +1361,14 @@ Item {
         snoozeOptions: service.snoozeOptions,
         decks: service.layout.decks.length, layoutH: service.layout.height,
         layoutRevision: service.layoutRevision, heightNotes: service.heightNotes,
+        t: service.t, ys: (function() {
+          var out = []
+          for (var i = 0; i < toasts.count; i++) {
+            var k = toasts.get(i).key
+            out.push(Math.round(service.at(k, "y") * 10) / 10)
+          }
+          return out
+        })(),
         barClearance: service.barClearance, edgeClearance: service.edgeClearance,
         gapsOut: Style.gapsOut, barThickness: service.barThickness,
         deckInset: service.deckInset
@@ -1579,9 +1701,9 @@ Item {
           y: service.deckInset
         x: clipper.shadowRoom
         width: Style.space(340)
-        height: service.layout.height
-
-        Behavior on height { NumberAnimation { duration: 200; easing.type: Easing.OutCubic } }
+        // From the same clock as everything on it, so the clip and its
+        // contents can never disagree mid-move.
+        height: service.deckHeight
 
         // One hover region for the whole deck. Individual cards must not own
         // this: moving between two of them would leave and re-enter, and the
@@ -1619,7 +1741,7 @@ Item {
             // through - which is why the buttons worked while looking dead.
             service.hoverX = x
             service.hoverY = y
-            var places = service.layout.placements
+            var places = service.placements
             var found = ""
             for (var key in places) {
               var pl = places[key]
@@ -1667,8 +1789,9 @@ Item {
             id: toast
             required property var model
             row: model
+            scene: service
             cardWidth: deck.width
-            place: service.layout.placements[model.key]
+            place: service.placements[model.key]
                    || ({ y: 0, scale: 1, opacity: 0, z: 1, front: false, hidden: true })
             hovered: service.hoverKey === model.key
             actions: service.actionsOf(model.key, service.refsRevision)
@@ -1692,8 +1815,11 @@ Item {
             // an answer half typed into it.
             paused: service.expanded || service.replyingKey !== ""
 
-            onImplicitHeightChanged: service.noteHeight(model.key, implicitHeight)
-            Component.onCompleted: service.noteHeight(model.key, implicitHeight)
+            // The target height, not the drawn one: a step function of the
+            // card's state, so the layout moves on events rather than frames.
+            drawnHeight: service.at(model.key, "height")
+            onTargetHeightChanged: service.noteHeight(model.key, targetHeight)
+            Component.onCompleted: service.noteHeight(model.key, targetHeight)
 
             onExpired: service.closeToast(model.key, "expired")
             onActivated: service.activate(model.key)
@@ -1704,13 +1830,6 @@ Item {
                                    String(model.source || model.app || ""), seconds)
             }
             onSilenceRequested: service.doNotDisturb = true
-
-            Connections {
-              target: service
-              function onCardExit(key, byHand) {
-                if (key === toast.model.key) toast.playExit(byHand)
-              }
-            }
           }
         }
       }

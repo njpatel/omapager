@@ -18,6 +18,9 @@ Item {
 
   property var row: ({})
   property var place: ({ y: 0, scale: 1, opacity: 1, z: 1, front: true, hidden: false })
+  // The scene that owns the clock. Everything below degrades to a still card
+  // rather than breaking if it is not there.
+  property var scene: null
   property bool expanded: false
   property bool paused: false
   property bool hovered: false
@@ -39,6 +42,10 @@ Item {
     return Qt.formatDateTime(then, "ddd")
   }
   property real cardWidth: Style.space(340)
+
+  // The only duration the card owns. Everything it animates is a crossfade
+  // inside its own edges; anything that moves the deck belongs to the scene.
+  readonly property int fade: 150
 
   signal expired()
   signal activated()
@@ -200,79 +207,41 @@ Item {
 
   width: cardWidth
   height: body.height
-  implicitHeight: body.implicitHeight
+
+  // ---------------------------------------------------- what the scene reads
+  //
+  // The card with its action area closed: the part that does not move when
+  // buttons appear. Summed explicitly rather than taken from the laid-out
+  // height minus the action area, because that area's height is derived from
+  // the card's - and subtracting it back out is a binding loop.
+  readonly property real fixedHeight: Style.space(12) * 2
+      + Math.max(thumb.height,
+                 headline.height + (bodyBox.visible ? column.spacing + bodyBox.height : 0))
+
+  // The height this card's *state* implies. The deck lays out from this and
+  // only this: feeding a rendered, mid-animation height back into the layout
+  // is what made the stack stall and then jump.
+  readonly property real targetHeight: fixedHeight + deedArea.wanted
+
+  // And the height the scene says it is right now, on the way there.
+  property real drawnHeight: targetHeight
 
   onHoveredChanged: if (!hovered) menuOpen = false
   onExpandedChanged: if (!expanded) menuOpen = false
 
-  y: place.y
+  // Position, size and opacity all come from the scene. The card owns none of
+  // them and animates none of them: it is told where it is, every frame, by
+  // the one clock the deck runs. What it still owns is everything inside its
+  // own edges - a button row appearing, a reply field opening - which may
+  // animate itself freely, on one condition: it must not change the height the
+  // layout reads while it is moving. That is `targetHeight`, and it is a step
+  // function of the card's state.
+  y: scene ? scene.at(row.key, "y") : 0
   z: place.z
-  opacity: place.hidden ? 0 : place.opacity
-  scale: place.scale
+  scale: scene ? scene.at(row.key, "scale") : 1
+  opacity: place.hidden ? 0 : (scene ? scene.at(row.key, "opacity") : 1)
   transformOrigin: Item.Top
   visible: opacity > 0.01
-
-  // Every card in the deck moves on the same curve for the same length of
-  // time, so an arrival reads as the stack being pushed down together rather
-  // than as each card springing independently. Springs were the "hectic"
-  // feeling: each card oscillating on its own schedule.
-  readonly property var deckCurve: [0.21, 1.02, 0.73, 1.0, 1.0, 1.0]
-  readonly property int deckDuration: 400
-
-  Behavior on y {
-    NumberAnimation { duration: card.deckDuration; easing.type: Easing.Bezier
-                      easing.bezierCurve: card.deckCurve }
-  }
-  Behavior on scale {
-    NumberAnimation { duration: card.deckDuration; easing.type: Easing.Bezier
-                      easing.bezierCurve: card.deckCurve }
-  }
-  Behavior on opacity { NumberAnimation { duration: 200; easing.type: Easing.OutQuad } }
-
-  // Arrival: it lands. The card drops the short distance into its place at
-  // the front of the deck while the cards already there move down by exactly
-  // one peek - one motion, one curve, no overshoot. Coming in from the side
-  // made every arrival look like it had knocked the stack over.
-  property real slide: 0          // horizontal, used only for dismissal
-  property real drop: 0           // vertical, used only for arrival
-  property real enterFade: 1      // multiplied into both halves of the card
-  transform: Translate { x: card.slide; y: card.drop }
-
-  Component.onCompleted: enterAnim.start()
-
-  ParallelAnimation {
-    id: enterAnim
-    // It comes down from the bar and settles - a short, unhurried fall from
-    // just under the panel rather than a dart in from the edge of the screen.
-    NumberAnimation {
-      target: card; property: "drop"; from: -Style.space(30); to: 0
-      duration: 480; easing.type: Easing.Bezier
-      easing.bezierCurve: card.deckCurve
-    }
-    NumberAnimation {
-      target: card; property: "enterFade"; from: 0; to: 1
-      duration: 380; easing.type: Easing.OutCubic
-    }
-    // Fades the body, not the card: the card's opacity carries a Behavior,
-    // and animating a property that has one restarts it every frame.
-    NumberAnimation {
-      target: body; property: "opacity"; from: 0; to: 1
-      duration: 260; easing.type: Easing.OutQuad
-    }
-  }
-
-  // Departure by hand goes right, out the way it came in; an expiry just
-  // fades. A deliberate action should not look like a timeout.
-  function playExit(byHand) {
-    exitAnim.toX = byHand ? Style.space(34) : 0
-    exitAnim.start()
-  }
-  ParallelAnimation {
-    id: exitAnim
-    property real toX: 0
-    NumberAnimation { target: card; property: "slide"; to: exitAnim.toX; duration: 200; easing.type: Easing.OutQuad }
-    NumberAnimation { target: card; property: "opacity"; to: 0; duration: 200; easing.type: Easing.OutQuad }
-  }
 
   // The card is drawn in two pieces. This one is the plate: the background,
   // the border and - crucially - the shadow, with no children at all. A
@@ -295,7 +264,6 @@ Item {
     height: plate.height
     radius: plate.radius
     color: plate.color
-    opacity: card.enterFade
     visible: !card.place.hidden
 
     layer.enabled: true
@@ -332,9 +300,7 @@ Item {
                             Color.notifications.countdown.b, 0.85)
                   : Qt.rgba(Color.notifications.border.r, Color.notifications.border.g,
                             Color.notifications.border.b, outlined ? 0.38 : 0.10)
-    Behavior on border.color { ColorAnimation { duration: 180 } }
-
-    opacity: card.enterFade
+    Behavior on border.color { ColorAnimation { duration: card.fade } }
 
     layer.enabled: true
     layer.effect: MultiEffect {
@@ -354,18 +320,13 @@ Item {
   // so it can repaint as often as it likes.
   Item {
     id: body
-    opacity: card.enterFade
     x: 0
     width: parent.width
     // Twice the inset the row sits at, so the space above the content and the
     // space below it are the same number. A flat 18 against an inset of 12
     // left 12 above and 6 below, which is invisible on a one-line card and
     // obvious on a two-line one.
-    implicitHeight: layout.implicitHeight + Style.space(12) * 2
-    height: card.place.height || implicitHeight
-
-    Behavior on x { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
-    Behavior on height { NumberAnimation { duration: 220; easing.type: Easing.OutCubic } }
+    height: card.drawnHeight
 
     Row {
       id: layout
@@ -390,7 +351,7 @@ Item {
         // above nothing on a two-line card.
         y: Math.max(0, (layout.implicitHeight - height) / 2)
         opacity: card.showsContent ? 1 : 0
-        Behavior on opacity { NumberAnimation { duration: 160 } }
+        Behavior on opacity { NumberAnimation { duration: card.fade } }
 
         readonly property bool mono: String(picture.source).indexOf("-mono.png") >= 0
 
@@ -469,6 +430,7 @@ Item {
       }
 
       Column {
+        id: column
         width: layout.width - thumb.width - layout.spacing
         spacing: Style.space(3)
 
@@ -476,10 +438,11 @@ Item {
         // The sender's name used to sit above this; it says "notify-send" more
         // often than it says anything useful, so it now only picks the icon.
         Item {
+          id: headline
           width: parent.width
           height: title.implicitHeight
           opacity: card.showsContent ? 1 : 0
-          Behavior on opacity { NumberAnimation { duration: 160 } }
+          Behavior on opacity { NumberAnimation { duration: card.fade } }
 
           Text {
             id: title
@@ -582,7 +545,7 @@ Item {
                 visible: opacity > 0.01
                 font.family: Style.font.family
                 font.pixelSize: Style.font.bodySmall
-                Behavior on opacity { NumberAnimation { duration: 150 } }
+                Behavior on opacity { NumberAnimation { duration: card.fade } }
               }
 
               Rectangle {
@@ -595,8 +558,8 @@ Item {
                                Color.notifications.text.b, shutHit.containsMouse ? 0.22 : 0.12)
                 opacity: card.hovered ? 1 : 0
                 visible: opacity > 0.01
-                Behavior on opacity { NumberAnimation { duration: 150 } }
-                Behavior on color { ColorAnimation { duration: 140 } }
+                Behavior on opacity { NumberAnimation { duration: card.fade } }
+                Behavior on color { ColorAnimation { duration: card.fade } }
 
                 Text {
                   anchors.centerIn: parent
@@ -660,7 +623,7 @@ Item {
           height: Math.min(Math.ceil(lineH * 2), Math.ceil(shown))
           visible: String(card.row.body || "").length > 0
           opacity: card.showsContent ? 0.72 : 0
-          Behavior on opacity { NumberAnimation { duration: 160 } }
+          Behavior on opacity { NumberAnimation { duration: card.fade } }
 
           Text {
             id: rich
@@ -725,10 +688,13 @@ Item {
                                               : mode === "menu" ? menuColumn.implicitHeight
                                               : mode === "list" ? deedColumn.implicitHeight
                                               : mode === "row" ? deedRow.implicitHeight : 0
-          height: mode === "" ? 0 : contentHeight + Style.space(7)
+          // What this area's state asks for, with nothing animating. The card
+          // lays out from it; the drawn height below is whatever slack the
+          // scene has given the card so far, so the two can never disagree.
+          readonly property real wanted: mode === "" ? 0 : contentHeight + Style.space(7)
+          height: Math.max(0, card.drawnHeight - card.fixedHeight)
           visible: height > 0
           clip: true
-          Behavior on height { NumberAnimation { duration: 170; easing.type: Easing.OutCubic } }
 
           Row {
             id: deedRow
@@ -741,7 +707,7 @@ Item {
             spacing: Style.space(6)
             opacity: deedArea.mode === "row" ? 1 : 0
             visible: opacity > 0.01
-            Behavior on opacity { NumberAnimation { duration: 120 } }
+            Behavior on opacity { NumberAnimation { duration: card.fade } }
 
             Repeater {
               model: card.deeds
@@ -765,11 +731,13 @@ Item {
           Item {
             id: replyBox
             width: parent.width
+            // A step, not an animation. This height is part of what the
+            // layout reads, and anything the layout reads must not move
+            // between frames - the scene animates the slack around it.
             height: card.replying ? Style.space(24) : 0
             visible: height > 0
             anchors.bottom: parent.bottom
             clip: true
-            Behavior on height { NumberAnimation { duration: 170; easing.type: Easing.OutCubic } }
 
             // The kit's own text input: same focus ring, selection tint and
             // padding as every other field in the desktop, and it follows
@@ -815,7 +783,7 @@ Item {
             spacing: Style.space(4)
             opacity: deedArea.mode === "list" ? 1 : 0
             visible: opacity > 0.01
-            Behavior on opacity { NumberAnimation { duration: 120 } }
+            Behavior on opacity { NumberAnimation { duration: card.fade } }
 
             Repeater {
               model: card.deedsOpen ? card.allDeeds : []
@@ -840,7 +808,7 @@ Item {
             spacing: Style.space(4)
             opacity: deedArea.mode === "menu" ? 1 : 0
             visible: opacity > 0.01
-            Behavior on opacity { NumberAnimation { duration: 120 } }
+            Behavior on opacity { NumberAnimation { duration: card.fade } }
 
             Repeater {
               model: card.menuOpen ? card.menuDeeds : []
