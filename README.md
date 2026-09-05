@@ -180,6 +180,33 @@ no rebinding, nothing to configure:
 | `SUPER` `ALT` `,` | invoke the newest one, as clicking it would |
 | `SUPER` `SHIFT` `ALT` `,` | put the last few back on screen |
 
+### Worth adding
+
+Three things omapager can do that the stock bindings have no key for. The two
+about quiet join Omarchy's own on the comma key; copying a code gets a shorter
+chord, because it is the one you reach for in a hurry. All three are free on a
+stock install — check yours with `omarchy menu keybindings --print`, and
+`hl.unbind` first if you have moved things around.
+
+In `~/.config/hypr/bindings.lua`:
+
+```lua
+-- A code arrives, you copy it without touching the mouse, and the
+-- notification takes itself away.
+o.bind("SUPER + ALT + C", "Copy code from newest notification",
+       "omarchy-shell omapager offer code")
+
+-- Next to SUPER + CTRL + comma, which silences. This one is quiet for an
+-- hour, rather than quiet until you remember you turned it off.
+o.bind("SUPER + CTRL + ALT + comma", "Snooze all notifications for an hour",
+       "omarchy-shell omapager snoozeAll 60")
+
+-- What is snoozed, what it has held, and the way back. Worth a key because
+-- the bar icon is not there at all when nothing is being held back.
+o.bind("SUPER + CTRL + SHIFT + comma", "Notification options",
+       "omarchy-shell omapager.panel toggle")
+```
+
 ## Driving it from a script
 
 ```
