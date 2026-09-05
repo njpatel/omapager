@@ -1311,10 +1311,22 @@ Item {
     }
   }
 
+  // "~/Screenshots/shot.png" is the shape a sender writes most often, and it is
+  // the first thing Detect.paths looks for - but "file://" + that parses with ~
+  // as the *hostname*, so the URL points at a machine called ~ and the file
+  // never opens. Expand it, and encode what follows: a path with a space in it
+  // is not a URL until you do, and a # in a filename would cut the rest off as
+  // a fragment.
+  function fileUrl(path) {
+    var p = String(path || "")
+    if (p.charAt(0) === "~") p = Quickshell.env("HOME") + p.slice(1)
+    return "file://" + encodeURI(p).replace(/#/g, "%23").replace(/\?/g, "%3F")
+  }
+
   function takeOffer(kind, value, key) {
     if (kind === "code") copyText(value, true)
     else if (kind === "phone") copyText(value, false)
-    else if (kind === "path") Qt.openUrlExternally("file://" + value)
+    else if (kind === "path") Qt.openUrlExternally(fileUrl(value))
     else Qt.openUrlExternally(value)
 
     // A copied code is a finished notification: it exists to carry six digits
