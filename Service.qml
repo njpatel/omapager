@@ -194,6 +194,12 @@ Item {
 
   readonly property int snoozeCount: { snoozeRevision; return liveSnoozes().length }
 
+  // Including the global one, which liveSnoozes() deliberately leaves out -
+  // the source list has no row for it. Anything that has to keep running while
+  // something is asleep has to watch this rather than the count, or a snooze
+  // of everything is a snooze nothing is ticking for.
+  readonly property bool anySnooze: { snoozeRevision; return snoozeCount > 0 || globalSnoozeUntil > 0 }
+
   // `fromNow` re-snoozes rather than extends. Picking "4 hours" from the panel
   // means the source comes back in four hours - not four hours after whatever
   // was already left on it, which would make the number on the button a lie.
@@ -337,7 +343,7 @@ Item {
   Timer {
     interval: 20000
     repeat: true
-    running: service.snoozeCount > 0
+    running: service.anySnooze
     onTriggered: {
       var now = Date.now() / 1000, next = {}, dropped = false
       for (var k in service.snoozes) {
@@ -1260,6 +1266,16 @@ Item {
       var until = service.snoozeSource(String(row.groupKey || ""),
                                        String(row.source || row.app || ""), mins * 60)
       return until ? (String(row.source || row.app) + " until " + new Date(until * 1000).toTimeString().slice(0, 5)) : "no source"
+    }
+
+    // Snooze the lot, which is what the panel's own button does. Separate from
+    // `snooze` because that one acts on the front card's source, and the two
+    // are easy to confuse at a prompt - with the cost of confusing them being
+    // a real source silently going quiet for an hour.
+    function snoozeAll(minutes: string): string {
+      var mins = Number(minutes) > 0 ? Number(minutes) : 60
+      var until = service.snoozeSource(service.globalKey, "Everything", mins * 60, true)
+      return until ? ("everything until " + new Date(until * 1000).toTimeString().slice(0, 5)) : "no"
     }
 
     function unsnooze(key: string): string {

@@ -166,8 +166,12 @@ BarWidget {
   // remaining minutes stop being the useful half.
   function waking(until) {
     var left = Math.max(0, until - Date.now() / 1000)
-    if (left < 3600) return "in " + Math.max(1, Math.round(left / 60)) + "m"
-    if (left < 8 * 3600) return "in " + Math.round(left / 3600) + "h"
+    // Rounded minutes, unless rounding them lands on the hour - an hour's
+    // snooze read "back in 60m" for its first few seconds, which is a strange
+    // way to say something nobody would ever say out loud.
+    var minutes = Math.max(1, Math.round(left / 60))
+    if (minutes < 60) return "in " + minutes + "m"
+    if (left < 8 * 3600) return "in " + Math.max(1, Math.round(left / 3600)) + "h"
     return "until " + Qt.formatDateTime(new Date(until * 1000), "HH:mm")
   }
 
@@ -187,6 +191,17 @@ BarWidget {
   ]
   property int phraseIndex: 0
   readonly property bool rotatingPhrases: opened && hasState
+
+  // When it ends, in the hero's own pill beside the title. It cannot go in the
+  // line underneath: that line rotates a phrase while anything is being held
+  // back, which is the whole time this fact is worth knowing - so the one
+  // thing you opened the panel to find out was the one thing it never showed.
+  // A pill does not rotate.
+  readonly property string endsAt: {
+    if (globalSnoozed) return "back " + waking(globalUntil)
+    if (!silenced && snoozed.length === 1) return "back " + waking(snoozed[0].until)
+    return ""      // silence has no end, and several sources each show their own
+  }
 
   readonly property string stateLine: {
     if (rotatingPhrases) return quietPhrases[phraseIndex % quietPhrases.length]
@@ -391,6 +406,7 @@ BarWidget {
             id: hero
             width: parent.width
             title: "Notifications"
+            detail: pager.endsAt
             meta: pager.stateLine
             foreground: pager.panelFg
             fontFamily: pager.fontFamily
