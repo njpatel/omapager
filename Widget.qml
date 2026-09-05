@@ -44,6 +44,27 @@ BarWidget {
   readonly property bool revealed: hasState || opened
     || (bar && bar.centerSectionRevealHeld === true && bar.centerHoverRevealSuppressed !== true)
 
+  // The settings plumbing the daemon has been doing without. Only a bar widget
+  // is handed its shell.json entry, and the daemon is a sibling with no way to
+  // read one - so this is the single place that can, and it pushes them over.
+  function applySettings() {
+    if (!service) return
+    var stacking = String(setting("stacking", "source"))
+    if (stacking === "all" || stacking === "source") service.stacking = stacking
+    var align = String(setting("actionsAlign", "right"))
+    if (align === "left" || align === "right") service.actionsAlign = align
+    service.hideSettingsAction = setting("hideSettingsAction", true) !== false
+    service.wakeHour = Number(setting("wakeHour", 8)) || 8
+    // Empty means "none chosen", not "no snoozing" - fall back rather than
+    // leaving a menu with nothing in it.
+    var chosen = setting("snoozeDurations", null)
+    if (chosen && chosen.length > 0) service.snoozeChoices = chosen
+  }
+
+  onSettingsChanged: applySettings()
+  onServiceChanged: applySettings()
+  Component.onCompleted: applySettings()
+
   readonly property color panelFg: bar ? bar.foreground : Color.foreground
   readonly property color dim: Qt.darker(panelFg, 1.55)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
@@ -81,11 +102,13 @@ BarWidget {
   function togglePanel() { controller.open ? controller.hide() : controller.show() }
   function toggleSilence() { if (service) service.setDoNotDisturb(!service.doNotDisturb) }
 
-  // Left opens the panel, right silences. The fastest thing anyone can want
-  // from a notification bell is for it to stop, so it stays one click away.
+  // Left silences, right opens the panel. The fastest thing anyone wants from
+  // a notification indicator is for it to stop, so that is the plain click;
+  // the panel is where you go when you want to look at something rather than
+  // change it, which is what a right-click means everywhere else.
   function pressed(buttonCode) {
-    if (buttonCode === Qt.RightButton) toggleSilence()
-    else togglePanel()
+    if (buttonCode === Qt.RightButton) togglePanel()
+    else toggleSilence()
   }
 
   // "in 24m", "in 3h", "until 08:00" once it is far enough out that the
@@ -97,11 +120,45 @@ BarWidget {
     return "until " + Qt.formatDateTime(new Date(until * 1000), "HH:mm")
   }
 
+  // The other panels put a line under their title that cycles while the thing
+  // they are about is doing something. Ours is doing something precisely when
+  // it is holding notifications back, so that is when it talks.
+  readonly property var quietPhrases: [
+    "Holding messages",
+    "Hushing apps",
+    "Pocketing pings",
+    "Absorbing alerts",
+    "Muffling mentions",
+    "Guarding quiet",
+    "Sitting on notices",
+    "Deferring drama",
+    "Banking interruptions"
+  ]
+  property int phraseIndex: 0
+  readonly property bool rotatingPhrases: opened && hasState
+
   readonly property string stateLine: {
+    if (rotatingPhrases) return quietPhrases[phraseIndex % quietPhrases.length]
     if (silenced) return "Silenced"
     if (snoozed.length === 1) return snoozed[0].label + ", back " + waking(snoozed[0].until)
     if (snoozed.length > 1) return snoozed.length + " sources snoozed"
     return "Everything comes through"
+  }
+
+  Timer {
+    interval: 2800
+    running: pager.rotatingPhrases
+    repeat: true
+    onTriggered: phraseSwap.restart()
+  }
+
+  SequentialAnimation {
+    id: phraseSwap
+    PropertyAnimation { target: hero; property: "metaOpacity"
+                        to: 0.0; duration: 180; easing.type: Easing.OutQuad }
+    ScriptAction { script: pager.phraseIndex = (pager.phraseIndex + 1) % pager.quietPhrases.length }
+    PropertyAnimation { target: hero; property: "metaOpacity"
+                        to: 1.0; duration: 260; easing.type: Easing.InQuad }
   }
 
   // Return types are spelled out because Quickshell wants them, and `string`
@@ -132,15 +189,16 @@ BarWidget {
     Indicator {
       visible: pager.silenced
       text: pager.bellOff
-      tooltipText: "Notifications silenced - click for options"
+      tooltipText: "Silenced - click to let them through, right-click for options"
     }
 
     Indicator {
       visible: pager.snoozed.length > 0 && !pager.silenced
       text: pager.zzz
-      tooltipText: pager.snoozed.length === 1
-                   ? (pager.snoozed[0].label + " snoozed " + pager.waking(pager.snoozed[0].until))
-                   : (pager.snoozed.length + " sources snoozed")
+      tooltipText: (pager.snoozed.length === 1
+                    ? (pager.snoozed[0].label + " snoozed " + pager.waking(pager.snoozed[0].until))
+                    : (pager.snoozed.length + " sources snoozed"))
+                   + " - right-click for options"
     }
 
     // The resting bell, which only ever appears while the bar's inactive
@@ -149,7 +207,7 @@ BarWidget {
       visible: !pager.hasState
       text: pager.bell
       quiet: true
-      tooltipText: "Silence notifications"
+      tooltipText: "Silence notifications - right-click for options"
     }
   }
 
@@ -176,8 +234,11 @@ BarWidget {
     bar: pager.bar
     open: pager.opened
     focusTarget: keys
-    contentWidth: panel.fittedContentWidth(Style.space(300))
-    contentHeight: panel.fittedContentHeight(column.implicitHeight, Style.space(420))
+    // 380 is what every core Omarchy panel is, bar the two that need to be
+    // wider (the clock's calendar, the weather's forecast). A panel that is
+    // its own width is the thing you notice about it.
+    contentWidth: panel.fittedContentWidth(Style.space(380))
+    contentHeight: panel.fittedContentHeight(column.implicitHeight, Style.space(480))
 
     PanelKeyCatcher {
       id: keys
@@ -214,6 +275,7 @@ BarWidget {
           spacing: Style.space(12)
 
           PanelHero {
+            id: hero
             width: parent.width
             title: "Notifications"
             meta: pager.stateLine
@@ -266,6 +328,7 @@ BarWidget {
                 id: line
                 required property var modelData
                 required property int index
+                property bool choosing: false
                 width: parent.width
                 height: Math.max(label.implicitHeight, Style.space(24))
 
@@ -304,15 +367,44 @@ BarWidget {
                   id: controls
                   anchors.right: parent.right
                   anchors.verticalCenter: parent.verticalCenter
-                  spacing: Style.space(2)
+                  spacing: Style.space(3)
+
+                  // The lengths on offer, revealed rather than always present:
+                  // four numbers on every row is a wall, and most of the time
+                  // the button you want is the one that wakes it.
+                  Row {
+                    spacing: Style.space(3)
+                    visible: line.choosing
+
+                    Repeater {
+                      model: line.choosing && pager.service ? pager.service.snoozeOptions : []
+
+                      Button {
+                        required property var modelData
+                        text: String(modelData.short)
+                        bordered: true
+                        foreground: pager.panelFg
+                        accent: pager.panelFg
+                        fontFamily: pager.fontFamily
+                        fontSize: Style.font.caption
+                        verticalPadding: 1
+                        // From now, not on top of what is left: the button
+                        // says four hours, so it had better mean four hours.
+                        onClicked: {
+                          pager.service.snoozeSource(line.modelData.key, line.modelData.label,
+                                                     Number(modelData.seconds), true)
+                          line.choosing = false
+                        }
+                      }
+                    }
+                  }
 
                   PanelActionButton {
-                    iconText: "\u{f0415}"                 // nf-md-clock-plus
-                    tooltipText: "Another half hour"
+                    iconText: line.choosing ? "\u2715" : "\u{f0150}"    // close / clock
+                    tooltipText: line.choosing ? "Leave it as it is" : "Snooze for longer"
                     foreground: pager.panelFg
                     fontFamily: pager.fontFamily
-                    onClicked: pager.service.snoozeSource(line.modelData.key,
-                                                         line.modelData.label, 1800)
+                    onClicked: line.choosing = !line.choosing
                   }
 
                   PanelActionButton {

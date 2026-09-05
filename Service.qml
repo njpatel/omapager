@@ -109,6 +109,52 @@ Item {
   // silenced one does, so "what did I miss" survives the decision to not be
   // interrupted by it.
   property var snoozes: ({})        // groupKey -> { until: epoch seconds, label }
+
+  // How long "snooze" is allowed to mean. Minutes, or the literal "tomorrow",
+  // which is the one choice that is not a duration at all - it is a time, and
+  // what time depends on when you start work. Both come from the widget's
+  // settings; these are the defaults.
+  property var snoozeChoices: ["30", "60", "240", "tomorrow"]
+  property int wakeHour: 8
+
+  // "40 minutes", "An hour", "4 hours" - and a short form for somewhere that
+  // only has room for a chip.
+  function durationWords(minutes) {
+    if (minutes < 60) return minutes + " minutes"
+    var hours = minutes / 60
+    if (hours === 1) return "an hour"
+    return (Math.round(hours * 10) / 10) + " hours"
+  }
+
+  function shortWords(minutes) {
+    return minutes < 60 ? (minutes + "m") : ((Math.round(minutes / 6) / 10) + "h").replace(".0h", "h")
+  }
+
+  // One choice, worked out against the clock as it is now: "tomorrow" is a
+  // different number of seconds at every hour of the day.
+  function snoozeOption(choice) {
+    var value = String(choice || "")
+    if (value === "tomorrow") {
+      var wake = new Date()
+      wake.setDate(wake.getDate() + 1)
+      wake.setHours(Math.max(0, Math.min(23, wakeHour)), 0, 0, 0)
+      return { short: "Tomorrow", menuLabel: "Snooze until tomorrow",
+               seconds: Math.max(600, Math.round((wake.getTime() - Date.now()) / 1000)) }
+    }
+    var minutes = Number(value)
+    if (!(minutes > 0)) return null
+    return { short: shortWords(minutes), menuLabel: "Snooze for " + durationWords(minutes),
+             seconds: Math.round(minutes * 60) }
+  }
+
+  readonly property var snoozeOptions: {
+    var out = []
+    for (var i = 0; i < snoozeChoices.length; i++) {
+      var option = snoozeOption(snoozeChoices[i])
+      if (option) out.push(option)
+    }
+    return out
+  }
   // snoozes is a plain map, so nothing re-evaluates when it changes; this is
   // what the bar indicator and the panel are bound through.
   property int snoozeRevision: 0
@@ -134,12 +180,14 @@ Item {
 
   readonly property int snoozeCount: { snoozeRevision; return liveSnoozes().length }
 
-  function snoozeSource(groupKey, label, seconds) {
+  // `fromNow` re-snoozes rather than extends. Picking "4 hours" from the panel
+  // means the source comes back in four hours - not four hours after whatever
+  // was already left on it, which would make the number on the button a lie.
+  function snoozeSource(groupKey, label, seconds, fromNow) {
     var key = String(groupKey || "")
     if (!key || !(seconds > 0)) return 0
-    // Extending adds to what is left rather than to now, so pressing "+30m"
-    // twice buys an hour.
-    var from = Math.max(Date.now() / 1000, snoozedUntil(key))
+    var from = fromNow ? Date.now() / 1000
+                       : Math.max(Date.now() / 1000, snoozedUntil(key))
     var next = {}
     for (var k in snoozes) next[k] = snoozes[k]
     next[key] = { until: from + seconds, label: String(label || key) }
@@ -1062,6 +1110,7 @@ Item {
         replying: service.replyingKey !== "",
         expanded: service.expanded, pointerIn: service.pointerIn,
         doNotDisturb: service.doNotDisturb, snoozed: service.liveSnoozes(),
+        snoozeOptions: service.snoozeOptions,
         decks: service.layout.decks.length, layoutH: service.layout.height,
         barClearance: service.barClearance
       })
@@ -1378,6 +1427,7 @@ Item {
             onExpired: service.closeToast(model.key, "expired")
             onActivated: service.activate(model.key)
             onDismissed: service.closeToast(model.key, "dismissed")
+            snoozeOptions: service.snoozeOptions
             onSnoozeRequested: function(seconds) {
               service.snoozeSource(String(model.groupKey || ""),
                                    String(model.source || model.app || ""), seconds)

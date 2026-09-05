@@ -112,22 +112,19 @@ Item {
   property string actionsAlign: "right"      // right | left
 
   // Right-clicking a card asks about the source rather than about the message:
-  // stop this one talking for a while, or stop everything. Seconds, not a
-  // wall-clock time - "half an hour from now" is what is being asked for, and
-  // the clock is only how it gets measured.
-  function untilTomorrow() {
-    var wake = new Date()
-    wake.setDate(wake.getDate() + 1)
-    wake.setHours(8, 0, 0, 0)
-    return Math.max(600, Math.round((wake.getTime() - Date.now()) / 1000))
-  }
+  // stop this one talking for a while, or stop everything. The lengths on
+  // offer are the daemon's, which are the ones from settings - a desktop where
+  // half an hour is the useful unit and one where half a day is are both real.
+  property var snoozeOptions: []
 
-  readonly property var menuDeeds: [
-    { kind: "snooze", label: "Snooze for 30 minutes", value: 1800 },
-    { kind: "snooze", label: "Snooze for an hour", value: 3600 },
-    { kind: "snooze", label: "Snooze until tomorrow", value: untilTomorrow() },
-    { kind: "silence", label: "Silence everything", value: 0 }
-  ]
+  readonly property var menuDeeds: {
+    var out = []
+    for (var i = 0; i < snoozeOptions.length; i++)
+      out.push({ kind: "snooze", label: String(snoozeOptions[i].menuLabel),
+                 value: Number(snoozeOptions[i].seconds) })
+    out.push({ kind: "silence", label: "Silence everything", value: 0 })
+    return out
+  }
 
   // The pointer, in the deck's coordinates, handed down from the one region
   // that is allowed to see it. Cards convert it to their own space so the

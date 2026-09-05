@@ -18,7 +18,7 @@
   },
   "barWidget": {
     "displayName": "Notification state",
-    "description": "Appears only when notifications are being held back: crossed-out bell when silenced, zzz when a source is snoozed. Opens a panel to wake sources or silence the desktop.",
+    "description": "Appears only when notifications are being held back: crossed-out bell when silenced, zzz when a source is snoozed. Click silences, right-click opens a panel to wake sources or snooze them for longer.",
     "category": "Status",
     "aliases": [
       "notifications",
@@ -31,7 +31,14 @@
     "defaults": {
       "stacking": "source",
       "actionsAlign": "right",
-      "hideSettingsAction": true
+      "hideSettingsAction": true,
+      "snoozeDurations": [
+        "30",
+        "60",
+        "240",
+        "tomorrow"
+      ],
+      "wakeHour": 8
     },
     "schema": [
       {
@@ -62,6 +69,60 @@
         "label": "Hide the browser's Settings button",
         "defaultValue": true,
         "description": "Chrome puts a Settings action on every web notification. It is the same button on every card and it crowds out the ones that are worth pressing."
+      },
+      {
+        "key": "snoozeDurations",
+        "type": "multiselect",
+        "label": "Snooze lengths",
+        "description": "What the snooze menus offer, on a card and in the panel. A desktop where half an hour is the useful unit and one where half a day is are both real.",
+        "noSelectionText": "30 minutes, 1 hour, 4 hours, until tomorrow",
+        "placeholderText": "Search lengths...",
+        "options": [
+          {
+            "value": "15",
+            "label": "15 minutes"
+          },
+          {
+            "value": "30",
+            "label": "30 minutes"
+          },
+          {
+            "value": "60",
+            "label": "1 hour"
+          },
+          {
+            "value": "120",
+            "label": "2 hours"
+          },
+          {
+            "value": "240",
+            "label": "4 hours"
+          },
+          {
+            "value": "480",
+            "label": "8 hours"
+          },
+          {
+            "value": "tomorrow",
+            "label": "Until tomorrow morning"
+          }
+        ],
+        "defaultValue": [
+          "30",
+          "60",
+          "240",
+          "tomorrow"
+        ]
+      },
+      {
+        "key": "wakeHour",
+        "type": "integer",
+        "label": "Tomorrow morning starts at",
+        "description": "The hour \"until tomorrow\" wakes a source at, on a 24-hour clock.",
+        "min": 0,
+        "max": 23,
+        "step": 1,
+        "defaultValue": 8
       }
     ]
   }

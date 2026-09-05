@@ -47,12 +47,15 @@ outright; a site open as a tab in an ordinary browser doesn't, so the brand is
 matched against browser window titles instead — a Slack notification lands in
 the Chrome that's already showing Slack rather than in a new tab.
 
-**Quietens one source at a time.** Right-click a card for half an hour, an
-hour, or until tomorrow morning. It is the *source* that goes quiet, not the
-app that relayed it — so snoozing a Slack notification that arrived through
-Chrome silences `app.slack.com`, not every website you have open. Snoozed
-notifications are still recorded; they go to history without ever being on
-screen.
+**Quietens one source at a time.** Right-click a card and pick how long. It is
+the *source* that goes quiet, not the app that relayed it — so snoozing a Slack
+notification that arrived through Chrome silences `app.slack.com`, not every
+website you have open. Snoozed notifications are still recorded; they go to
+history without ever being on screen.
+
+The lengths on offer are yours: 30 minutes, an hour, 4 hours and until tomorrow
+morning by default, and whatever you like in `snoozeDurations` — half an hour is
+the useful unit on some desktops and half a day on others.
 
 ![The bar indicator and the panel behind it](assets/quiet.png)
 
@@ -90,6 +93,15 @@ resets `shell.json` to defaults.)
 | `stacking` | `source` | `source` gives each sender its own deck; `all` puts everything in one |
 | `actionsAlign` | `right` | which end of a card its buttons sit at |
 | `hideSettingsAction` | `true` | drop the browser's "Settings" button, which is on every web notification and is never the one you wanted |
+| `snoozeDurations` | `30, 60, 240, tomorrow` | what the snooze menus offer — minutes, or `tomorrow` |
+| `wakeHour` | `8` | the hour "until tomorrow" wakes a source at |
+
+Settings live on the bar widget's entry in `shell.json`, and it hands them to
+the daemon — so they are all set in the one place, next to `id`:
+
+```json
+{ "id": "njpatel.omapager", "snoozeDurations": ["60", "480"], "wakeHour": 9 }
+```
 
 ## The bar
 
@@ -99,10 +111,12 @@ snoozed, and nothing at all the rest of the time. Hovering the centre of the
 bar reveals it the way it reveals Omarchy's own inactive indicators — that's
 the way back into silence when nothing is showing.
 
-Left-click opens a panel listing what is snoozed, with the time each one comes
-back, a button to give it another half hour and one to wake it now. It also
-carries the silence switch. Right-click on the glyph silences without opening
-anything.
+Left-click silences and unsilences — the fastest thing anyone wants from a
+notification indicator is for it to stop, so that is the plain click.
+
+Right-click opens the panel: what is snoozed, when each one comes back, a
+button to wake it now and one that offers the snooze lengths again if it needs
+longer. The silence switch is there too, along with "Wake everything".
 
 ## Driving it from a script
 
