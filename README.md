@@ -1,4 +1,4 @@
-![Omapager](assets/title.png)
+<img src="assets/title.png" width="1266" alt="Omapager">
 
 <!--
  ▄█████▄    ▄███████████▄   ▄███████   ▄███████▄  ▄███████    ▄█████▄   ▄████████  ▄███████▄
@@ -16,7 +16,7 @@ built-in notification service with a stacking deck that groups by source,
 reads what a notification is actually offering you, and lets you act on it
 without leaving the card.
 
-![Notifications landing and stacking in the corner of the screen](assets/deck.gif)
+<img src="assets/deck.gif" width="440" alt="Notifications landing and stacking in the corner of the screen">
 
 ## What it does
 
@@ -30,7 +30,7 @@ path in the body becomes a labelled button: `Copy code`, `Open link`,
 carrying something before you hover, because the useful part of a message is
 usually past the ellipsis.
 
-![A card showing a Copy code button](assets/actions.png)
+<img src="assets/actions.png" width="369" alt="A card showing a Copy code button">
 
 A message carrying two codes gets a button each, labelled with the digits,
 because "Copy code" twice is a coin toss. Detection is deliberately
@@ -47,7 +47,7 @@ The answer goes back to the conversation, and the notification is dismissed on
 the phone too. Nothing new lands and nothing expires while you are typing, so
 the field cannot move out from under you mid-sentence.
 
-![Typing a reply into a notification](assets/reply.png)
+<img src="assets/reply.png" width="369" alt="Typing a reply into a notification">
 
 **Sends you back where it came from.** Clicking a card focuses the window that
 source is already showing in — a Slack notification lands in the Chrome you
@@ -79,7 +79,7 @@ that caught something and opens each one to show what it caught, newest first �
 capped at both ends, so a fortnight of silence doesn't turn a panel into a log
 file.
 
-![The bar indicator and the panel behind it](assets/quiet.png)
+<img src="assets/quiet.png" width="404" alt="The bar indicator and the panel behind it">
 
 **Resolves real icons.** Your own icon themes win; web notifications fall back
 to the site's own icon, in dark and light variants to suit the theme.
