@@ -267,8 +267,11 @@ BarWidget {
     return "Everything comes through"
   }
 
+  // The hero's own dim when there is nothing to colour - darker(1.4), which is
+  // what PanelHero uses, not the 1.55 the panel body uses for secondary text.
   readonly property color stateColour: globalSnoozed ? snoozedColour
-                                     : silenced ? silencedColour : dim
+                                     : silenced ? silencedColour
+                                     : Qt.darker(panelFg, 1.4)
 
   Timer {
     interval: 2800
@@ -507,7 +510,13 @@ BarWidget {
                 // the thing that makes it quiet. Not a switch: it is a
                 // qualifier on the button beside it, and two switches in one
                 // corner is a settings page.
+                //
+                // Only while there is quiet for it to qualify - and while a
+                // length is being chosen, which is the moment before there is.
+                // A key on a desktop where everything is coming through anyway
+                // is a control for nothing.
                 PanelActionButton {
+                  visible: pager.hasState || pager.globalChoosing
                   anchors.verticalCenter: parent.verticalCenter
                   iconText: pager.codesLetThrough ? pager.keyGlyph : pager.keyOff
                   tooltipText: pager.codesLetThrough

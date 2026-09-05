@@ -460,20 +460,6 @@ Item {
   Timer { interval: 20000; repeat: true; running: toasts.count > 0
           onTriggered: service.nowTick = Date.now() }
 
-  // A copy of what is on screen, for anything that wants to read it: handing
-  // the ListModel across would let the reader outlive rows it still holds.
-  readonly property int toastCount: toasts.count
-  function liveRows() {
-    var out = []
-    for (var i = 0; i < toasts.count; i++) {
-      var r = toasts.get(i)
-      var copy = {}
-      for (var k in r) copy[k] = r[k]
-      out.push(copy)
-    }
-    return out
-  }
-
   // ------------------------------------------------------------- the deck
   //
   // Expansion is pointer containment, not a click, and it survives a short
@@ -1163,17 +1149,24 @@ Item {
       var at = rowIndexFor(String(key))
       var several = at >= 0 && String(toasts.get(at).codes || "").indexOf(" ") > 0
       if (!several) {
-        codeTaken.key = String(key)
-        codeTaken.restart()
+        var waiting = codeTaken.keys.slice()
+        waiting.push(String(key))
+        codeTaken.keys = waiting
       }
     }
   }
 
   Timer {
     id: codeTaken
-    property string key: ""
+    property var keys: []
     interval: 900
-    onTriggered: service.closeToast(key, "activated")
+    repeat: true
+    running: keys.length > 0
+    onTriggered: {
+      var pending = keys
+      keys = []
+      for (var i = 0; i < pending.length; i++) service.closeToast(pending[i], "activated")
+    }
   }
 
   // ------------------------------------------------------------- store
