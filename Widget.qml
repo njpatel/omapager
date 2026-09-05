@@ -123,6 +123,11 @@ BarWidget {
   readonly property string keyGlyph: "\u{f0306}"
   readonly property string keyOff: "\u{f0308}"
 
+  // nf-md-timer-sand. An hourglass says "time left" where a clock says "a
+  // time", and it is not the clock button sitting at the other end of the same
+  // row, which would read as the same control twice.
+  readonly property string hourglass: "\u{f051f}"
+
   readonly property string bellOff: "\u{f009b}"
   readonly property string bellSleep: "\u{f00a0}"
   readonly property string bell: "\u{f009a}"
@@ -218,6 +223,11 @@ BarWidget {
     if (left < 8 * 3600) return "in " + Math.max(1, Math.round(left / 3600)) + "h"
     return "until " + clockTime(when) + dayOffset(when)
   }
+
+  // Without the leading word, for places that put a glyph in front of it
+  // instead: an hourglass and "28m" says what "back in 28m" says, in a third
+  // of the width.
+  function waitingFor(until) { return waking(until).replace(/^in /, "").replace(/^until /, "") }
 
   // The same, said as a time rather than as a wait - which is what the line
   // under the title wants when the wait is the whole story.
@@ -670,7 +680,7 @@ BarWidget {
 
                       Text {
                         visible: line.snoozedByName
-                        text: "back " + pager.waking(line.modelData.until)
+                        text: pager.hourglass + "  " + pager.waitingFor(line.modelData.until)
                         color: pager.snoozedColour
                         font.family: pager.fontFamily
                         font.pixelSize: Style.font.caption
