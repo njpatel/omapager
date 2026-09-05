@@ -55,7 +55,16 @@ history without ever being on screen.
 
 The lengths on offer are yours: 30 minutes, an hour, 4 hours and until tomorrow
 morning by default, and whatever you like in `snoozeDurations` — half an hour is
-the useful unit on some desktops and half a day on others.
+the useful unit on some desktops and half a day on others. The panel snoozes
+*everything* for the same lengths, which is usually the one you want: not for
+the next hour, rather than not until you remember you turned it off.
+
+**Shows you what quiet cost.** Silence is only tolerable if you can see what it
+kept from you. While anything is being held back — silenced, snoozed wholesale,
+or one source at a time — the panel lists the sources that caught something and
+opens each one to show what it caught, newest first. Both ends are capped
+(`sourceLimit`, `heldPerSource`) so a fortnight of silence doesn't turn a panel
+into a log file.
 
 ![The bar indicator and the panel behind it](assets/quiet.png)
 
@@ -95,6 +104,8 @@ resets `shell.json` to defaults.)
 | `hideSettingsAction` | `true` | drop the browser's "Settings" button, which is on every web notification and is never the one you wanted |
 | `snoozeDurations` | `30, 60, 240, tomorrow` | what the snooze menus offer — minutes, or `tomorrow` |
 | `wakeHour` | `8` | the hour "until tomorrow" wakes a source at |
+| `sourceLimit` | `8` | how many quietened sources the panel lists |
+| `heldPerSource` | `10` | how many held notifications it shows per source |
 
 Settings live on the bar widget's entry in `shell.json`, and it hands them to
 the daemon — so they are all set in the one place, next to `id`:
@@ -105,18 +116,49 @@ the daemon — so they are all set in the one place, next to `id`:
 
 ## The bar
 
-omapager takes a slot in the bar only while it is keeping something from you:
-a crossed-out bell when the desktop is silenced, a `zᶻᶻ` when a source is
-snoozed, and nothing at all the rest of the time. Hovering the centre of the
-bar reveals it the way it reveals Omarchy's own inactive indicators — that's
-the way back into silence when nothing is showing.
+omapager takes a slot in the bar only while it is keeping something from you,
+and nothing at all the rest of the time. Hovering the centre of the bar reveals
+it the way it reveals Omarchy's own inactive indicators — that's the way back
+into silence when nothing is showing.
+
+| | |
+| --- | --- |
+| crossed-out bell, in the theme's urgent colour | silenced |
+| bell with a `z` in it, in amber | snoozed — everything, or a source |
+| crossed-out bell, dimmed | nothing held back; only visible while the bar's indicators are revealed |
+
+The crossed-out bell is the glyph Omarchy's own DND indicator uses, so a
+silenced desktop looks the same whichever service is running. The colour is an
+addition: silence is a state you can forget you're in, and the cost of
+forgetting is a missed message. Amber rather than red for a snooze, because a
+snooze ends by itself.
 
 Left-click silences and unsilences — the fastest thing anyone wants from a
-notification indicator is for it to stop, so that is the plain click.
+notification indicator is for it to stop, and then for it to start again — so
+that is the plain click.
 
-Right-click opens the panel: what is snoozed, when each one comes back, a
-button to wake it now and one that offers the snooze lengths again if it needs
-longer. The silence switch is there too, along with "Wake everything".
+Right-click opens the panel: the switch (on means notifications are coming
+through), a button beside it that snoozes everything for a while, and the list
+of what is being kept from you — when each source comes back, how much it has
+caught, and the messages themselves when you open one.
+
+## Keybindings
+
+Omarchy ships five global bindings on the comma key, and every one of them
+talks to the IPC target `notifications`. Disabling the built-in service to run
+this one takes that target away with it, so all five go quietly dead: the keys
+still fire, the shell answers "target not found", and nothing says why.
+
+So omapager answers to that target as well, and they keep working unchanged —
+no rebinding, nothing to configure:
+
+| | |
+| --- | --- |
+| `SUPER` `,` | dismiss the newest notification |
+| `SUPER` `SHIFT` `,` | dismiss all of them |
+| `SUPER` `CTRL` `,` | toggle silencing |
+| `SUPER` `ALT` `,` | invoke the newest one, as clicking it would |
+| `SUPER` `SHIFT` `ALT` `,` | put the last few back on screen |
 
 ## Driving it from a script
 
@@ -136,7 +178,8 @@ omarchy-shell omapager stack source     switch stacking mode
 omarchy-shell omapager align right      switch which end the buttons sit at
 omarchy-shell omapager probe            what the daemon believes, as JSON
 
-omarchy-shell omapager.panel toggle     the snooze panel
+omarchy-shell omapager.panel toggle     the panel
+omarchy-shell omapager.panel expand x   open a source's held list, as clicking it would
 ```
 
 ## Seeing it work

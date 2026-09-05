@@ -63,7 +63,14 @@ Item {
   property bool hideSettingsAction: true
 
   property bool doNotDisturb: false
-  function setDoNotDisturb(value) { doNotDisturb = !!value }
+  property double silencedSince: 0
+  function setDoNotDisturb(value) {
+    var on = !!value
+    if (on === doNotDisturb) return
+    if (on) silencedSince = Date.now() / 1000
+    doNotDisturb = on
+    saveQuiet()
+  }
   readonly property int gap: Style.space(6)
 
   // ------------------------------------------------------------- bar room
@@ -159,6 +166,12 @@ Item {
   // what the bar indicator and the panel are bound through.
   property int snoozeRevision: 0
 
+  // Snoozing everything is the same mechanism under a key no source can have.
+  // It persists, prunes and restores with the rest, and the panel only has to
+  // know to leave it out of the source list.
+  readonly property string globalKey: "*"
+  readonly property double globalSnoozeUntil: { snoozeRevision; return snoozedUntil(globalKey) }
+
   function snoozedUntil(groupKey) {
     var entry = snoozes[String(groupKey || "")]
     var until = entry ? Number(entry.until || 0) : 0
@@ -170,6 +183,7 @@ Item {
     snoozeRevision
     var now = Date.now() / 1000, out = []
     for (var key in snoozes) {
+      if (key === globalKey) continue
       var entry = snoozes[key]
       if (!entry || Number(entry.until || 0) <= now) continue
       out.push({ key: key, label: String(entry.label || key), until: Number(entry.until) })
@@ -190,10 +204,15 @@ Item {
                        : Math.max(Date.now() / 1000, snoozedUntil(key))
     var next = {}
     for (var k in snoozes) next[k] = snoozes[k]
-    next[key] = { until: from + seconds, label: String(label || key) }
+    // `since` is when this quiet period began. Without it the panel would
+    // list everything the source has ever had held back, including what it
+    // held during a snooze you ended last week.
+    var since = (next[key] && snoozedUntil(key)) ? Number(next[key].since || 0)
+                                                 : Date.now() / 1000
+    next[key] = { until: from + seconds, label: String(label || key), since: since }
     snoozes = next
     snoozeRevision += 1
-    saveSnoozes()
+    saveQuiet()
     // Anything from that source already on screen goes now: leaving it there
     // is the opposite of what was just asked for.
     var keys = []
@@ -210,16 +229,107 @@ Item {
     for (var k in snoozes) if (k !== String(groupKey)) next[k] = snoozes[k]
     snoozes = next
     snoozeRevision += 1
-    saveSnoozes()
+    saveQuiet()
   }
 
   function unsnoozeAll() {
     snoozes = ({})
     snoozeRevision += 1
-    saveSnoozes()
+    saveQuiet()
   }
 
-  function saveSnoozes() { Store.write(storeProc, storeBin, "snooze-save", snoozes) }
+  // Silencing outlives a shell restart, the way the built-in service's does.
+  // It has to: nothing on screen says the desktop is quiet, so a silence that
+  // quietly lifts itself when the shell reloads is a silence you cannot rely
+  // on - and one that stays on when you thought it had gone is worse.
+  function saveQuiet() {
+    Store.write(storeProc, storeBin, "quiet-save",
+                { snoozes: snoozes, dnd: doNotDisturb, silencedSince: silencedSince })
+  }
+
+  // ------------------------------------------------------- what was held
+  //
+  // A notification that never reached the screen is the one you most want to
+  // be able to look at: "quiet" is only tolerable if you can see what it cost.
+  // Read on demand rather than kept up to date - the panel is the only thing
+  // that asks, and it asks when it opens.
+  property var heldRows: []
+  property int heldRevision: 0
+  property int heldLimit: 80          // read from the store; the panel shows far fewer
+
+  function refreshHeld() { if (!heldProc.running) heldProc.running = true }
+
+  Process {
+    id: heldProc
+    running: false
+    command: [service.storeBin, "held", String(service.heldLimit)]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        service.heldRows = Store.parseList(text)
+        service.heldRevision += 1
+      }
+    }
+  }
+
+  // When the quiet that is holding this source began. Everything older than
+  // that was held by some earlier decision and is not what you are asking
+  // about now.
+  function quietSince(groupKey) {
+    var entry = snoozes[String(groupKey || "")]
+    var mine = entry && snoozedUntil(groupKey) ? Number(entry.since || 0) : 0
+    var global = globalSnoozeUntil ? Number((snoozes[globalKey] || {}).since || 0) : 0
+    var silence = doNotDisturb ? silencedSince : 0
+    // The earliest of the reasons currently in force: if the desktop has been
+    // silent for an hour and this source was snoozed ten minutes ago, the hour
+    // is the honest window.
+    var starts = [mine, global, silence].filter(function(t) { return t > 0 })
+    return starts.length ? Math.min.apply(null, starts) : 0
+  }
+
+  function heldFor(groupKey, limit) {
+    heldRevision
+    var since = quietSince(groupKey)
+    var out = []
+    for (var i = 0; i < heldRows.length && out.length < limit; i++) {
+      var row = heldRows[i]
+      if (String(row.groupKey || "") !== String(groupKey)) continue
+      if (since && Number(row.ts || 0) < since) continue
+      out.push(row)
+    }
+    return out
+  }
+
+  // Every source being kept quiet right now, with what it has held. Sources
+  // that are snoozed by name come first and keep their own wake time; after
+  // them come the ones that are only quiet because everything is, and they
+  // are here because they actually held something.
+  function quietSources(limit) {
+    snoozeRevision; heldRevision
+    var rows = [], seen = {}
+    var snoozed = liveSnoozes()
+    var i, key
+    for (i = 0; i < snoozed.length && rows.length < limit; i++) {
+      seen[snoozed[i].key] = true
+      rows.push({ key: snoozed[i].key, label: snoozed[i].label, until: snoozed[i].until,
+                  held: heldFor(snoozed[i].key, heldPerSource) })
+    }
+    if (!doNotDisturb && !globalSnoozeUntil) return rows
+    for (i = 0; i < heldRows.length && rows.length < limit; i++) {
+      key = String(heldRows[i].groupKey || "")
+      if (!key || seen[key]) continue
+      var held = heldFor(key, heldPerSource)
+      if (!held.length) continue
+      seen[key] = true
+      rows.push({ key: key, label: String(heldRows[i].source || heldRows[i].app || key),
+                  until: 0, held: held })
+    }
+    return rows
+  }
+
+  // Caps, so a fortnight of silence does not turn the panel into a log file.
+  property int sourceLimit: 8
+  property int heldPerSource: 10
 
   // Wakes the bindings so a snooze that has run out stops being counted, and
   // drops it from the map so the file does not collect the past. Only runs
@@ -234,7 +344,7 @@ Item {
         if (Number(service.snoozes[k].until || 0) > now) next[k] = service.snoozes[k]
         else dropped = true
       }
-      if (dropped) { service.snoozes = next; service.saveSnoozes() }
+      if (dropped) { service.snoozes = next; service.saveQuiet() }
       service.snoozeRevision += 1
     }
   }
@@ -550,7 +660,8 @@ Item {
     // Silenced or snoozed still means recorded: "what did I miss" is the whole
     // point of a store. It goes straight to history without being on screen.
     // Critical is never muted - that is what critical means.
-    var muted = doNotDisturb ? "silenced" : (snoozedUntil(row.groupKey) ? "snoozed" : "")
+    var muted = doNotDisturb ? "silenced"
+              : (globalSnoozeUntil || snoozedUntil(row.groupKey)) ? "snoozed" : ""
     if (muted && notification.urgency !== NotificationUrgency.Critical) {
       Store.write(storeProc, storeBin, "put", row)
       Store.write(storeProc, storeBin, "close", null, [key, muted])
@@ -1044,15 +1155,19 @@ Item {
   }
 
   Process {
-    id: snoozeRestoreProc
+    id: quietRestoreProc
     running: false
-    command: [service.storeBin, "snoozes"]
+    command: [service.storeBin, "quiet"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
         try {
           var read = JSON.parse(String(text) || "{}")
-          if (read && typeof read === "object") service.snoozes = read
+          if (read && typeof read === "object") {
+            if (read.snoozes && typeof read.snoozes === "object") service.snoozes = read.snoozes
+            service.doNotDisturb = read.dnd === true
+            service.silencedSince = Number(read.silencedSince || 0)
+          }
         } catch (e) {}
         service.snoozeRevision += 1
       }
@@ -1061,7 +1176,7 @@ Item {
 
   Component.onCompleted: {
     restoreProc.running = true
-    snoozeRestoreProc.running = true
+    quietRestoreProc.running = true
   }
 
   // ------------------------------------------------------------- server
@@ -1227,6 +1342,103 @@ Item {
       return service.stacking
     }
   }
+
+  // ---------------------------------------------------- the stock keybindings
+  //
+  // Omarchy ships five global bindings on the comma key, and every one of them
+  // talks to the IPC target `notifications` - dismiss one, dismiss all, invoke
+  // the last, replay history, and the silencing toggle that
+  // omarchy-toggle-notification-silencing drives. Disabling the built-in
+  // service to run this one takes that target away with it, so all five go
+  // quietly dead: the keys still fire, the shell answers "target not found",
+  // and nothing tells you why.
+  //
+  // So omapager answers to it as well. The names and return values are the
+  // built-in service's, not ours, because the callers are Omarchy's.
+  IpcHandler {
+    target: "notifications"
+
+    function dndState(): string { return service.doNotDisturb ? "on" : "off" }
+    function isDnd(): string { return dndState() }
+
+    function toggleDnd(): string {
+      service.setDoNotDisturb(!service.doNotDisturb)
+      return dndState()
+    }
+
+    function setDnd(value: string): string {
+      var v = String(value || "").toLowerCase()
+      service.setDoNotDisturb(v === "true" || v === "1" || v === "on" || v === "yes")
+      return dndState()
+    }
+
+    function dismissAll(): string { service.clearAll("dismissed"); return "ok" }
+
+    function dismissOne(): string {
+      if (toasts.count === 0) return "none"
+      service.closeToast(String(toasts.get(0).key), "dismissed")
+      return "ok"
+    }
+
+    function invokeLast(): string {
+      if (toasts.count === 0) return "none"
+      service.activate(String(toasts.get(0).key))
+      return "ok"
+    }
+
+    function showHistory(): string { service.replayHistory(); return "ok" }
+
+    // Forgets what was recorded. What is on screen stays where it is.
+    function clear(): string {
+      Store.write(storeProc, storeBin, "forget-all", null)
+      service.heldRows = []
+      service.heldRevision += 1
+      return "ok"
+    }
+
+    // Used by Omarchy's first-run notifications to take their own card off
+    // the screen once its action has been clicked.
+    function dismiss(summary: string): string {
+      var needle = String(summary || "")
+      if (!needle) return "none"
+      var keys = []
+      for (var i = 0; i < toasts.count; i++)
+        if (String(toasts.get(i).summary || "").indexOf(needle) !== -1)
+          keys.push(String(toasts.get(i).key))
+      for (var k = 0; k < keys.length; k++) service.closeToast(keys[k], "dismissed")
+      return keys.length ? "ok" : "none"
+    }
+
+    function ping(): string { return "ok" }
+  }
+
+  // Put the last few back on screen, the way the built-in service's
+  // "Open notification history" binding does. They come back as restored
+  // rows - no live sender, a short grace rather than their original timeout -
+  // because the notification they came from is long gone.
+  property int replayCount: 6
+
+  Process {
+    id: replayProc
+    running: false
+    command: [service.storeBin, "history", String(service.replayCount)]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var rows = Store.parseList(text)          // newest first out of the store
+        for (var i = rows.length - 1; i >= 0; i--) {
+          var row = Store.restored(rows[i])
+          // A fresh key, or replaying something still on screen would land on
+          // the row that is already there and replace it.
+          if (!row) continue
+          if (service.rowIndexFor(row.key) >= 0) row.key = service.nextKey()
+          service.showRow(row)
+        }
+      }
+    }
+  }
+
+  function replayHistory() { if (!replayProc.running) replayProc.running = true }
 
   // ------------------------------------------------------------- surface
   //

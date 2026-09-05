@@ -38,7 +38,9 @@
         "240",
         "tomorrow"
       ],
-      "wakeHour": 8
+      "wakeHour": 8,
+      "sourceLimit": 8,
+      "heldPerSource": 10
     },
     "schema": [
       {
@@ -123,6 +125,26 @@
         "max": 23,
         "step": 1,
         "defaultValue": 8
+      },
+      {
+        "key": "sourceLimit",
+        "type": "integer",
+        "label": "Sources listed in the panel",
+        "description": "How many quietened sources the panel lists at once. A fortnight of silence should not turn it into a log file.",
+        "min": 2,
+        "max": 20,
+        "step": 1,
+        "defaultValue": 8
+      },
+      {
+        "key": "heldPerSource",
+        "type": "integer",
+        "label": "Held notifications shown per source",
+        "description": "How many of the notifications a source held back the panel will show when you open it.",
+        "min": 3,
+        "max": 25,
+        "step": 1,
+        "defaultValue": 10
       }
     ]
   }

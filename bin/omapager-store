@@ -8,8 +8,10 @@
 #   history [N]      print the newest N history entries, newest first
 #   image KEY SRC    copy a sender's image into images/, print where it landed
 #   sweep            delete images no live or history entry refers to
-#   snoozes          print the snoozed sources
-#   snooze-save      read the snoozed sources as JSON on stdin
+#   quiet            print the quiet state: snoozed sources, and silencing
+#   quiet-save       read the quiet state as JSON on stdin
+#   held [N]         print the newest N that were never shown, newest first
+#   forget-all       empty the history
 #
 # Everything lives in ~/.local/state/omarchy/omapager/. It is state, not cache:
 # what you were told should survive a `rm -rf ~/.cache`. History is a log to
@@ -26,7 +28,8 @@ ROOT = os.path.expanduser("~/.local/state/omarchy/omapager")
 LIVE = os.path.join(ROOT, "live")
 HISTORY = os.path.join(ROOT, "history")
 IMAGES = os.path.join(ROOT, "images")
-SNOOZES = os.path.join(ROOT, "snoozes.json")
+QUIET = os.path.join(ROOT, "quiet.json")
+SNOOZES = os.path.join(ROOT, "snoozes.json")     # what quiet.json used to be
 HISTORY_MAX = 300
 
 
@@ -132,15 +135,54 @@ def cmd_image(key, src):
     return 0
 
 
-def cmd_snooze_save():
-    """The whole snooze map at once. It is a handful of entries that change
-    only when someone asks for quiet, so there is nothing to gain from
-    tracking them one file at a time."""
+# What was kept from you, as opposed to what you saw and dealt with. The
+# distinction is the closing reason, which is recorded for every entry: only
+# these two mean "this never reached the screen".
+HELD_REASONS = ("snoozed", "silenced")
+
+
+def cmd_held(limit):
+    out = []
+    for name in sorted(os.listdir(HISTORY), reverse=True):
+        if not name.endswith(".json"):
+            continue
+        entry = read_json(os.path.join(HISTORY, name))
+        if entry is not None and entry.get("closed_reason") in HELD_REASONS:
+            out.append(entry)
+            if len(out) >= limit:
+                break
+    json.dump(out, sys.stdout, separators=(",", ":"))
+    return 0
+
+
+def cmd_forget_all():
+    for name in os.listdir(HISTORY):
+        try:
+            os.remove(os.path.join(HISTORY, name))
+        except OSError:
+            pass
+    return 0
+
+
+def cmd_quiet_save():
+    """Every decision to not be interrupted, in one file: which sources are
+    snoozed and until when, and whether the desktop is silenced. A handful of
+    entries that change only when someone asks for quiet, so there is nothing
+    to gain from tracking them separately."""
     value = json.load(sys.stdin)
     if not isinstance(value, dict):
         return 1
-    write_json(SNOOZES, value)
+    write_json(QUIET, value)
     return 0
+
+
+def read_quiet():
+    state = read_json(QUIET)
+    if state is not None:
+        return state
+    # Snoozes used to live in a file of their own, before silencing joined
+    # them. Read it once so an upgrade does not wake everything up.
+    return {"snoozes": read_json(SNOOZES) or {}}
 
 
 def cmd_sweep():
@@ -178,11 +220,15 @@ def main():
         json.dump(listing(HISTORY, limit, newest_first=True), sys.stdout,
                   separators=(",", ":"))
         return 0
-    if verb == "snoozes":
-        json.dump(read_json(SNOOZES) or {}, sys.stdout, separators=(",", ":"))
+    if verb == "held":
+        return cmd_held(int(args[1]) if len(args) > 1 else 60)
+    if verb == "forget-all":
+        return cmd_forget_all()
+    if verb == "quiet":
+        json.dump(read_quiet(), sys.stdout, separators=(",", ":"))
         return 0
-    if verb == "snooze-save":
-        return cmd_snooze_save()
+    if verb == "quiet-save":
+        return cmd_quiet_save()
     if verb == "image":
         return cmd_image(args[1], args[2] if len(args) > 2 else "")
     if verb == "sweep":
