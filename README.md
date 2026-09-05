@@ -219,7 +219,7 @@ omarchy-shell omapager act reply        invoke one of the sender's actions
 omarchy-shell omapager reply "text"     answer the front card ("" opens the field)
 omarchy-shell omapager swipe            throw the front card away
 omarchy-shell omapager snooze 60        quieten the front card's source, in minutes
-omarchy-shell omapager snoozeAll 60     quieten everything, in minutes
+omarchy-shell omapager snoozeAll 60     quieten everything for 60 minutes, or wake it
 omarchy-shell omapager codes off        stop letting verification codes through
 omarchy-shell omapager unsnooze ""      wake everything ("" for all, or a source key)
 omarchy-shell omapager snoozes          what is snoozed, and until when

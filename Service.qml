@@ -1306,7 +1306,15 @@ Item {
     // `snooze` because that one acts on the front card's source, and the two
     // are easy to confuse at a prompt - with the cost of confusing them being
     // a real source silently going quiet for an hour.
+    //
+    // Toggles, like the silence key it sits beside on the keyboard and like
+    // the panel button it stands in for: pressed again, it wakes everything.
+    // A key that only goes one way leaves you hunting for the way back.
     function snoozeAll(minutes: string): string {
+      if (service.globalSnoozeUntil) {
+        service.unsnooze(service.globalKey)
+        return "awake"
+      }
       var mins = Number(minutes) > 0 ? Number(minutes) : 60
       var until = service.snoozeSource(service.globalKey, "Everything", mins * 60, true)
       return until ? ("everything until " + new Date(until * 1000).toTimeString().slice(0, 5)) : "no"
