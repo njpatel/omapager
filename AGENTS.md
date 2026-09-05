@@ -46,7 +46,13 @@ will tell you there are two when there are none.
 
 Almost everything is drivable without a pointer, which is how it gets tested:
 `expand`, `offer`, `act`, `reply`, `snooze`, `snoozeAll`, `codes`,
-`omapager.panel expand`. Add a verb rather than reaching for a screenshot.
+`omapager.panel expand`, `omapager.panel line`. Add a verb rather than reaching
+for a screenshot.
+
+Reading the panel by eye is the expensive case: an open panel owns the
+keyboard, so a person at the machine types into it. `omapager.panel line`
+reports the line under the title and which phrase set it is drawing from, which
+is most of what you would have opened it to see.
 
 Screenshots are a last resort: the panel dismisses on **any** click, so a user
 at the keyboard will close it under you, and a wide crop catches their desktop.

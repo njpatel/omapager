@@ -236,9 +236,12 @@ BarWidget {
     return "Snoozed until " + clockTime(when) + dayOffset(when)
   }
 
-  // The other panels put a line under their title that cycles while the thing
-  // they are about is doing something. Ours is doing something precisely when
-  // it is holding notifications back, so that is when it talks.
+  // The other panels put a line under their title that cycles the whole time
+  // they are open, so this one does too. Two sets, because the honest thing to
+  // say depends on which way the switch is: held back, or coming through. They
+  // are deliberately parallel - every quiet line has its opposite in the other
+  // list, in the same grammar - so flipping the switch reads as the same voice
+  // changing its mind rather than as two different panels.
   readonly property var quietPhrases: [
     "Holding messages",
     "Hushing apps",
@@ -250,6 +253,25 @@ BarWidget {
     "Deferring drama",
     "Banking interruptions"
   ]
+
+  // Index 0 is the plain statement rather than a joke: it is the first thing
+  // you see when the panel opens, and "is anything getting through" is a real
+  // question the panel exists to answer. The wit starts on the second beat.
+  readonly property var openPhrases: [
+    "Everything comes through",
+    "Passing messages on",
+    "Waving apps through",
+    "Relaying pings",
+    "Ferrying alerts",
+    "Forwarding mentions",
+    "Breaking the quiet",
+    "Handing over notices",
+    "Delivering drama",
+    "Spending interruptions"
+  ]
+
+  // Whichever set the switch is pointing at.
+  readonly property var phrases: hasState ? quietPhrases : openPhrases
   property int phraseIndex: 0
 
   // The wake time used to sit in a pill beside the title. It is gone: when
@@ -258,11 +280,11 @@ BarWidget {
   // was say it a second time and squeeze the title down to "Notificati...".
   // A snooze has an end, and the end is the whole story, so it says so and does
   // not rotate. The phrases are for the states with nothing more useful to say.
-  readonly property bool rotatingPhrases: opened && hasState && !globalSnoozed
+  readonly property bool rotatingPhrases: opened && !globalSnoozed
 
   readonly property string stateLine: {
     if (globalSnoozed) return wakingAt(globalUntil)
-    if (rotatingPhrases) return quietPhrases[phraseIndex % quietPhrases.length]
+    if (rotatingPhrases) return phrases[phraseIndex % phrases.length]
     if (silenced) return "Silenced"
     if (snoozed.length === 1) return snoozed[0].label + ", back " + waking(snoozed[0].until)
     if (snoozed.length > 1) return snoozed.length + " sources snoozed"
@@ -288,12 +310,22 @@ BarWidget {
   // panel mid-swap and reopening it showed a title with nothing under it.
   onRotatingPhrasesChanged: if (!rotatingPhrases) phraseSwap.stop()
 
+  // The two lists are read in step, so a switch flipped at phrase 7 would jump
+  // straight to the seventh line of the other set. Start the new set at its
+  // own beginning instead: on the way out of quiet that means "Everything
+  // comes through", which is exactly what just happened.
+  onHasStateChanged: {
+    phraseSwap.stop()
+    phraseIndex = 0
+    if (hero) hero.metaOpacity = 1   // settles before the panel's tree exists
+  }
+
   SequentialAnimation {
     id: phraseSwap
     onStopped: hero.metaOpacity = 1
     PropertyAnimation { target: hero; property: "metaOpacity"
                         to: 0.0; duration: 180; easing.type: Easing.OutQuad }
-    ScriptAction { script: pager.phraseIndex = (pager.phraseIndex + 1) % pager.quietPhrases.length }
+    ScriptAction { script: pager.phraseIndex = (pager.phraseIndex + 1) % pager.phrases.length }
     PropertyAnimation { target: hero; property: "metaOpacity"
                         to: 1.0; duration: 260; easing.type: Easing.InQuad }
   }
@@ -303,6 +335,13 @@ BarWidget {
   IpcHandler {
     target: "omapager.panel"
     function open(): string { pager.open(); return "open" }
+    // The line under the title, and which set it is drawing from. Reading it
+    // by eye means opening the panel, and an open panel owns the keyboard.
+    function line(): string {
+      return JSON.stringify({ line: pager.stateLine, rotating: pager.rotatingPhrases,
+                              set: pager.hasState ? "quiet" : "open",
+                              index: pager.phraseIndex, count: pager.phrases.length })
+    }
     function close(): string { controller.hide(); return "closed" }
     function toggle(): string { pager.togglePanel(); return controller.open ? "open" : "closed" }
     // Open a source's held list without a pointer, the same way the deck's
