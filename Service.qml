@@ -1499,7 +1499,25 @@ Item {
       //
       // Input is unaffected: the mask follows the deck, and an empty deck is a
       // zero-area mask, which is click-through everywhere.
-      visible: toasts.count > 0
+      // Always mapped, even with nothing to draw. It used to appear with the
+      // first notification and vanish with the last, and a layer surface
+      // coming and going makes the compositor re-evaluate its layer set each
+      // time - which on a scrolling layout drags the viewport somewhere else
+      // the moment you dismiss the last card. The surface is the canvas; the
+      // deck is what gets painted on it.
+      //
+      // Input is unaffected: the mask follows the deck, and an empty deck is a
+      // zero-area mask, which is click-through everywhere.
+      // Always mapped, even with nothing to draw. It used to appear with the
+      // first notification and vanish with the last, and a layer surface
+      // coming and going makes the compositor re-evaluate its layer set each
+      // time - which on a scrolling layout drags the viewport somewhere else
+      // the moment you dismiss the last card. The surface is the canvas; the
+      // deck is what gets painted on it.
+      //
+      // Input is unaffected: the mask follows the deck, so an empty deck is a
+      // zero-area mask and the whole surface is click-through.
+      visible: true
       color: "transparent"
 
       // The name the Hyprland layer_rule matches on for blur.
