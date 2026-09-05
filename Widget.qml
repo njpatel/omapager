@@ -676,11 +676,31 @@ BarWidget {
                     // same colour is how you know they are the same thing.
                     Row {
                       width: parent.width
-                      spacing: 0
+                      spacing: Style.space(4)
+
+                      // The glyph in a box the height of the line, one size
+                      // down. A Nerd Font mark is drawn taller than the text it
+                      // sits in at the same nominal size, so matching the
+                      // numbers means asking for slightly less.
+                      Item {
+                        visible: line.snoozedByName
+                        width: sand.implicitWidth
+                        height: waitFor.implicitHeight
+
+                        Text {
+                          id: sand
+                          anchors.centerIn: parent
+                          text: pager.hourglass
+                          color: pager.snoozedColour
+                          font.family: pager.fontFamily
+                          font.pixelSize: Math.round(Style.font.caption * 0.85)
+                        }
+                      }
 
                       Text {
+                        id: waitFor
                         visible: line.snoozedByName
-                        text: pager.hourglass + "  " + pager.waitingFor(line.modelData.until)
+                        text: pager.waitingFor(line.modelData.until)
                         color: pager.snoozedColour
                         font.family: pager.fontFamily
                         font.pixelSize: Style.font.caption
@@ -690,7 +710,7 @@ BarWidget {
                         readonly property int count: line.modelData.held.length
                         visible: count > 0
                         width: Math.min(implicitWidth, Math.max(0, parent.width - x))
-                        text: (line.snoozedByName ? " · " : "")
+                        text: (line.snoozedByName ? "· " : "")
                               + (count === 1 ? "1 held" : count + " held")
                         color: pager.dim
                         font.family: pager.fontFamily
