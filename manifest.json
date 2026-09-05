@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "author": "Neil Patel",
   "license": "Apache-2.0",
-  "description": "Notifications for Omarchy: a stacking, grouping replacement for the built-in service, with markup parsing and resolved source icons.",
+  "description": "Notifications for Omarchy: a stacking, grouping replacement for the built-in service, with markup parsing, resolved source icons, inline reply, and per-source snooze.",
   "kinds": [
     "service",
     "bar-widget"
@@ -17,9 +17,9 @@
     "barWidget": "Widget.qml"
   },
   "barWidget": {
-    "displayName": "Omapager",
-    "description": "The notification bell: what is on screen now. Left-click dismisses it, right-click silences.",
-    "category": "System",
+    "displayName": "Notification state",
+    "description": "Appears only when notifications are being held back: crossed-out bell when silenced, zzz when a source is snoozed. Opens a panel to wake sources or silence the desktop.",
+    "category": "Status",
     "aliases": [
       "notifications",
       "notify",
@@ -27,10 +27,11 @@
       "pager"
     ],
     "allowMultiple": false,
-    "defaultSection": "right",
+    "defaultSection": "center",
     "defaults": {
       "stacking": "source",
-      "actionsAlign": "right"
+      "actionsAlign": "right",
+      "hideSettingsAction": true
     },
     "schema": [
       {
@@ -54,6 +55,13 @@
         ],
         "defaultValue": "right",
         "description": "Which end of a card its action buttons sit at."
+      },
+      {
+        "key": "hideSettingsAction",
+        "type": "boolean",
+        "label": "Hide the browser's Settings button",
+        "defaultValue": true,
+        "description": "Chrome puts a Settings action on every web notification. It is the same button on every card and it crowds out the ones that are worth pressing."
       }
     ]
   }

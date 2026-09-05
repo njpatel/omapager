@@ -33,7 +33,9 @@ app offered, appear as buttons on hover.
 
 **Replies to your phone.** KDE Connect keeps a reply channel for the
 notifications that have one. When it does, the card grows a text field and the
-answer goes back to the conversation on the device.
+answer goes back to the conversation on the device. Escape puts the buttons
+back; while you are typing, nothing new lands on the deck and nothing already
+on it expires, so the field cannot move out from under you mid-sentence.
 
 ![Typing a reply into a notification](assets/reply.png)
 
@@ -44,6 +46,15 @@ Omarchy's web apps carry their host in their Hyprland class, so those match
 outright; a site open as a tab in an ordinary browser doesn't, so the brand is
 matched against browser window titles instead — a Slack notification lands in
 the Chrome that's already showing Slack rather than in a new tab.
+
+**Quietens one source at a time.** Right-click a card for half an hour, an
+hour, or until tomorrow morning. It is the *source* that goes quiet, not the
+app that relayed it — so snoozing a Slack notification that arrived through
+Chrome silences `app.slack.com`, not every website you have open. Snoozed
+notifications are still recorded; they go to history without ever being on
+screen.
+
+![The bar indicator and the panel behind it](assets/quiet.png)
 
 **Resolves real icons.** Local icon themes first, so your own overrides win,
 then the site's own icon for web notifications, with dark and light variants.
@@ -58,13 +69,14 @@ git clone https://github.com/njpatel/omapager.git \
 ```
 
 Then in `~/.config/omarchy/shell.json`, turn off the built-in service, add the
-plugin, and put the bell somewhere in the bar:
+plugin, and put the indicator in the bar — beside the other status glyphs in
+the centre is where it belongs, since it behaves like one:
 
 ```json
 {
   "disabledPlugins": ["omarchy.notifications"],
   "plugins": [{ "id": "njpatel.omapager" }],
-  "bar": { "layout": { "right": ["njpatel.omapager", "omarchy.tray"] } }
+  "bar": { "layout": { "center": ["omarchy.indicators", "njpatel.omapager", "omarchy.clock"] } }
 }
 ```
 
@@ -77,12 +89,20 @@ resets `shell.json` to defaults.)
 | --- | --- | --- |
 | `stacking` | `source` | `source` gives each sender its own deck; `all` puts everything in one |
 | `actionsAlign` | `right` | which end of a card its buttons sit at |
+| `hideSettingsAction` | `true` | drop the browser's "Settings" button, which is on every web notification and is never the one you wanted |
 
-## The bell
+## The bar
 
-Left-click dismisses what's on screen, right-click is Do Not Disturb. It shows
-a hollow bell when nothing is waiting and a filled one with a count when
-something is.
+omapager takes a slot in the bar only while it is keeping something from you:
+a crossed-out bell when the desktop is silenced, a `zᶻᶻ` when a source is
+snoozed, and nothing at all the rest of the time. Hovering the centre of the
+bar reveals it the way it reveals Omarchy's own inactive indicators — that's
+the way back into silence when nothing is showing.
+
+Left-click opens a panel listing what is snoozed, with the time each one comes
+back, a button to give it another half hour and one to wake it now. It also
+carries the silence switch. Right-click on the glyph silences without opening
+anything.
 
 ## Driving it from a script
 
@@ -93,10 +113,16 @@ omarchy-shell omapager dnd              toggle Do Not Disturb
 omarchy-shell omapager expand           open the deck, as hovering would
 omarchy-shell omapager offer code       take the front card's offer (code|link|phone|path)
 omarchy-shell omapager act reply        invoke one of the sender's actions
-omarchy-shell omapager reply "text"     answer the front card; no text opens the field
+omarchy-shell omapager reply "text"     answer the front card ("" opens the field)
 omarchy-shell omapager swipe            throw the front card away
+omarchy-shell omapager snooze 60        quieten the front card's source, in minutes
+omarchy-shell omapager unsnooze ""      wake everything ("" for all, or a source key)
+omarchy-shell omapager snoozes          what is snoozed, and until when
 omarchy-shell omapager stack source     switch stacking mode
 omarchy-shell omapager align right      switch which end the buttons sit at
+omarchy-shell omapager probe            what the daemon believes, as JSON
+
+omarchy-shell omapager.panel toggle     the snooze panel
 ```
 
 ## Seeing it work
@@ -115,29 +141,16 @@ do before it sends anything, so you can check it against what happens.
 `--scene reply` writes a fixture the daemon treats as a repliable notification
 and logs the reply to a file rather than sending it to a person.
 
-## Why there is no notification centre
-
-There was one — a slide-in tray with everything you hadn't dealt with — and it
-was deleted on purpose.
-
-Android and macOS can have a notification centre because the *app* owns the
-notification: read the message in Slack and the entry disappears, because
-Slack tells the system it was handled. Freedesktop has `CloseNotification` for
-exactly this and almost nobody calls it. Chrome doesn't close a web
-notification when you read the tab, `notify-send` can't, and a script that
-fired one has already exited. So "outstanding" could only ever mean *omapager
-hasn't seen you click it*, which stops matching reality within minutes, and
-the list fills with things you dealt with hours ago. A list you have to prune
-by hand is worse than no list.
-
-What the daemon can know honestly is what is on screen right now. That's the
-deck. History is still kept — 300 entries, for `--replay` and for restoring
-notifications across a shell restart — but as a log, not an inbox.
-
 ## Requirements
 
-Omarchy (Quickshell 0.3.x, Hyprland). Optional: `wl-copy` for the copy
-buttons, KDE Connect for phone replies.
+Omarchy (Quickshell 0.3.x, Hyprland), and Python 3 for the helpers in `bin/`.
+
+Two things are optional, and each one only disables what it powers:
+
+| | for |
+| --- | --- |
+| `wl-clipboard` | the `Copy code` and `Copy number` buttons. Codes are copied with `wl-copy --sensitive`, so Omarchy's clipboard history skips them, and they are cleared again after 90 seconds if nothing else has been copied since. Without it those buttons do nothing. |
+| KDE Connect | replying to a phone notification from the card. Without it, cards from your phone still arrive; they just have no reply field. |
 
 ## Licence
 

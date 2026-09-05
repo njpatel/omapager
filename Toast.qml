@@ -45,8 +45,8 @@ Item {
   signal swipeEnded(bool away)
   signal activated()
   signal dismissed()
-  signal groupToggled()
-  signal contextRequested(real atX, real atY)
+  signal snoozeRequested(int seconds)
+  signal silenceRequested()
 
   readonly property bool critical: row.urgency === 2
   // A card behind the front one in a collapsed deck is a shape, not a message:
@@ -54,7 +54,6 @@ Item {
   // through the card in front of it.
   readonly property bool showsContent: expanded || place.front
   readonly property int stands: place.count || 1     // how many this card speaks for
-  readonly property bool isMember: !!place.member
 
   // Everything this card can do, in one row: what it found in its own text
   // first, then what the sender said it supports. Spelled out rather than
@@ -85,8 +84,6 @@ Item {
     return out
   }
 
-  // Three across is what fits without the labels shrinking; the rest folds
-  // into "More".
   // What the card is holding, as marks rather than buttons. Buttons cost
   // height, and a collapsed deck draws every card at the height of the
   // tallest - so one card with two buttons padded out every other card on
@@ -102,10 +99,35 @@ Item {
     return out
   }
 
-  readonly property var deeds: allDeeds.slice(0, spare.length > 0 ? 2 : 3)
-  readonly property var spare: allDeeds.length > 3 ? allDeeds.slice(2) : []
+  // Three buttons is what fits across a card without the labels shrinking.
+  // Past that the last slot becomes "More", which opens the lot as a list
+  // rather than a floating menu: this surface is clipped, and a popup that can
+  // be cut off is worse than one more row.
+  readonly property int fits: 3
+  readonly property bool overflows: allDeeds.length > fits
+  readonly property var deeds: allDeeds.slice(0, overflows ? fits - 1 : fits)
+  readonly property var spare: overflows ? allDeeds.slice(fits - 1) : []
   property bool deedsOpen: false
+  property bool menuOpen: false
   property string actionsAlign: "right"      // right | left
+
+  // Right-clicking a card asks about the source rather than about the message:
+  // stop this one talking for a while, or stop everything. Seconds, not a
+  // wall-clock time - "half an hour from now" is what is being asked for, and
+  // the clock is only how it gets measured.
+  function untilTomorrow() {
+    var wake = new Date()
+    wake.setDate(wake.getDate() + 1)
+    wake.setHours(8, 0, 0, 0)
+    return Math.max(600, Math.round((wake.getTime() - Date.now()) / 1000))
+  }
+
+  readonly property var menuDeeds: [
+    { kind: "snooze", label: "Snooze for 30 minutes", value: 1800 },
+    { kind: "snooze", label: "Snooze for an hour", value: 3600 },
+    { kind: "snooze", label: "Snooze until tomorrow", value: untilTomorrow() },
+    { kind: "silence", label: "Silence everything", value: 0 }
+  ]
 
   // The pointer, in the deck's coordinates, handed down from the one region
   // that is allowed to see it. Cards convert it to their own space so the
@@ -118,7 +140,9 @@ Item {
   function doDeed(deed) {
     var kind = String(deed.kind || "")
     if (kind === "more") { deedsOpen = !deedsOpen; return }
-    if (kind === "reply") { replyRequested(); return }
+    if (kind === "snooze") { menuOpen = false; snoozeRequested(Number(deed.value)); return }
+    if (kind === "silence") { menuOpen = false; silenceRequested(); return }
+    if (kind === "reply") { menuOpen = false; replyRequested(); return }
     if (kind === "action") { actionInvoked(String(deed.value)); return }
     offerTaken(kind, String(deed.value))
     takenKind = kind
@@ -167,13 +191,8 @@ Item {
   height: body.height
   implicitHeight: body.implicitHeight
 
-  // The card's height with nothing hovering over it. The deck draws every
-  // collapsed card at the height of the tallest one, so if the tallest is
-  // tall only because your pointer is on it, every other card on screen
-  // grows and shrinks as you move around - which is exactly what happened
-  // once buttons appeared on hover. The stack's shape is a resting property;
-  // the buttons are not part of it.
-  readonly property real restingHeight: body.implicitHeight - deedArea.height
+  onHoveredChanged: if (!hovered) menuOpen = false
+  onExpandedChanged: if (!expanded) menuOpen = false
 
   y: place.y
   z: place.z
@@ -326,9 +345,8 @@ Item {
   Item {
     id: body
     opacity: card.enterFade
-    // A member of an opened group sits inset, so the group reads as one thing.
-    x: card.isMember ? Style.space(10) : 0
-    width: parent.width - x
+    x: 0
+    width: parent.width
     // Twice the inset the row sits at, so the space above the content and the
     // space below it are the same number. A flat 18 against an inset of 12
     // left 12 above and 6 below, which is invisible on a one-line card and
@@ -341,14 +359,10 @@ Item {
 
     Row {
       id: layout
-      // Centred rather than pinned to the top: every card in a deck is drawn
-      // at the height of the tallest one, so a card with less in it than its
-      // neighbours would otherwise hang from the ceiling of its own box.
       // Anchored to the top, not centred. A card grows downwards when its
       // buttons or its reply field appear, and content hung off the centre
       // line slides up by half of whatever was added - so the words move while
-      // you are reading them. Every card is its own height now (see the deck),
-      // so there is no spare space for centring to distribute anyway.
+      // you are reading them.
       anchors { left: parent.left; right: parent.right; top: parent.top
                 leftMargin: Style.space(12); rightMargin: Style.space(12)
                 topMargin: Style.space(12) }
@@ -399,8 +413,8 @@ Item {
           }
         }
 
-        // A single-colour mark on nothing (see TrayCard) is painted in the
-        // theme's text colour rather than drawn as it came.
+        // A one-colour glyph is painted in the theme's text colour rather
+        // than drawn as it came, or a dark mark disappears into a dark card.
         Rectangle {
           anchors.fill: parent
           visible: thumb.mono && picture.status === Image.Ready
@@ -511,12 +525,6 @@ Item {
               font.pixelSize: Style.font.caption
             }
 
-            MouseArea {
-              anchors.fill: parent
-              anchors.margins: -Style.space(3)
-              cursorShape: Qt.PointingHandCursor
-              onClicked: card.groupToggled()
-            }
           }
 
           // The time slides aside to make room for the dismiss control, and
@@ -610,20 +618,12 @@ Item {
           id: bodyBox
           clip: true
           width: parent.width
-          // RichText honours neither `elide` nor `maximumLineCount`, so the
-          // rich version cannot report that it overflowed - it just draws
-          // every line. Its line count is the only usable signal, and when
-          // there are more than two the flattened text takes over, because
-          // plain text can elide and ends in a proper ellipsis.
-          // As tall as the text actually is, one line or two. It used to be a
-          // flat two lines on the theory that equal natural heights keep the
-          // deck's shape - but the deck already does that itself, by drawing
-          // every collapsed card at the height of the tallest. All the fixed
-          // two lines achieved was an empty second line under every one-line
-          // body, which is why those cards read as top-heavy however carefully
-          // the padding above and below was balanced.
+          // As tall as the text actually is, one line or two - not a fixed
+          // two, which left an empty second line under every one-line body and
+          // made those cards read as top-heavy however carefully the padding
+          // above and below was balanced.
           //
-          // Measured from the laid-out height, not from `lineCount`: in
+          // Measured from the laid-out height, never from `lineCount`: in
           // RichText mode lineCount counts paragraphs rather than wrapped
           // lines, so a single sentence that visibly takes two lines still
           // reports one - which sized the box to one line and clipped the rest.
@@ -683,33 +683,41 @@ Item {
         Item {
           id: deedArea
           width: parent.width
-          // Under the pointer only. Expanded too, because a collapsed deck is
-          // drawn at one fixed height and a row that appears inside it would
-          // either be clipped or stretch every other card to match. And while
-          // a reply is being typed regardless: the pointer wanders off to the
-          // keyboard, and a text field that vanishes when it does is useless.
-          readonly property bool showing: (card.hovered && card.expanded
-                                           && card.deeds.length > 0) || card.replying
-          // The reply field is part of this area's height, or it is clipped to
-          // nothing and pressing Reply looks like it did nothing at all.
-          height: showing ? (card.deedsOpen ? deedColumn.implicitHeight
-                                            : deedRow.implicitHeight)
-                            + replyBox.height + Style.space(7) : 0
+
+          // The space under the body does one job at a time. Answering used to
+          // leave the buttons stacked above the field, which read as a form
+          // rather than as a reply - and put "Reply" directly above the box it
+          // had just opened. Escape puts them back, because it puts the card
+          // back to not replying.
+          //
+          // The row is under the pointer only, and only in an open deck: a
+          // collapsed deck is a peek of an edge, and buttons appearing inside
+          // one would be clipped to nothing.
+          readonly property string mode: card.replying ? "reply"
+                                       : card.menuOpen ? "menu"
+                                       : card.deedsOpen ? "list"
+                                       : (card.hovered && card.expanded
+                                          && card.deeds.length > 0) ? "row" : ""
+
+          readonly property real contentHeight: mode === "reply" ? replyBox.height
+                                              : mode === "menu" ? menuColumn.implicitHeight
+                                              : mode === "list" ? deedColumn.implicitHeight
+                                              : mode === "row" ? deedRow.implicitHeight : 0
+          height: mode === "" ? 0 : contentHeight + Style.space(7)
           visible: height > 0
           clip: true
           Behavior on height { NumberAnimation { duration: 170; easing.type: Easing.OutCubic } }
 
           Row {
             id: deedRow
-            anchors.bottom: replyBox.visible ? replyBox.top : parent.bottom
-            anchors.bottomMargin: replyBox.visible ? Style.space(4) : 0
+            anchors.bottom: parent.bottom
             // Right by default: the buttons line up under the time and the
             // close control rather than under the icon, which keeps the left
             // edge of every card reading as one column of text.
             anchors.right: card.actionsAlign === "right" ? parent.right : undefined
             anchors.left: card.actionsAlign === "right" ? undefined : parent.left
             spacing: Style.space(6)
-            opacity: card.deedsOpen ? 0 : 1
+            opacity: deedArea.mode === "row" ? 1 : 0
             visible: opacity > 0.01
             Behavior on opacity { NumberAnimation { duration: 120 } }
 
@@ -783,12 +791,37 @@ Item {
             anchors.bottom: parent.bottom
             width: parent.width
             spacing: Style.space(4)
-            opacity: card.deedsOpen ? 1 : 0
+            opacity: deedArea.mode === "list" ? 1 : 0
             visible: opacity > 0.01
             Behavior on opacity { NumberAnimation { duration: 120 } }
 
             Repeater {
               model: card.deedsOpen ? card.allDeeds : []
+              DeedButton {
+                required property var modelData
+                deed: modelData
+                toast: card
+                wide: true
+              }
+            }
+          }
+
+          // Right-click: what to do about this sender, rather than about this
+          // message. Drawn in the card rather than as a popup for the same
+          // reason "More" is - the notification surface is clipped, and a menu
+          // that can be cut in half is worse than one that pushes the card
+          // down by four rows.
+          Column {
+            id: menuColumn
+            anchors.bottom: parent.bottom
+            width: parent.width
+            spacing: Style.space(4)
+            opacity: deedArea.mode === "menu" ? 1 : 0
+            visible: opacity > 0.01
+            Behavior on opacity { NumberAnimation { duration: 120 } }
+
+            Repeater {
+              model: card.menuOpen ? card.menuDeeds : []
               DeedButton {
                 required property var modelData
                 deed: modelData
@@ -869,8 +902,12 @@ Item {
 
       onClicked: function(mouse) {
         if (dragging) return                 // that was a swipe, not a click
-        if (mouse.button === Qt.RightButton) card.contextRequested(mouse.x, mouse.y)
-        else if (mouse.button === Qt.MiddleButton) card.dismissed()
+        if (mouse.button === Qt.RightButton) { card.menuOpen = !card.menuOpen; return }
+        // With the menu open, a click anywhere else on the card is a way out
+        // of it rather than a way into the app - the surface takes no keyboard
+        // focus while it is open, so Escape never reaches us.
+        if (card.menuOpen) { card.menuOpen = false; return }
+        if (mouse.button === Qt.MiddleButton) card.dismissed()
         else card.activated()
       }
     }

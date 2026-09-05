@@ -29,47 +29,36 @@ function groupKeyFor(row) {
 // hiding the rest: folding three notifications into one card left nothing to
 // stack and nothing to expand, which reads as broken.
 function groupRows(rows) {
-  var seen = {}
-  var counts = {}
-  var i
+  var counts = {}, seen = {}, items = [], i, key
   for (i = 0; i < rows.length; i++) {
-    var k = groupKeyFor(rows[i])
-    counts[k] = (counts[k] || 0) + 1
+    key = groupKeyFor(rows[i])
+    counts[key] = (counts[key] || 0) + 1
   }
-  var items = []
   for (i = 0; i < rows.length; i++) {
-    var key = groupKeyFor(rows[i])
-    var first = !seen[key]
+    key = groupKeyFor(rows[i])
+    // Only the newest of a group wears the count; the ones behind it would
+    // just be repeating themselves.
+    items.push({ key: rows[i].key, row: rows[i], count: seen[key] ? 1 : counts[key] })
     seen[key] = true
-    items.push({ key: rows[i].key, row: rows[i], groupOf: key,
-                 // Only the newest of a group wears the count; the ones
-                 // behind it would just be repeating themselves.
-                 count: first ? counts[key] : 1,
-                 members: [] })
   }
   return items
 }
 
 // Rows are newest-first. Returns:
 //   decks:      [{ key, rows: [row...] }] in display order, newest deck first
-//   placements: { rowKey: { y, scale, opacity, z, front, hidden } }
+//   placements: { rowKey: { y, height, scale, opacity, z, front, hidden, count } }
 //   height:     total height the deck area occupies
 function compute(rows, opts) {
   var stacking = opts.stacking || "all"
   var expanded = !!opts.expanded
   var gap = opts.gap || 6
   var deckGap = opts.deckGap || 12
-  var openGroup = opts.openGroup || ""
   var heightOf = opts.heightOf || function() { return 76 }
-  // Every card is its own height, collapsed or not.
-  //
-  // Collapsed cards used to share one height - the tallest card's - so the
-  // stack kept a fixed shape as things arrived. It cost more than it bought:
-  // a one-line card was padded out to match a two-line one, content had to be
-  // centred in the spare room, and the moment a card grew for its buttons the
-  // shared height grew and every card on screen moved. Only the front card of
-  // a collapsed deck is really visible anyway; the ones behind it are a peek
-  // of an edge, and an edge has no height worth matching.
+  // Every card is its own height, collapsed or not. Collapsed cards used to
+  // share the tallest card's height so the stack kept a fixed shape - it cost
+  // more than it bought: one-line cards were padded out to match two-line
+  // ones, and the moment a card grew for its buttons every card on screen
+  // moved. Only the front card of a collapsed deck is really visible anyway.
 
   // Which deck each row belongs to. One in "all" mode; one per source in
   // "source" mode, where the deck already separates them and grouping inside
@@ -84,8 +73,10 @@ function compute(rows, opts) {
   var decks = []
   for (var d = 0; d < order.length; d++) {
     var deck = byKey[order[d]]
+    // In "source" mode the deck already separates senders, so grouping inside
+    // it would be grouping twice.
     deck.items = stacking === "source"
-      ? deck.rows.map(function(r) { return { key: r.key, row: r, groupOf: "", count: 1, members: [] } })
+      ? deck.rows.map(function(r) { return { key: r.key, row: r, count: 1 } })
       : groupRows(deck.rows)
     decks.push(deck)
   }
@@ -106,26 +97,10 @@ function compute(rows, opts) {
       if (open) {
         placements[item.key] = {
           y: y, scale: 1, opacity: 1, z: 1000 - shown, front: r === 0,
-          hidden: false, height: heightOf(item.key), count: item.count,
-          groupOf: item.groupOf, member: false
+          hidden: false, height: heightOf(item.key), count: item.count
         }
         y += heightOf(item.key) + gap
         shown += 1
-
-        // Opening the deck opens its groups too. Hovering a stack of three
-        // and being shown one card with a "3" on it is the thing people
-        // report as "it does not expand" - because from where they are
-        // sitting, it did not.
-        for (var m = 0; m < item.members.length; m++) {
-          var mem = item.members[m]
-          placements[mem.key] = {
-            y: y, scale: 1, opacity: 1, z: 1000 - shown, front: false,
-            hidden: false, height: heightOf(mem.key), count: 1,
-            groupOf: item.groupOf, member: true
-          }
-          y += heightOf(mem.key) + gap
-          shown += 1
-        }
       } else {
         var drawn = r < VISIBLE
         placements[item.key] = {
@@ -136,16 +111,8 @@ function compute(rows, opts) {
           z: 1000 - r,
           front: r === 0,
           hidden: !drawn,
-          count: item.count,
-          groupOf: item.groupOf,
-          member: false
+          count: item.count
         }
-        // Members of a collapsed group are not on screen at all.
-        for (var mm = 0; mm < item.members.length; mm++)
-          placements[item.members[mm].key] = { y: deckTop, scale: 0.9, opacity: 0,
-                                               z: 0, front: false, hidden: true,
-                                               height: frontHeight, count: 1,
-                                               groupOf: item.groupOf, member: true }
       }
     }
 
@@ -155,13 +122,13 @@ function compute(rows, opts) {
     if (k < decks.length - 1) y += (stacking === "source" ? deckGap : gap)
   }
 
-  // Anything the model still holds but no deck placed (a row leaving, or a
-  // member of a group that just closed) gets a definite hidden placement
-  // rather than the fallback the delegate would otherwise invent.
+  // Anything the model still holds but no deck placed - a row on its way out -
+  // gets a definite hidden placement rather than the fallback the delegate
+  // would otherwise invent for itself.
   for (var q = 0; q < rows.length; q++) {
     if (!placements[rows[q].key])
-      placements[rows[q].key] = { y: 0, scale: 0.9, opacity: 0, z: 0, front: false,
-                                  hidden: true, height: 0, count: 1, groupOf: "", member: false }
+      placements[rows[q].key] = { y: 0, scale: 0.9, opacity: 0, z: 0,
+                                  front: false, hidden: true, height: 0, count: 1 }
   }
 
   return { decks: decks, placements: placements, height: Math.max(0, y) }

@@ -55,9 +55,37 @@ Item {
   // for plugins yet, so this is a property with an IPC verb, the same as
   // stacking above.
   property string actionsAlign: "right"  // right | left
+
+  // Chrome puts a "Settings" action on every web notification, which opens
+  // its site-permissions page. It is the same button on every card, it is
+  // never the thing you wanted, and it crowds out the ones that are - so it
+  // is dropped by default and can be put back.
+  property bool hideSettingsAction: true
+
   property bool doNotDisturb: false
-  readonly property int maxVisible: 3    // cards drawn in a collapsed deck
+  function setDoNotDisturb(value) { doNotDisturb = !!value }
   readonly property int gap: Style.space(6)
+
+  // ------------------------------------------------------------- bar room
+  //
+  // The deck hangs from the top right corner, so it has to keep clear of the
+  // bar on exactly two of the four edges it could be on - and of neither if
+  // it is hidden. This used to assume a bar across the top and nothing else:
+  // a bar down the right ran straight through the cards, a bar at the bottom
+  // pushed them a bar's height down from a top edge with nothing on it, and a
+  // hidden bar still had room left for it.
+  readonly property var barRef: shell && shell.bar ? shell.bar : null
+  readonly property string barPosition: barRef ? String(barRef.position || "top") : "top"
+  readonly property bool barVertical: barPosition === "left" || barPosition === "right"
+  readonly property int barThickness: {
+    if (!barRef || barRef.barHidden) return 0
+    var size = Number(barRef.barSize || 0)
+    if (size > 0) return size
+    return barVertical ? Style.bar.sizeVertical : Style.bar.sizeHorizontal
+  }
+  // Down from the top edge, and in from the right one.
+  readonly property int barClearance: (barPosition === "top" ? barThickness : 0) + Style.gapsOut
+  readonly property int edgeClearance: (barPosition === "right" ? barThickness : 0) + Style.space(14)
 
   readonly property int lowDuration: 5000
   readonly property int normalDuration: 8000
@@ -68,6 +96,99 @@ Item {
     var base = urgency === NotificationUrgency.Low ? lowDuration : normalDuration
     if (requested > 0) return Math.min(requested, maxDuration)
     return base
+  }
+
+  // ------------------------------------------------------------- snooze
+  //
+  // Silencing one source instead of the whole desktop. The key is the row's
+  // group key, so it is per site for anything arriving through a browser
+  // ("web:app.slack.com") and per app for everything else - which is what
+  // "snooze Slack" has to mean on a desktop where Slack is a tab in Chrome.
+  //
+  // A snoozed notification is still recorded: it goes to history the way a
+  // silenced one does, so "what did I miss" survives the decision to not be
+  // interrupted by it.
+  property var snoozes: ({})        // groupKey -> { until: epoch seconds, label }
+  // snoozes is a plain map, so nothing re-evaluates when it changes; this is
+  // what the bar indicator and the panel are bound through.
+  property int snoozeRevision: 0
+
+  function snoozedUntil(groupKey) {
+    var entry = snoozes[String(groupKey || "")]
+    var until = entry ? Number(entry.until || 0) : 0
+    return until > Date.now() / 1000 ? until : 0
+  }
+
+  // Soonest to wake first, which is the order the panel lists them in.
+  function liveSnoozes() {
+    snoozeRevision
+    var now = Date.now() / 1000, out = []
+    for (var key in snoozes) {
+      var entry = snoozes[key]
+      if (!entry || Number(entry.until || 0) <= now) continue
+      out.push({ key: key, label: String(entry.label || key), until: Number(entry.until) })
+    }
+    out.sort(function(a, b) { return a.until - b.until })
+    return out
+  }
+
+  readonly property int snoozeCount: { snoozeRevision; return liveSnoozes().length }
+
+  function snoozeSource(groupKey, label, seconds) {
+    var key = String(groupKey || "")
+    if (!key || !(seconds > 0)) return 0
+    // Extending adds to what is left rather than to now, so pressing "+30m"
+    // twice buys an hour.
+    var from = Math.max(Date.now() / 1000, snoozedUntil(key))
+    var next = {}
+    for (var k in snoozes) next[k] = snoozes[k]
+    next[key] = { until: from + seconds, label: String(label || key) }
+    snoozes = next
+    snoozeRevision += 1
+    saveSnoozes()
+    // Anything from that source already on screen goes now: leaving it there
+    // is the opposite of what was just asked for.
+    var keys = []
+    for (var i = 0; i < toasts.count; i++) {
+      var row = toasts.get(i)
+      if (String(row.groupKey || "") === key) keys.push(row.key)
+    }
+    for (var j = 0; j < keys.length; j++) closeToast(keys[j], "snoozed")
+    return next[key].until
+  }
+
+  function unsnooze(groupKey) {
+    var next = {}
+    for (var k in snoozes) if (k !== String(groupKey)) next[k] = snoozes[k]
+    snoozes = next
+    snoozeRevision += 1
+    saveSnoozes()
+  }
+
+  function unsnoozeAll() {
+    snoozes = ({})
+    snoozeRevision += 1
+    saveSnoozes()
+  }
+
+  function saveSnoozes() { Store.write(storeProc, storeBin, "snooze-save", snoozes) }
+
+  // Wakes the bindings so a snooze that has run out stops being counted, and
+  // drops it from the map so the file does not collect the past. Only runs
+  // while something is actually snoozed.
+  Timer {
+    interval: 20000
+    repeat: true
+    running: service.snoozeCount > 0
+    onTriggered: {
+      var now = Date.now() / 1000, next = {}, dropped = false
+      for (var k in service.snoozes) {
+        if (Number(service.snoozes[k].until || 0) > now) next[k] = service.snoozes[k]
+        else dropped = true
+      }
+      if (dropped) { service.snoozes = next; service.saveSnoozes() }
+      service.snoozeRevision += 1
+    }
   }
 
   // ------------------------------------------------------------- state
@@ -182,10 +303,8 @@ Item {
   // trip outside: crossing a gap between two cards should not slam the deck
   // shut in your face.
   property bool pointerIn: false
-  property int deckHits: 0
   property bool expanded: false
   property string openDeck: ""
-  property string openGroup: ""    // the group listing its members, if any
   property string hoverKey: ""     // the card under the pointer, when open
   property real hoverX: -1         // where it is, in the deck's coordinates
   property real hoverY: -1
@@ -246,8 +365,7 @@ Item {
     duration: 260; easing.type: Easing.OutCubic
     onFinished: { service.swipeKey = ""; service.swipeWholeDeck = false }
   }
-  property var heights: ({})          // key -> measured card height, as it is
-  property var restHeights: ({})      // key -> the same, with nothing hovering
+  property var heights: ({})          // key -> measured card height
   property int layoutRevision: 0
 
   Timer {
@@ -255,7 +373,7 @@ Item {
     interval: 120
     onTriggered: {
       if (service.dragging) return
-      service.expanded = false; service.openDeck = ""; service.openGroup = ""
+      service.expanded = false; service.openDeck = ""
       service.releaseHeld()
     }
   }
@@ -272,7 +390,9 @@ Item {
   // nothing ever "leaves", so arrivals queue up invisibly until the 30-second
   // safety valve fires. A notification held because of a pointer that is not
   // there is just a lost notification.
-  function holding() { return (pointerIn && expanded) || dragging }
+  // ...and while an answer is being typed. A card arriving above the one you
+  // are replying to moves the field out from under the cursor mid-sentence.
+  function holding() { return (pointerIn && expanded) || dragging || replyingKey !== "" }
 
   function releaseHeld() {
     if (!held.length) return
@@ -300,34 +420,15 @@ Item {
     collapseGrace.restart()
   }
 
-  // Two numbers per card, because two different things need them. `heights`
-  // is what the card is right now - what an opened deck lays out against, so a
-  // card that grew to show its buttons actually gets the room. `restHeights`
-  // is what it would be with nothing hovering over it, which is what the
-  // collapsed banner height is taken from: measure that from the current
-  // heights instead and hovering one card resizes every card on screen.
+  // Every card is measured and laid out at its own height, collapsed or not.
+  // There was a second map here holding each card's height "at rest" so that
+  // collapsed cards could share the tallest one - it went with the shared
+  // height itself, which padded one-line cards out to match two-line ones and
+  // made the whole deck resize whenever a card grew for its buttons.
   function noteHeight(key, h) {
     if (Math.abs((heights[key] || 0) - h) < 0.5) return
     heights[key] = h
     layoutRevision += 1
-  }
-
-  function noteResting(key, h) {
-    if (Math.abs((restHeights[key] || 0) - h) < 0.5) return
-    restHeights[key] = h
-    layoutRevision += 1
-  }
-
-  // The tallest card at rest. Collapsed cards all take this, so an arrival
-  // moves the stack by exactly one peek instead of resizing it.
-  readonly property real uniformHeight: {
-    layoutRevision
-    var tallest = Style.space(58)
-    for (var i = 0; i < toasts.count; i++) {
-      var h = restHeights[toasts.get(i).key] || 0
-      if (h > tallest) tallest = h
-    }
-    return tallest
   }
 
   readonly property var layout: {
@@ -338,9 +439,7 @@ Item {
       stacking: stacking,
       expanded: expanded,
       openDeck: stacking === "source" ? openDeck : undefined,
-      openGroup: openGroup,
       gap: gap,
-      uniform: uniformHeight,
       deckGap: Style.space(11),
       heightOf: function(key) { return service.heights[key] || Style.space(58) }
     })
@@ -400,11 +499,13 @@ Item {
       try { previous.tracked = false } catch (e) {}
     }
 
-    if (doNotDisturb && notification.urgency !== NotificationUrgency.Critical) {
-      // Silenced still means recorded: "what did I miss" is the whole point of
-      // anyone. It goes straight to history without ever being on screen.
+    // Silenced or snoozed still means recorded: "what did I miss" is the whole
+    // point of a store. It goes straight to history without being on screen.
+    // Critical is never muted - that is what critical means.
+    var muted = doNotDisturb ? "silenced" : (snoozedUntil(row.groupKey) ? "snoozed" : "")
+    if (muted && notification.urgency !== NotificationUrgency.Critical) {
       Store.write(storeProc, storeBin, "put", row)
-      Store.write(storeProc, storeBin, "close", null, [key, "silenced"])
+      Store.write(storeProc, storeBin, "close", null, [key, muted])
       release(key)
       return
     }
@@ -501,7 +602,6 @@ Item {
     release(key)
     toasts.remove(at)
     delete heights[key]
-    delete restHeights[key]
     Store.write(storeProc, storeBin, "close", null, [key, reason])
   }
 
@@ -532,7 +632,10 @@ Item {
       var a = ref.actions[i]
       var identifier = String(a.identifier || "")
       if (identifier === "default" || !identifier) continue
-      out.push({ id: identifier, text: String(a.text || identifier) })
+      var label = String(a.text || identifier)
+      if (hideSettingsAction && (/^settings$/i.test(label) || /^settings$/i.test(identifier)))
+        continue
+      out.push({ id: identifier, text: label })
     }
     return out
   }
@@ -550,15 +653,19 @@ Item {
     closeToast(key, "activated")
   }
 
-  // The default action, or failing that whatever the sender left us.
-  // Clicking a notification should put you back where it came from.
+  // ------------------------------------------------------- source routing
   //
-  // The sender's own default action is the best answer when there is one - a
-  // browser knows which tab it meant. Failing that, the window is usually
-  // already open and findable: an Omarchy web app carries its host in its
-  // Hyprland class ("chrome-web.whatsapp.com__-Default"), so a notification
-  // that identified itself as web.whatsapp.com can be matched to the window
-  // showing it. Only if there is no such window do we open anything new.
+  // Which open window is already showing the thing that notified you.
+  // Senders come in two shapes and need two different answers:
+  //
+  //   web.whatsapp.com   an Omarchy web app, which writes its host straight
+  //                      into its class: "chrome-web.whatsapp.com__-Default"
+  //   app.slack.com      a tab in an ordinary browser, whose class says only
+  //                      which browser it is ("chrome-work"). Nothing about
+  //                      Slack appears anywhere but the window title.
+  //
+  // So: the class first, because it is exact, and the title second, cautiously.
+
   // Whole words only: "slack" must not match "slackline", and a brand that
   // happens to be a substring of a longer word is not a sighting of it.
   function wordIn(text, word) {
@@ -572,75 +679,76 @@ Item {
     return false
   }
 
-  function openTitles() {
-    var list = Hyprland.toplevels ? Hyprland.toplevels.values : []
-    if (!list.length && Hyprland.clients) list = Hyprland.clients.values
-    var out = []
-    for (var i = 0; i < list.length; i++) {
-      var ipc = list[i].lastIpcObject
-      out.push(String((ipc && ipc.title) || ""))
-    }
-    return out
-  }
-
-  function openClasses() {
+  // Every window on the desktop, as { wmClass, title }. Hyprland.toplevels is
+  // the current name; clients is the older one, kept as a fallback so the
+  // plugin still routes on an older Quickshell.
+  function openWindows() {
     var list = Hyprland.toplevels ? Hyprland.toplevels.values : []
     if (!list.length && Hyprland.clients) list = Hyprland.clients.values
     var out = []
     for (var i = 0; i < list.length; i++) {
       var ipc = list[i].lastIpcObject
       var wmClass = String((ipc && ipc["class"]) || "")
-      if (wmClass) out.push(wmClass)
+      if (wmClass) out.push({ wmClass: wmClass,
+                              title: String((ipc && ipc.title) || ""),
+                              address: String((ipc && ipc.address) || "") })
     }
     return out
   }
 
-  // The distinctive part of a host: "app.slack.com" -> "slack",
-  // "web.whatsapp.com" -> "whatsapp", "linear.app" -> "linear". Subdomains
-  // people put in front of everything, and the suffix, carry no brand.
-  readonly property var genericLabels: ({ www: 1, app: 1, web: 1, my: 1, m: 1,
-                                          com: 1, org: 1, net: 1, io: 1, co: 1,
-                                          dev: 1, ai: 1, so: 1, site: 1 })
-
-  function brandOf(host) {
-    var labels = String(host || "").toLowerCase().split(".")
-    for (var i = 0; i < labels.length; i++) {
-      var label = labels[i]
-      if (label.length >= 4 && !genericLabels[label]) return label
-    }
-    return ""
-  }
-
   readonly property var browserClasses: /^(chrome|chromium|firefox|zen|brave|edge|vivaldi)/
+
+  // Every Chrome window title ends "- Google Chrome", every Firefox one
+  // "- Mozilla Firefox". Left on, a notification from any google.com host
+  // matches every Chrome window on the desktop, so the browser's own name
+  // comes off before anything is compared.
+  readonly property var browserSuffix:
+    /\s*[-\u2013\u2014|]\s*(google chrome|chromium|mozilla firefox|firefox|zen browser|brave|microsoft edge|vivaldi)\s*$/
+
+  // Labels that name nobody: the subdomains everyone uses, and public suffixes.
+  readonly property var genericLabels: ({ www: 1, app: 1, web: 1, my: 1, m: 1,
+                                          mail: 1, com: 1, org: 1, net: 1,
+                                          io: 1, co: 1, dev: 1, ai: 1, so: 1,
+                                          site: 1, uk: 1 })
+
+  // What to look for in a title, most telling first. "app.slack.com" gives
+  // ["slack"]; "news.ycombinator.com" gives ["news", "ycombinator"], because
+  // either half can be the one a page actually puts in its title. Tried in
+  // order, so the more specific label gets first refusal on every window.
+  function brandsOf(host) {
+    var labels = String(host || "").toLowerCase().split(".")
+    var out = []
+    for (var i = 0; i < labels.length; i++) {
+      if (labels[i].length >= 4 && !genericLabels[labels[i]]) { out.push(labels[i]); break }
+    }
+    var registered = labels.length >= 2 ? labels[labels.length - 2] : ""
+    if (registered.length >= 4 && !genericLabels[registered] && out.indexOf(registered) < 0)
+      out.push(registered)
+    return out
+  }
 
   function windowForSource(source) {
     var name = String(source || "").toLowerCase()
     if (!name) return null
-    var classes = openClasses()
-    var titles = openTitles()
-    var i
-
     // Compare in lower case, return the class as it actually is: Hyprland's
     // class filter is an exact match, so the lowercased form
     // ("...__-default") would never find the window ("...__-Default").
-    if (name.indexOf(".") > 0) {
-      // The host in the class - an Omarchy web app, which names itself
-      // "chrome-web.whatsapp.com__-Default".
-      for (i = 0; i < classes.length; i++)
-        if (classes[i].toLowerCase().indexOf(name) >= 0) return classes[i]
+    var windows = openWindows()
+    var i
 
-      // Failing that, the brand in a browser window's title. A site open as a
-      // tab in an ordinary browser window has nothing of itself in the class -
-      // Slack in a second Chrome instance is just "chrome-work" - so the only
-      // trace of where it is showing is what the window is called. Restricted
-      // to browsers, because "slack" appearing in some editor's title is a
-      // filename, not a place to go.
-      var brand = brandOf(name)
-      if (brand) {
-        for (i = 0; i < classes.length; i++) {
-          if (!browserClasses.test(classes[i].toLowerCase())) continue
-          var title = String(titles[i] || "").toLowerCase()
-          if (wordIn(title, brand)) return classes[i]
+    if (name.indexOf(".") > 0) {
+      for (i = 0; i < windows.length; i++)
+        if (windows[i].wmClass.toLowerCase().indexOf(name) >= 0) return windows[i]
+
+      // No class carries it, so the site is a tab in a browser that named
+      // itself after something else. Browsers only: "slack" in an editor's
+      // title is a filename, not a place to go.
+      var brands = brandsOf(name)
+      for (var b = 0; b < brands.length; b++) {
+        for (i = 0; i < windows.length; i++) {
+          if (!browserClasses.test(windows[i].wmClass.toLowerCase())) continue
+          var title = windows[i].title.toLowerCase().replace(browserSuffix, "")
+          if (wordIn(title, brands[b])) return windows[i]
         }
       }
       return null
@@ -654,26 +762,28 @@ Item {
     // otherwise match half the desktop.
     var slug = name.replace(/[^a-z0-9]+/g, "")
     if (slug.length < 4) return null
-    for (i = 0; i < classes.length; i++) {
-      var wmClass = classes[i]
-      var lower = wmClass.toLowerCase()
-      if (lower === slug) return wmClass                       // a native app
+    for (i = 0; i < windows.length; i++) {
+      var lower = windows[i].wmClass.toLowerCase()
+      if (lower === slug) return windows[i]                    // a native app
       if (lower.indexOf("chrome-") !== 0) continue
-      var host = lower.substring(7).split("__")[0]
-      var labels = host.split(".")
+      var labels = lower.substring(7).split("__")[0].split(".")
       for (var l = 0; l < labels.length; l++)
-        if (labels[l] === slug) return wmClass
+        if (labels[l] === slug) return windows[i]
     }
     return null
   }
 
-  function focusClass(wmClass) {
-    // The class filter is an exact match, not a pattern, which is why the
-    // class is looked up here rather than guessed at with a regex. And the
-    // dispatcher takes Lua on this machine: `hyprctl dispatch focuswindow ...`
-    // is parsed as an expression and fails.
-    Hyprland.dispatch('hl.dsp.focus({window = hl.get_windows({class = "'
-                      + wmClass.replace(/"/g, "") + '"})[1]})')
+  // By address, because a class is not an identity: this desktop runs two
+  // browser windows both called "chrome-work", and only one of them is showing
+  // Slack. The class is the fallback for a window Hyprland gave us no address
+  // for. Dispatch arguments are evaluated as Lua here, so this is an
+  // expression rather than the classic `dispatch focuswindow ...` string.
+  function focusWindow(win) {
+    if (!win) return
+    var target = win.address
+      ? 'hl.get_window("address:' + win.address.replace(/[^0-9a-fx]/gi, "") + '")'
+      : 'hl.get_windows({class = "' + win.wmClass.replace(/"/g, "") + '"})[1]'
+    Hyprland.dispatch("hl.dsp.focus({window = " + target + "})")
   }
 
   function activate(key) {
@@ -699,8 +809,8 @@ Item {
         // notifications, where the wrong order would have sent 20 clicks to
         // the wrong place - including a Slack card that would have opened
         // axiom.co.
-        var wmClass = windowForSource(row.source)
-        if (wmClass) focusClass(wmClass)
+        var win = windowForSource(row.source)
+        if (win) focusWindow(win)
         else if (String(row.source || "").indexOf(".") > 0)
           Qt.openUrlExternally("https://" + String(row.source) + "/")
         else if (String(row.link || "")) Qt.openUrlExternally(String(row.link))
@@ -885,7 +995,26 @@ Item {
     }
   }
 
-  Component.onCompleted: restoreProc.running = true
+  Process {
+    id: snoozeRestoreProc
+    running: false
+    command: [service.storeBin, "snoozes"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        try {
+          var read = JSON.parse(String(text) || "{}")
+          if (read && typeof read === "object") service.snoozes = read
+        } catch (e) {}
+        service.snoozeRevision += 1
+      }
+    }
+  }
+
+  Component.onCompleted: {
+    restoreProc.running = true
+    snoozeRestoreProc.running = true
+  }
 
   // ------------------------------------------------------------- server
   NotificationServer {
@@ -900,50 +1029,42 @@ Item {
     onNotification: function(notification) { service.handleNotification(notification) }
   }
 
-  // Temporary while bringing the surface up.
-  property int surfacesMade: 0
-  property string surfaceNote: ""
-
   IpcHandler {
     target: "omapager"
     function count(): string { return String(toasts.count) }
+    // What the daemon thinks is true, for a script to check against what it
+    // can see. Everything here answers a question that has actually been
+    // asked in anger: where would a click go, did the reply channel resolve,
+    // which of the sender's actions survived, how tall is each card.
     function probe(): string {
-      var hs = []
-      for (var i = 0; i < toasts.count; i++) {
-        var k = toasts.get(i).key
-        hs.push(k + "=" + (service.heights[k] || 0))
-      }
-      // What clicking the front card would do, without doing it.
+      var i, key
       var route = "nothing"
       if (toasts.count > 0) {
         var front = toasts.get(0)
-        var wmClass = service.windowForSource(front.source)
-        route = wmClass ? ("focus " + wmClass)
+        var win = service.windowForSource(front.source)
+        route = win ? ("focus " + win.wmClass + " [" + win.address + "]")
               : (String(front.source || "").indexOf(".") > 0
                  ? ("open https://" + front.source + "/")
                  : (String(front.link || "") ? ("open " + front.link)
                     : "sender's default action"))
       }
 
-      var replyTo = toasts.count > 0 ? String(toasts.get(0).replyPath || "") : ""
-
-      var acts = []
-      for (var j = 0; j < toasts.count; j++) {
-        var k = toasts.get(j).key
-        acts.push(String(toasts.get(j).summary).slice(0, 14) + "=" +
-                  JSON.stringify(service.actionsOf(k)))
+      var heights = [], actions = []
+      for (i = 0; i < toasts.count; i++) {
+        key = toasts.get(i).key
+        heights.push(key + "=" + (service.heights[key] || 0))
+        actions.push(String(toasts.get(i).summary).slice(0, 14) + "=" +
+                     JSON.stringify(service.actionsOf(key, service.refsRevision)))
       }
-      return JSON.stringify({ replyPath: replyTo, route: route, actions: acts,
-                              toasts: toasts.count, expanded: service.expanded,
-                              pointerIn: service.pointerIn, deckHits: service.deckHits,
-                              deckW: Style.space(340), pad20: Style.space(20),
-                              gapsOut: Style.gapsOut,
-                              barSize: (service.shell && service.shell.bar) ? service.shell.bar.barSize : -1,
-                              barDefault: Style.bar.sizeHorizontal,
-                              screenW: Quickshell.screens.length ? Quickshell.screens[0].width : -1,
-                              layoutH: service.layout.height,
-                              decks: service.layout.decks.length, heights: hs,
-                              note: service.surfaceNote })
+      return JSON.stringify({
+        toasts: toasts.count, route: route, actions: actions, heights: heights,
+        replyPath: toasts.count > 0 ? String(toasts.get(0).replyPath || "") : "",
+        replying: service.replyingKey !== "",
+        expanded: service.expanded, pointerIn: service.pointerIn,
+        doNotDisturb: service.doNotDisturb, snoozed: service.liveSnoozes(),
+        decks: service.layout.decks.length, layoutH: service.layout.height,
+        barClearance: service.barClearance
+      })
     }
     function clear(): string { service.clearAll("cleared"); return "ok" }
     function dnd(): string {
@@ -966,11 +1087,24 @@ Item {
       }
       return service.expanded ? "expanded" : "collapsed"
     }
-    function group(key: string): string {
-      service.openGroup = service.openGroup === key ? "" : key
-      service.layoutRevision += 1
-      return service.openGroup
+    // Snooze the front card's source, or any source by key. Minutes, because
+    // that is how anyone says it out loud.
+    function snooze(minutes: string): string {
+      if (toasts.count === 0) return "nothing"
+      var row = toasts.get(0)
+      var mins = Number(minutes) > 0 ? Number(minutes) : 60
+      var until = service.snoozeSource(String(row.groupKey || ""),
+                                       String(row.source || row.app || ""), mins * 60)
+      return until ? (String(row.source || row.app) + " until " + new Date(until * 1000).toTimeString().slice(0, 5)) : "no source"
     }
+
+    function unsnooze(key: string): string {
+      if (!String(key || "")) { service.unsnoozeAll(); return "all" }
+      service.unsnooze(String(key))
+      return String(key)
+    }
+
+    function snoozes(): string { return JSON.stringify(service.liveSnoozes()) }
     function open(deckKey: string): string {
       service.pointerEntered(deckKey)
       return service.openDeck
@@ -1082,18 +1216,12 @@ Item {
       // and never resized under an animation; the height stays full so the
       // deck can grow downwards without the window changing size either.
       anchors { top: true; bottom: true; right: true }
-      implicitWidth: Style.space(340) + Style.space(14) + Style.space(40)
+      implicitWidth: clipper.width + Style.space(10)
 
       // Only the deck takes input; the rest of the surface stays
       // click-through. Tracking the item keeps the region honest as the deck
       // grows and shrinks.
       mask: Region { item: deck }
-
-      readonly property int barClearance: {
-        var b = service.shell && service.shell.bar ? service.shell.bar : null
-        var size = b && !b.barHidden ? Math.max(0, b.barSize) : Style.bar.sizeHorizontal
-        return size + Style.gapsOut
-      }
 
       // The notification area proper: it begins at the bar's lower edge and is
       // clipped there, so a card arriving from above is revealed as it comes
@@ -1104,7 +1232,7 @@ Item {
         id: clipper
         anchors.right: parent.right
         anchors.top: parent.top
-        anchors.topMargin: surface.barClearance
+        anchors.topMargin: service.barClearance
         anchors.rightMargin: 0
         // Room for the shadow on both sides. The clip is here to hide a card
         // dropping in from behind the bar, which is a vertical concern only -
@@ -1114,7 +1242,9 @@ Item {
         // margin, right by however much room there is between the card and the
         // screen edge, which is all a shadow can have there anyway.
         readonly property int shadowRoom: Style.space(30)
-        readonly property int edgeGap: Style.space(14)
+        // In from the screen's right edge - plus the bar's width, if the bar
+        // is the thing occupying that edge.
+        readonly property int edgeGap: service.edgeClearance
         width: Style.space(340) + shadowRoom + edgeGap
         height: deck.y + deck.height + Style.space(30)
         clip: true
@@ -1178,7 +1308,6 @@ Item {
           onContainsMouseChanged: {
             service.pointerIn = containsMouse
             if (containsMouse) {
-              service.deckHits += 1
               service.pointerEntered(undefined)
               hoverAt(mouseX, mouseY)
             } else {
@@ -1239,23 +1368,21 @@ Item {
             now: service.nowTick
             expanded: service.expanded
                       && (service.stacking !== "source" || service.openDeck === Layout.deckKeyFor(model, service.stacking))
-            paused: service.expanded || service.dragging
+            // Nothing counts down while the deck is open, mid-throw, or with
+            // an answer half typed into it.
+            paused: service.expanded || service.dragging || service.replyingKey !== ""
 
             onImplicitHeightChanged: service.noteHeight(model.key, implicitHeight)
-            onRestingHeightChanged: service.noteResting(model.key, restingHeight)
-            Component.onCompleted: {
-              service.noteHeight(model.key, implicitHeight)
-              service.noteResting(model.key, restingHeight)
-            }
+            Component.onCompleted: service.noteHeight(model.key, implicitHeight)
 
             onExpired: service.closeToast(model.key, "expired")
             onActivated: service.activate(model.key)
             onDismissed: service.closeToast(model.key, "dismissed")
-            onGroupToggled: {
-              var key = Layout.groupKeyFor(model)
-              service.openGroup = service.openGroup === key ? "" : key
-              service.layoutRevision += 1
+            onSnoozeRequested: function(seconds) {
+              service.snoozeSource(String(model.groupKey || ""),
+                                   String(model.source || model.app || ""), seconds)
             }
+            onSilenceRequested: service.doNotDisturb = true
 
             Connections {
               target: service

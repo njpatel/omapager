@@ -78,14 +78,15 @@ function applyTo(model, index, row) {
 // shell, and re-arming the original timeout would make a notification from
 // before the restart expire instantly. It gets a short grace instead - long
 // enough to say "this arrived while the shell was down", short enough that a
-// restart does not leave yesterday's toasts sitting on the screen. Critical
+// restart does not leave yesterday's cards sitting on the screen. Critical
 // notifications still wait for you, because that is what critical means.
-// A ListModel fixes its roles from the first row it is given, and silently
-// drops keys that row did not have. A restored row written by an older build
-// therefore defines the model without `source`, and every notification after
-// it loses its chip. Every row goes through here so they all have every field.
 var RESTORE_GRACE = 20000     // 20s for a notification that outlived its sender
 
+// Every field a row can have, with a default for each. A ListModel fixes its
+// roles from the first row it is handed and silently drops keys that row did
+// not carry - so one row restored from an older build could define the model
+// without `source`, and every notification for the rest of the session lost
+// it. Everything goes through normalise() so they all have every field.
 var SHAPE = {
   key: "", originalId: 0, app: "", appIcon: "", summary: "", body: "",
   bodyRich: "", bodyLine: "", rawBody: "", source: "", groupKey: "", image: "",
