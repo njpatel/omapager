@@ -93,29 +93,36 @@ SCENES = {
     "interactive": [
         dict(web="app.slack.com", summary="#design",
              body="Gurbinder: latest build is up, take a look https://axiom.co/preview/1841"),
-        dict(web="app.slack.com", summary="Bank",
+        # A code from somebody who plausibly sends codes. This used to come
+        # from app.slack.com, which put Slack's logo on a card asking you to
+        # verify your identity - the one place a wrong logo actually matters.
+        dict(web="accounts.google.com", summary="Google",
              body="Your verification code is 482913. Do not share it with anyone."),
-        dict(app="KDE Connect", summary="Messages",
-             body="Seif: are you around later?",
+        dict(app="KDE Connect", summary="WhatsApp",
+             body="Seif Lotfy: are you around later?",
              # Deliberately not called "Reply": that word belongs to the real
              # inline reply, which only appears when the phone offers a reply
              # channel (see the reply scene, which sets one up). A demo button
              # that looks like it and merely closes the card reads as the
              # feature being broken.
-             #
-             # And only one action, not two: "Mute chat" was the second, which
-             # is a worse version of snoozing the source - offering it here
-             # invites the comparison and loses it.
              actions=["read=Mark as read"]),
+        # An SMS, which is where most codes actually arrive. "Messages" has no
+        # brand to resolve, so it wears its initial - which is the honest
+        # answer for a phone's built-in app.
         dict(app="KDE Connect", summary="Messages",
              body="G-728341 is your Google verification code"),
-        dict(app="KDE Connect", summary="Messages",
-             body="Call me back on +44 7911 123456 when you get this",
+        # A second phone app rather than a second WhatsApp: same-summary cards
+        # group into one stack, and the card behind would be hidden exactly
+        # where the demo wants both on screen.
+        dict(app="KDE Connect", summary="Discord",
+             body="Ravi: here is my new number, +44 7911 123456",
              actions=["read=Mark as read"]),
+        # The one that must NOT offer anything: a digit run of the right shape
+        # with no keyword near it.
         dict(app="kitty", icon="kitty", summary="Tests passed",
              body="412 passed, 0 failed in 2m 14s"),
         dict(web="github.com", summary="Review requested",
-             body="axiomhq/axiom-web #1841 - tighten the toast layout"),
+             body="axiomhq/axiom \u00b7 sub-second histograms (#4412)"),
     ],
     # Off the clock.
     "personal": [

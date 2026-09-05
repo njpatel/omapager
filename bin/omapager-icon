@@ -225,6 +225,18 @@ def from_desktop_entries(names):
 
 
 # ---------------------------------------------------------------- 3. the site
+# Names that are a description rather than a brand. Guessing a domain from one
+# of these lands on whoever happened to register the generic word: "Messages"
+# found messages.dev and came back wearing a stranger's logo, which is worse
+# than the letter M. A phone's built-in apps are all called things like this.
+GENERIC_NAMES = {
+    "messages", "message", "mail", "email", "phone", "dialer", "camera",
+    "clock", "alarm", "calendar", "settings", "files", "photos", "gallery",
+    "music", "notes", "weather", "contacts", "downloads", "screenshot",
+    "recorder", "voice", "browser", "news", "wallet", "health", "home",
+}
+
+
 def load_index():
     try:
         with open(INDEX) as f:
@@ -405,8 +417,13 @@ def resolve(args):
             cached = note.get(args.scheme)
             if cached and os.path.isfile(cached):
                 return cached, "cache"
-            if note.get("failed_at", 0) < time.time() - RETRY_AFTER:
-                for tld in (".app", ".com", ".io", ".dev"):
+            if bare in GENERIC_NAMES:
+                pass                      # a description, not a brand
+            elif note.get("failed_at", 0) < time.time() - RETRY_AFTER:
+                # .com first: these are guesses at a brand's home from its
+                # name alone, and .app/.dev are cheap enough that the generic
+                # word usually belongs to somebody else.
+                for tld in (".com", ".io", ".app", ".dev"):
                     hit = fetch_site(bare + tld, args.scheme)
                     if hit:
                         note[args.scheme] = hit
