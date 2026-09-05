@@ -54,11 +54,16 @@ function compute(rows, opts) {
   var gap = opts.gap || 6
   var deckGap = opts.deckGap || 12
   var heightOf = opts.heightOf || function() { return 76 }
-  // Every card is its own height, collapsed or not. Collapsed cards used to
-  // share the tallest card's height so the stack kept a fixed shape - it cost
-  // more than it bought: one-line cards were padded out to match two-line
-  // ones, and the moment a card grew for its buttons every card on screen
-  // moved. Only the front card of a collapsed deck is really visible anyway.
+  // A card is its own height when the deck is open, and the *front card's*
+  // height while it is shut.
+  //
+  // Shut, all you see of the ones behind is a strip of edge peeking out from
+  // under the one in front. Drawn at their own heights, a card taller than the
+  // front one hangs out below the stack - which reads as a notification stuck
+  // half way out, and is what "the bottom one sticks out more than it needs
+  // to" was. Uniform *within a deck*, and only while it is shut: this is not
+  // the old shared height, which took the tallest card anywhere on screen and
+  // padded every one-line card out to match it.
 
   // Which deck each row belongs to. One in "all" mode; one per source in
   // "source" mode, where the deck already separates them and grouping inside
@@ -104,7 +109,7 @@ function compute(rows, opts) {
       } else {
         var drawn = r < VISIBLE
         placements[item.key] = {
-          height: heightOf(item.key),
+          height: frontHeight,
           y: deckTop + r * PEEK,
           scale: Math.max(0.7, 1 - r * SHRINK),
           opacity: r === 0 ? 1 : (drawn ? (r === VISIBLE - 1 ? FADE : 0.85) : 0),
