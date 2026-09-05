@@ -16,7 +16,7 @@ built-in notification service with a stacking deck that groups by source,
 reads what a notification is actually offering you, and lets you act on it
 without leaving the card.
 
-![Notifications stacking in the corner of the screen](assets/deck.png)
+![Notifications landing and stacking in the corner of the screen](assets/deck.gif)
 
 ## What it does
 
