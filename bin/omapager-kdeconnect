@@ -154,8 +154,18 @@ def main():
         result = subprocess.run(["busctl", "--user", "call", BUS, path, IFACE,
                                  "sendReply", "s", text],
                                 capture_output=True, text=True, check=False)
-        sys.stdout.write("sent" if result.returncode == 0 else result.stderr.strip())
-        return result.returncode
+        if result.returncode != 0:
+            sys.stdout.write(result.stderr.strip())
+            return result.returncode
+        # Answered means dealt with, on the phone as well. Without this the
+        # notification is still live over there, KDE Connect forwards it again,
+        # and the card you just replied to reappears a moment later.
+        # Best effort: a reply that went through is a success even if the
+        # dismissal does not, and some senders do not offer one.
+        subprocess.run(["busctl", "--user", "call", BUS, path, IFACE, "dismiss"],
+                       capture_output=True, text=True, check=False)
+        sys.stdout.write("sent")
+        return 0
 
     return 2
 

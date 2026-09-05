@@ -37,8 +37,15 @@ file in this directory also triggers a reload, which briefly makes IPC answer
 
 **Never run `omarchy-refresh-shell`** — it resets `shell.json` to defaults.
 
+Restart with `omarchy-restart-shell`, and let it finish. Killing and relaunching
+by hand races: a second instance starting while the first is still coming up
+dies on the socket, and Quickshell writes a crash report and refuses to retry
+("crashed within 10 seconds of launching"). Count instances with `pgrep -xc
+quickshell` — `pgrep -f` matches the shell command you are running it from and
+will tell you there are two when there are none.
+
 Almost everything is drivable without a pointer, which is how it gets tested:
-`expand`, `offer`, `act`, `reply`, `swipe`, `snooze`, `snoozeAll`, `codes`,
+`expand`, `offer`, `act`, `reply`, `snooze`, `snoozeAll`, `codes`,
 `omapager.panel expand`. Add a verb rather than reaching for a screenshot.
 
 Screenshots are a last resort: the panel dismisses on **any** click, so a user

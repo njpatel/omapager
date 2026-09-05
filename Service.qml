@@ -480,62 +480,6 @@ Item {
   property real hoverX: -1         // where it is, in the deck's coordinates
   property real hoverY: -1
 
-  // ------------------------------------------------------------- swipe
-  //
-  // Pushing a card to the right throws it away. Collapsed, the deck travels
-  // together and goes together - the stack is one object until you open it.
-  property real swipeX: 0
-  property string swipeKey: ""
-  property bool swipeWholeDeck: false
-  // A drag in progress freezes the deck: nothing collapses, nothing expires,
-  // nothing new lands. Dragging a card to the right takes the pointer out of
-  // the hover region, which used to collapse the deck mid-gesture and re-lay
-  // out every card underneath the one being dragged - the fight you could
-  // feel.
-  property bool dragging: false
-
-  function swipeMoved(key, dx) {
-    if (!dragging) { dragging = true; swipeWholeDeck = !expanded }
-    swipeKey = key
-    swipeX = dx
-  }
-
-  function swipeEnded(key, away) {
-    dragging = false
-    if (!away) {
-      settleBack.start()          // not far enough: it comes back
-      return
-    }
-    var keys = []
-    if (swipeWholeDeck) {
-      for (var i = 0; i < toasts.count; i++) keys.push(toasts.get(i).key)
-    } else {
-      keys.push(key)
-    }
-    swipeX = 0
-    swipeKey = ""
-    swipeWholeDeck = false
-    for (var k = 0; k < keys.length; k++) closeToast(keys[k], "dismissed")
-  }
-
-  // Carries the test throw past the threshold a moment later, so the movement
-  // is visible rather than instantaneous.
-  Timer {
-    id: swipeDemo
-    property string key: ""
-    interval: 180
-    onTriggered: {
-      service.swipeMoved(key, service.swipeX + Style.space(200))
-      service.swipeEnded(key, true)
-    }
-  }
-
-  NumberAnimation {
-    id: settleBack
-    target: service; property: "swipeX"; to: 0
-    duration: 260; easing.type: Easing.OutCubic
-    onFinished: { service.swipeKey = ""; service.swipeWholeDeck = false }
-  }
   property var heights: ({})          // key -> measured card height
   property int layoutRevision: 0
 
@@ -543,7 +487,6 @@ Item {
     id: collapseGrace
     interval: 120
     onTriggered: {
-      if (service.dragging) return
       service.expanded = false; service.openDeck = ""
       service.releaseHeld()
     }
@@ -551,8 +494,7 @@ Item {
 
   // Notifications that arrived while the deck was held. A card appearing
   // under the pointer moves everything below it by one place, which is
-  // maddening when you are part-way through reading - or dragging - the card
-  // it lands on.
+  // maddening when you are part-way through reading the card it lands on.
   property var held: []
 
   // Held only while the pointer is genuinely on the deck, or mid-drag. Keying
@@ -563,7 +505,7 @@ Item {
   // there is just a lost notification.
   // ...and while an answer is being typed. A card arriving above the one you
   // are replying to moves the field out from under the cursor mid-sentence.
-  function holding() { return (pointerIn && expanded) || dragging || replyingKey !== "" }
+  function holding() { return (pointerIn && expanded) || replyingKey !== "" }
 
   function releaseHeld() {
     if (!held.length) return
@@ -586,10 +528,7 @@ Item {
     expanded = true
     if (deckKey !== undefined) openDeck = deckKey
   }
-  function pointerLeft() {
-    if (dragging) return          // the pointer leaves during every throw
-    collapseGrace.restart()
-  }
+  function pointerLeft() { collapseGrace.restart() }
 
   // Every card is measured and laid out at its own height, collapsed or not.
   // There was a second map here holding each card's height "at rest" so that
@@ -1413,19 +1352,6 @@ Item {
       return "sent"
     }
 
-    // Throw the front card off to the right, as a drag would. Splits the
-    // gesture in two for testing: this is everything after the pointer, so if
-    // the card leaves when this runs but not when you drag, the fault is in
-    // recognising the drag rather than in acting on it.
-    function swipe(): string {
-      if (toasts.count === 0) return "nothing"
-      var key = String(toasts.get(0).key)
-      service.swipeMoved(key, Style.space(40))
-      swipeDemo.key = key
-      swipeDemo.restart()
-      return "thrown"
-    }
-
     function stack(mode: string): string {
       if (mode === "all" || mode === "source") service.stacking = mode
       return service.stacking
@@ -1696,9 +1622,6 @@ Item {
             place: service.layout.placements[model.key]
                    || ({ y: 0, scale: 1, opacity: 0, z: 1, front: false, hidden: true })
             hovered: service.hoverKey === model.key
-            // A collapsed deck moves as one; an open one moves card by card.
-            swipe: (service.swipeWholeDeck || service.swipeKey === model.key)
-                   ? service.swipeX : 0
             actions: service.actionsOf(model.key, service.refsRevision)
             actionsAlign: service.actionsAlign
             replying: service.replyingKey === model.key
@@ -1713,14 +1636,12 @@ Item {
             hoverY: service.hoverY
             onActionInvoked: function(identifier) { service.invokeAction(model.key, identifier) }
             onOfferTaken: function(kind, value) { service.takeOffer(kind, value, model.key) }
-            onSwipeMoved: function(dx) { service.swipeMoved(model.key, dx) }
-            onSwipeEnded: function(away) { service.swipeEnded(model.key, away) }
             now: service.nowTick
             expanded: service.expanded
                       && (service.stacking !== "source" || service.openDeck === Layout.deckKeyFor(model, service.stacking))
             // Nothing counts down while the deck is open, mid-throw, or with
             // an answer half typed into it.
-            paused: service.expanded || service.dragging || service.replyingKey !== ""
+            paused: service.expanded || service.replyingKey !== ""
 
             onImplicitHeightChanged: service.noteHeight(model.key, implicitHeight)
             Component.onCompleted: service.noteHeight(model.key, implicitHeight)

@@ -38,9 +38,10 @@ app offered, appear as buttons on hover.
 
 **Replies to your phone.** KDE Connect keeps a reply channel for the
 notifications that have one. When it does, the card grows a text field and the
-answer goes back to the conversation on the device. Escape puts the buttons
-back; while you are typing, nothing new lands on the deck and nothing already
-on it expires, so the field cannot move out from under you mid-sentence.
+answer goes back to the conversation on the device — and the notification is
+dismissed on the phone too, because you have dealt with it. Escape puts the
+buttons back; while you are typing, nothing new lands on the deck and nothing
+already on it expires, so the field cannot move out from under you mid-sentence.
 
 ![Typing a reply into a notification](assets/reply.png)
 
@@ -223,7 +224,6 @@ omarchy-shell omapager expand           open the deck, as hovering would
 omarchy-shell omapager offer code       take the front card's offer (code|link|phone|path)
 omarchy-shell omapager act reply        invoke one of the sender's actions
 omarchy-shell omapager reply "text"     answer the front card ("" opens the field)
-omarchy-shell omapager swipe            throw the front card away
 omarchy-shell omapager snooze 60        quieten the front card's source, in minutes
 omarchy-shell omapager snoozeAll 60     quieten everything for 60 minutes, or wake it
 omarchy-shell omapager codes off        stop letting verification codes through

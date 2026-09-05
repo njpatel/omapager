@@ -41,8 +41,6 @@ Item {
   property real cardWidth: Style.space(340)
 
   signal expired()
-  signal swipeMoved(real dx)
-  signal swipeEnded(bool away)
   signal activated()
   signal dismissed()
   signal snoozeRequested(int seconds)
@@ -238,8 +236,7 @@ Item {
   property real slide: 0          // horizontal, used only for dismissal
   property real drop: 0           // vertical, used only for arrival
   property real enterFade: 1      // multiplied into both halves of the card
-  property real swipe: 0          // how far it has been dragged toward the edge
-  transform: Translate { x: card.slide + card.swipe; y: card.drop }
+  transform: Translate { x: card.slide; y: card.drop }
 
   Component.onCompleted: enterAnim.start()
 
@@ -874,17 +871,14 @@ Item {
                          * (card.remaining / Math.max(1, card.row.duration)))
     }
 
-    // Push it off to the right to be rid of it - the one gesture worth
-    // stealing wholesale from macOS. Collapsed, the whole deck goes with the
-    // card you are pushing; expanded, only the one under your hand does.
+    // Clicks on the card. Underneath the card's own content: this covers the
+    // whole card and is declared after it, so it sat on top and swallowed
+    // every click before a button could see one - the buttons highlighted on
+    // hover and then did nothing when pressed. Items above that do not accept
+    // a click still let it fall through to here, so click-to-open keeps
+    // working everywhere except on an actual button.
     MouseArea {
       anchors.fill: parent
-      // Underneath the card's own content. This covers the whole card and is
-      // declared after it, so it sat on top and swallowed every click before a
-      // button could see one - the buttons highlighted on hover and then did
-      // nothing when pressed. Items above that do not accept a click still let
-      // it fall through to here, so the swipe and the click-to-open keep
-      // working everywhere except on an actual button.
       z: -1
       // Deliberately NOT hoverEnabled: hover goes to the topmost item that
       // wants it, so a card that took hover would starve the deck's own
@@ -893,40 +887,7 @@ Item {
       acceptedButtons: Qt.LeftButton | Qt.MiddleButton | Qt.RightButton
       cursorShape: Qt.PointingHandCursor
 
-      property real from: 0
-      property bool dragging: false
-      readonly property real threshold: card.width * 0.3
-
-      // Measured in the scene, not in the card.
-      //
-      // `mouse.x` is a coordinate inside this card - and the card slides right
-      // as you drag it, carrying its own coordinate system along. So the
-      // pointer stays at roughly the same local x however far you pull, dx
-      // stops growing after the first few pixels, and the card creeps and then
-      // stops. Scene coordinates do not move with the thing being dragged.
-      function sceneX(mouse) { return mapToItem(null, mouse.x, mouse.y).x }
-
-      onPressed: function(mouse) {
-        from = sceneX(mouse)
-        dragging = false
-      }
-      onPositionChanged: function(mouse) {
-        if (!pressed || mouse.buttons !== Qt.LeftButton) return
-        var dx = sceneX(mouse) - from
-        // Only rightwards, and only after enough travel to be a decision
-        // rather than a wobble on the way to a click.
-        if (!dragging && dx > Style.space(7)) dragging = true
-        if (dragging) card.swipeMoved(Math.max(0, dx))
-      }
-      onReleased: function(mouse) {
-        if (!dragging) return
-        dragging = false
-        card.swipeEnded(card.swipe > threshold)
-      }
-      onCanceled: { dragging = false; card.swipeEnded(false) }
-
       onClicked: function(mouse) {
-        if (dragging) return                 // that was a swipe, not a click
         if (mouse.button === Qt.RightButton) { card.menuOpen = !card.menuOpen; return }
         // With the menu open, a click anywhere else on the card is a way out
         // of it rather than a way into the app - the surface takes no keyboard
