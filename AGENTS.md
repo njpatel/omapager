@@ -145,6 +145,28 @@ every close. Icons are pruned at 60 days by `tidy`, which the daemon runs at
 startup. Nothing is written to the journal: no `console.log` anywhere, and the
 Python helpers speak on stdout, which is the IPC channel.
 
+## The parts an attacker writes
+
+An app name, a summary, a body, an action label and a source are all written by
+whoever sent the notification, and anything derived from them is too. Two places
+turn that text into something with consequences, and both are guarded:
+
+- **`bin/omapager-icon` fetches.** `reachable()` allows `http(s)` only and
+  refuses any host that resolves to a non-global address, and `GuardedRedirect`
+  re-tests every hop, because the next URL is chosen by the page (its
+  `<link rel=icon>`) or by a redirect. Without it a site you allowed
+  notifications from could read `file:///etc/passwd` or aim a GET at
+  `127.0.0.1`. `host_names()` gates the first hop the same way: a source is a
+  plain dotted hostname or it is nothing, so no ports, userinfo or paths.
+- **`Markup.js` renders.** Everything is escaped, then a fixed tag list is put
+  back — no `img`, so a body cannot pull a remote image. An anchor survives only
+  if `linkable()` vouches for its scheme; `Toast.onLinkActivated` asks again
+  before `Qt.openUrlExternally`. The label is the sender's too, so a `file://`
+  href is free to read like an ordinary web link.
+
+Adding anything that fetches, opens, or writes a path from notification text
+means extending one of these, not working around it.
+
 ## Conventions
 
 Comments say **why**, and especially why not the obvious thing — most of them

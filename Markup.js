@@ -66,10 +66,27 @@ function unescapeAllowed(text) {
   }
   out = out.replace(/&lt;br\s*\/?&gt;/gi, "<br/>")
   // Anchors keep their href, and nothing else: no target, no style, no event
-  // handlers smuggled through an attribute we did not ask about.
+  // handlers smuggled through an attribute we did not ask about. And only if
+  // the scheme is one worth handing to the desktop - see linkable().
   out = out.replace(/&lt;a\s+href=(?:&quot;|")([^"&]+)(?:&quot;|")[^&]*&gt;([\s\S]*?)&lt;\/a&gt;/gi,
-                    '<a href="$1">$2</a>')
+                    function (whole, href, label) {
+                      return linkable(href) ? '<a href="' + href + '">' + label + '</a>'
+                                            : label
+                    })
   return out
+}
+
+// An href is written by whoever sent the notification, and a click on it goes
+// straight to the desktop's URL handler - which will open a local file for
+// file://, hand an smb:// path to a file manager, or start whichever app
+// claimed some custom scheme, with whatever parameters came with it. The label
+// is the sender's too, so it is free to read like a link to somewhere ordinary.
+// Three schemes are worth that trust. Anything else keeps its text and loses
+// its click: still readable, no longer a button to somewhere else.
+var LINKABLE = /^(?:https?|mailto):/i
+
+function linkable(url) {
+  return LINKABLE.test(String(url || ""))
 }
 
 function hostOf(url) {

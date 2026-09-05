@@ -11,9 +11,11 @@
 # the one step that has to be asked for.
 import argparse
 import glob
+import ipaddress
 import json
 import os
 import re
+import socket
 import sys
 import time
 import urllib.parse
@@ -253,9 +255,87 @@ def save_index(data):
     os.replace(tmp, INDEX)
 
 
+# Everything below this line is fetched because a notification said so, and a
+# notification is written by whoever sent it. The body of a page we fetch picks
+# the next URL (its <link rel=icon>), and a redirect picks one too, so "we only
+# ever ask the notifying site" has to be enforced at every hop rather than
+# assumed from the first one.
+#
+# Two rules. http(s) only: urllib will happily open file:// and ftp://, and a
+# page that offers <link rel="icon" href="file:///etc/passwd"> should not turn
+# an icon lookup into a local file read. And public addresses only: otherwise a
+# site you allowed notifications from can aim this at 127.0.0.1 or
+# 169.254.169.254 and use the shell as a way to reach things that are only
+# listening because they believed they were unreachable.
+ALLOWED_SCHEMES = ("http", "https")
+
+# A plain dotted hostname and nothing else - no port, no userinfo, no path, no
+# IP literal. Each of those turns "https://" + host + "/" into a URL pointing
+# somewhere other than where it reads as pointing.
+HOSTNAME = re.compile(
+    r"^(?=.{1,253}$)"
+    r"(?!\d+$)"
+    r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+    r"(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$")
+
+
+def public_hostname(host):
+    """A hostname worth asking, or None."""
+    h = str(host or "").strip().lower().rstrip(".")
+    if not HOSTNAME.match(h):
+        return None
+    if h.split(".")[-1].isdigit():      # a dotted-quad wearing a hostname's shape
+        return None
+    return h
+
+
+def reachable(url):
+    """The URL, if it is one we are allowed to fetch. Otherwise None.
+
+    The address check resolves the name and refuses loopback, private,
+    link-local and reserved space. A name can resolve differently between this
+    check and urllib's own connect, which is a rebinding window we accept: the
+    prize is a GET to a local port, and closing it properly means holding the
+    socket ourselves."""
+    try:
+        parts = urllib.parse.urlsplit(url)
+    except ValueError:
+        return None
+    if parts.scheme not in ALLOWED_SCHEMES:
+        return None
+    if not public_hostname(parts.hostname):
+        return None
+    try:
+        infos = socket.getaddrinfo(parts.hostname, parts.port or 0,
+                                   proto=socket.IPPROTO_TCP)
+    except (OSError, ValueError):
+        return None
+    for info in infos:
+        try:
+            if not ipaddress.ip_address(info[4][0]).is_global:
+                return None
+        except ValueError:
+            return None
+    return url
+
+
+class GuardedRedirect(urllib.request.HTTPRedirectHandler):
+    """A redirect is a URL chosen by the server, so it gets the same test.
+    Returning None stops the chain instead of following it."""
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if not reachable(newurl):
+            return None
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+OPENER = urllib.request.build_opener(GuardedRedirect)
+
+
 def get(url):
+    if not reachable(url):
+        raise ValueError("refusing to fetch " + str(url)[:80])
     req = urllib.request.Request(url, headers={"User-Agent": AGENT})
-    with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+    with OPENER.open(req, timeout=TIMEOUT) as r:
         return r.read(600000), r.geturl()
 
 
@@ -347,8 +427,8 @@ def fetch_site(host, scheme):
 def host_names(source):
     """app.slack.com -> slack, app.slack.com. The middle label is almost always
     the name of the thing."""
-    s = str(source or "").strip().lower()
-    if "." not in s or " " in s:
+    s = public_hostname(source)
+    if not s:
         return []
     labels = [l for l in s.split(".") if l not in ("www", "app", "web", "my", "m")]
     names = [s]

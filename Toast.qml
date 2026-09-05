@@ -638,7 +638,13 @@ Item {
             font.family: Style.font.family
             font.pixelSize: Style.font.bodySmall
             wrapMode: Text.Wrap
-            onLinkActivated: function(url) { Qt.openUrlExternally(url) }
+            // Second gate on the same rule. Markup drops an anchor it will
+            // not vouch for, so nothing unsafe should arrive here - but this
+            // is one regex away from being wrong, and the cost of the check
+            // is a function call.
+            onLinkActivated: function(url) {
+              if (Markup.linkable(url)) Qt.openUrlExternally(url)
+            }
           }
 
           Text {
