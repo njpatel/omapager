@@ -20,7 +20,10 @@ Button {
   property var toast: null
   property bool wide: false
 
-  readonly property bool taken: toast && toast.takenKind === String(deed.kind)
+  // Matched on the value as well as the kind: a card carrying two codes has
+  // two Copy buttons, and pressing one used to tick both.
+  readonly property bool taken: toast && toast.takenKind
+                                === String(deed.kind) + ":" + String(deed.value)
 
   // Under the pointer? Worked out from where the deck says the pointer is,
   // because this button never receives hover itself - the deck's hover region

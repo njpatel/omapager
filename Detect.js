@@ -178,6 +178,10 @@ function scan(summary, body) {
   var phone = phones(text)
   return {
     code: code.length ? code[0] : "",
+    // All of them, space separated. A message carrying two - "your code is
+    // 482913, your backup code is 771204" - used to offer the first and drop
+    // the second on the floor, which is the wrong one about half the time.
+    codes: code.join(" "),
     link: link.length ? link[0] : "",
     meeting: link.length ? isMeeting(link[0]) : false,
     path: path.length ? path[0] : "",

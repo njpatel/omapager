@@ -21,6 +21,11 @@ usually past the ellipsis.
 
 ![A card showing a Copy code button](assets/actions.png)
 
+A message carrying two codes — "your code is 482913, your backup code is
+771204" — gets a button each, labelled with the digits, because "Copy code"
+twice is a coin toss. Copying one of those leaves the card alone; the other one
+is still in there.
+
 Detection is deliberately conservative — a rule that fires wrongly is worse
 than one that doesn't fire. A code needs a keyword (*code*, *OTP*,
 *verification*, *passcode*, *2FA*) **near** a plausible shape, so

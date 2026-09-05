@@ -1157,9 +1157,15 @@ Item {
     // in it. Long enough after the press for the button's tick to be seen,
     // because a card that vanishes the instant you click it leaves you unsure
     // whether it copied or you missed.
+    // ...unless it was carrying more than one, in which case the other one is
+    // still in there and taking the card away would be taking that with it.
     if (kind === "code" && String(key || "")) {
-      codeTaken.key = String(key)
-      codeTaken.restart()
+      var at = rowIndexFor(String(key))
+      var several = at >= 0 && String(toasts.get(at).codes || "").indexOf(" ") > 0
+      if (!several) {
+        codeTaken.key = String(key)
+        codeTaken.restart()
+      }
     }
   }
 

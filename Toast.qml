@@ -61,10 +61,21 @@ Item {
   // a puzzle, and on a desktop where almost nothing carries actions, nobody
   // thinks to hover looking for them. What is written on the button is what
   // happens when you press it.
+  // Every code the body carried, not just the first. One is the normal case
+  // and says "Copy code"; two or more have to say which, because "Copy code"
+  // twice is a coin toss.
+  readonly property var foundCodes: {
+    var all = String(row.codes || row.code || "").split(" ")
+    var out = []
+    for (var i = 0; i < all.length; i++) if (all[i]) out.push(all[i])
+    return out
+  }
+
   readonly property var allDeeds: {
     var out = []
-    if (String(row.code || ""))
-      out.push({ kind: "code", label: "Copy code", value: String(row.code) })
+    for (var c = 0; c < foundCodes.length; c++)
+      out.push({ kind: "code", value: foundCodes[c],
+                 label: foundCodes.length > 1 ? ("Copy " + foundCodes[c]) : "Copy code" })
     if (String(row.link || ""))
       out.push({ kind: row.meeting ? "meeting" : "link",
                  label: row.meeting ? "Join" : "Open link", value: String(row.link) })
@@ -142,7 +153,7 @@ Item {
     if (kind === "reply") { menuOpen = false; replyRequested(); return }
     if (kind === "action") { actionInvoked(String(deed.value)); return }
     offerTaken(kind, String(deed.value))
-    takenKind = kind
+    takenKind = kind + ":" + String(deed.value)
     tick.restart()
   }
 
@@ -163,7 +174,7 @@ Item {
   // Which one was just pressed, so its label can say so for a moment. Copying
   // to a clipboard is completely silent otherwise: you click, nothing moves,
   // and you click again to be sure.
-  property string takenKind: ""
+  property string takenKind: ""      // "kind:value" of the last press
   Timer { id: tick; interval: 1400; onTriggered: card.takenKind = "" }
 
   // The card's own clock. One ticker drives both the countdown and the expiry,
