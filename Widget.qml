@@ -43,6 +43,7 @@ BarWidget {
   readonly property bool globalSnoozed: globalUntil > 0
 
   // Quiet by decision, as opposed to quiet because nothing happened.
+  readonly property bool codesLetThrough: service ? service.codesBypassQuiet : true
   readonly property bool quiet: silenced || globalSnoozed
   readonly property bool hasState: quiet || snoozed.length > 0
 
@@ -70,7 +71,11 @@ BarWidget {
     var align = String(setting("actionsAlign", "right"))
     if (align === "left" || align === "right") service.actionsAlign = align
     service.hideSettingsAction = setting("hideSettingsAction", true) !== false
-    service.codesBypassQuiet = setting("codesBypassQuiet", true) !== false
+    // Only when it has actually been configured. An explicit setting is an
+    // instruction; the default is not one - and the panel's own key toggle is
+    // persisted, so applying the default on every reload would quietly undo it.
+    var codes = setting("codesBypassQuiet", null)
+    if (codes !== null) service.setCodesBypassQuiet(codes !== false)
     service.wakeHour = Number(setting("wakeHour", 8)) || 8
     service.sourceLimit = Number(setting("sourceLimit", 8)) || 8
     service.heldPerSource = Number(setting("heldPerSource", 10)) || 10
@@ -111,6 +116,11 @@ BarWidget {
   // desktop looks the same whichever service is running; nf-md-bell-sleep, a
   // bell with a Z in it, for a snooze - which is a bell that will ring later
   // rather than one that has been switched off.
+  // The same key the cards wear when they are carrying a code, so the control
+  // that decides whether codes get through is wearing the thing it is about.
+  readonly property string keyGlyph: "\u{f0306}"
+  readonly property string keyOff: "\u{f0308}"
+
   readonly property string bellOff: "\u{f009b}"
   readonly property string bellSleep: "\u{f00a0}"
   readonly property string bell: "\u{f009a}"
@@ -188,9 +198,9 @@ BarWidget {
     var today = new Date(); today.setHours(0, 0, 0, 0)
     var then = new Date(when.getTime()); then.setHours(0, 0, 0, 0)
     var days = Math.round((then.getTime() - today.getTime()) / 86400000)
-    if (days <= 0) return ""
-    var superscripts = ["", "\u00b9", "\u00b2", "\u00b3"]
-    return "\u207a" + (days < superscripts.length ? superscripts[days] : days)
+    // Written out rather than set in superscript: at caption size the
+    // superscript form was there but not legible, which is the worst of both.
+    return days <= 0 ? "" : " +" + days
   }
 
   // "in 24m", "in 3h", and then the time itself once the remaining minutes
@@ -493,6 +503,23 @@ BarWidget {
               Row {
                 spacing: Style.space(6)
 
+                // Whether quiet has a hole in it, sitting immediately before
+                // the thing that makes it quiet. Not a switch: it is a
+                // qualifier on the button beside it, and two switches in one
+                // corner is a settings page.
+                PanelActionButton {
+                  anchors.verticalCenter: parent.verticalCenter
+                  iconText: pager.codesLetThrough ? pager.keyGlyph : pager.keyOff
+                  tooltipText: pager.codesLetThrough
+                    ? "Verification codes come through a snooze or a silence - click to hold them back too"
+                    : "Nothing comes through - click to let verification codes through"
+                  foreground: pager.codesLetThrough ? pager.panelFg : pager.dim
+                  fontFamily: pager.fontFamily
+                  onClicked: {
+                    if (pager.service) pager.service.setCodesBypassQuiet(!pager.codesLetThrough)
+                  }
+                }
+
                 PanelActionButton {
                   anchors.verticalCenter: parent.verticalCenter
                   iconText: pager.globalSnoozed ? pager.bell : pager.bellSleep
@@ -529,7 +556,7 @@ BarWidget {
             visible: pager.globalChoosing && !pager.globalSnoozed
 
             Text {
-              visible: pager.service && pager.service.codesBypassQuiet
+              visible: pager.codesLetThrough
               width: parent.width
               text: "Verification codes still come through."
               color: pager.dim

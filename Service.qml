@@ -68,6 +68,11 @@ Item {
   // sitting next to a plausible shape, so this is a narrow hole rather than an
   // exception anything can walk through - and it can be closed.
   property bool codesBypassQuiet: true
+  function setCodesBypassQuiet(value) {
+    if (!!value === codesBypassQuiet) return
+    codesBypassQuiet = !!value
+    saveQuiet()
+  }
 
   property bool doNotDisturb: false
   property double silencedSince: 0
@@ -257,7 +262,8 @@ Item {
   // on - and one that stays on when you thought it had gone is worse.
   function saveQuiet() {
     Store.write(storeProc, storeBin, "quiet-save",
-                { snoozes: snoozes, dnd: doNotDisturb, silencedSince: silencedSince })
+                { snoozes: snoozes, dnd: doNotDisturb, silencedSince: silencedSince,
+                  codesBypassQuiet: codesBypassQuiet })
   }
 
   // ------------------------------------------------------- what was held
@@ -1140,11 +1146,28 @@ Item {
     }
   }
 
-  function takeOffer(kind, value) {
+  function takeOffer(kind, value, key) {
     if (kind === "code") copyText(value, true)
     else if (kind === "phone") copyText(value, false)
     else if (kind === "path") Qt.openUrlExternally("file://" + value)
     else Qt.openUrlExternally(value)
+
+    // A copied code is a finished notification: it exists to carry six digits
+    // to a login box, and once they are on the clipboard there is nothing left
+    // in it. Long enough after the press for the button's tick to be seen,
+    // because a card that vanishes the instant you click it leaves you unsure
+    // whether it copied or you missed.
+    if (kind === "code" && String(key || "")) {
+      codeTaken.key = String(key)
+      codeTaken.restart()
+    }
+  }
+
+  Timer {
+    id: codeTaken
+    property string key: ""
+    interval: 900
+    onTriggered: service.closeToast(key, "activated")
   }
 
   // ------------------------------------------------------------- store
@@ -1181,6 +1204,10 @@ Item {
             if (read.snoozes && typeof read.snoozes === "object") service.snoozes = read.snoozes
             service.doNotDisturb = read.dnd === true
             service.silencedSince = Number(read.silencedSince || 0)
+            // Turned off in the panel, it stays off - the setting is the
+            // default, not a standing instruction to put it back.
+            if (read.codesBypassQuiet !== undefined)
+              service.codesBypassQuiet = read.codesBypassQuiet === true
           }
         } catch (e) {}
         service.snoozeRevision += 1
@@ -1293,6 +1320,15 @@ Item {
     }
 
     function snoozes(): string { return JSON.stringify(service.liveSnoozes()) }
+
+    // Whether a verification code gets through the quiet. The panel's key
+    // button, from a script.
+    function codes(state: string): string {
+      var want = String(state || "").toLowerCase()
+      if (want === "on" || want === "off")
+        service.setCodesBypassQuiet(want === "on")
+      return service.codesBypassQuiet ? "on" : "off"
+    }
     function open(deckKey: string): string {
       service.pointerEntered(deckKey)
       return service.openDeck
@@ -1321,7 +1357,7 @@ Item {
                 : want === "path" ? String(row.filePath || "")
                 : String(row.link || "")
       if (!value) return "none"
-      service.takeOffer(want, value)
+      service.takeOffer(want, value, String(row.key))
       return value
     }
 
@@ -1647,7 +1683,7 @@ Item {
             hoverX: service.hoverX
             hoverY: service.hoverY
             onActionInvoked: function(identifier) { service.invokeAction(model.key, identifier) }
-            onOfferTaken: function(kind, value) { service.takeOffer(kind, value) }
+            onOfferTaken: function(kind, value) { service.takeOffer(kind, value, model.key) }
             onSwipeMoved: function(dx) { service.swipeMoved(model.key, dx) }
             onSwipeEnded: function(away) { service.swipeEnded(model.key, away) }
             now: service.nowTick

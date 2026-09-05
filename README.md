@@ -66,7 +66,10 @@ is not a thing you can do with it — and being locked out of your own login
 because you'd quietened Slack is exactly the failure that makes people stop
 snoozing anything. Codes are only ever detected from a keyword sitting next to
 a plausible shape, so this is a narrow hole rather than an exception anything
-can walk through, and `codesBypassQuiet` closes it.
+can walk through — and the key beside the panel's snooze button closes it, for
+the times you would rather nothing at all came through. Copying the code
+dismisses the notification, because a code notification exists to carry six
+digits to a login box and there is nothing left in it afterwards.
 
 **Shows you what quiet cost.** Silence is only tolerable if you can see what it
 kept from you. While anything is being held back — silenced, snoozed wholesale,
@@ -185,6 +188,7 @@ omarchy-shell omapager reply "text"     answer the front card ("" opens the fiel
 omarchy-shell omapager swipe            throw the front card away
 omarchy-shell omapager snooze 60        quieten the front card's source, in minutes
 omarchy-shell omapager snoozeAll 60     quieten everything, in minutes
+omarchy-shell omapager codes off        stop letting verification codes through
 omarchy-shell omapager unsnooze ""      wake everything ("" for all, or a source key)
 omarchy-shell omapager snoozes          what is snoozed, and until when
 omarchy-shell omapager stack source     switch stacking mode
