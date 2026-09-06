@@ -812,10 +812,12 @@ Item {
               Keys.onEscapePressed: { text = ""; card.replyCancelled() }
 
               // Enter sends, but an affordance nobody can see is not one.
+              // Sits at the trailing edge of the field. When the first
+              // directional character is Arabic or Hebrew the field reads
+              // right-to-left, so "trailing" means left.
               Button {
                 id: sendButton
-                anchors.right: parent.right
-                anchors.rightMargin: Style.space(4)
+                x: isRtl ? Style.space(4) : parent.width - width - Style.space(4)
                 anchors.verticalCenter: parent.verticalCenter
                 visible: replyInput.text.length > 0
                 text: "Send"
@@ -826,6 +828,23 @@ Item {
                 fontSize: Style.font.caption
                 verticalPadding: 1
                 onClicked: { card.replySent(replyInput.text); replyInput.text = "" }
+
+                // True when the reply text starts with an RTL script.
+                // Skips spaces, digits, and punctuation to find the first
+                // character that actually has a direction.
+                property bool isRtl: {
+                  var t = replyInput.text;
+                  for (var i = 0; i < t.length; i++) {
+                    var c = t.charCodeAt(i);
+                    if (c < 0x41) continue;                         // skip ASCII controls, digits, punctuation
+                    if (c <= 0x024F) return false;                  // Latin
+                    if (c >= 0x0590 && c <= 0x08FF) return true;    // Hebrew, Arabic, Syriac, Thaana (Dhivehi)
+                    if (c >= 0xFB50 && c <= 0xFDFF) return true;    // Arabic Presentation Forms-A
+                    if (c >= 0xFE70 && c <= 0xFEFF) return true;    // Arabic Presentation Forms-B
+                    return false;
+                  }
+                  return false;
+                }
               }
             }
 
