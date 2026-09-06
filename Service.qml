@@ -1926,9 +1926,12 @@ Item {
             onOfferTaken: function(kind, value) { service.takeOffer(kind, value, model.key) }
             now: service.nowTick
             expanded: service.expanded
-            // Hover opens the body only when there is nothing else to open.
-            sole: service.toasts.count === 1
                       && (service.stacking !== "source" || service.openDeck === Layout.deckKeyFor(model, service.stacking))
+            // Hover opens the body only when there is nothing else to open.
+            // `toasts` is the ListModel's id, which is file-scoped - it is not
+            // a property of `service`, and reaching for it that way is how this
+            // line spent a morning throwing a TypeError per frame.
+            sole: toasts.count === 1
             // Nothing counts down while the deck is open, mid-throw, or with
             // an answer half typed into it.
             paused: service.expanded || service.replyingKey !== ""
