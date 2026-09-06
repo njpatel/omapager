@@ -18,6 +18,7 @@ import qs.Commons
 
 import "Store.js" as Store
 import "Layout.js" as Layout
+import "Markup.js" as Markup
 
 Item {
   id: service
@@ -1134,8 +1135,12 @@ Item {
         // The sender's own window first, then the source's, then the site.
         var win = windowForPid(row.senderPid) || windowForSource(row.source)
         if (win) focusWindow(win)
-        else if (String(row.source || "").indexOf(".") > 0)
-          Qt.openUrlExternally("https://" + String(row.source) + "/")
+        // Not `indexOf(".") > 0`. A source is lifted out of text the sender
+        // wrote, and "https://" + it is a URL going wherever it says - so it
+        // has to be a hostname by the same test omapager-icon uses before it
+        // will fetch anything, not merely a string with a dot in it.
+        else if (Markup.hostname(row.source))
+          Qt.openUrlExternally("https://" + Markup.hostname(row.source) + "/")
         else if (String(row.link || "")) Qt.openUrlExternally(String(row.link))
       }
     }
@@ -1446,8 +1451,8 @@ Item {
         var win = service.windowForPid(front.senderPid)
                   || service.windowForSource(front.source)
         route = win ? ("focus " + win.wmClass + " [" + win.address + "]")
-              : (String(front.source || "").indexOf(".") > 0
-                 ? ("open https://" + front.source + "/")
+              : (Markup.hostname(front.source)
+                 ? ("open https://" + Markup.hostname(front.source) + "/")
                  : (String(front.link || "") ? ("open " + front.link)
                     : "sender's default action"))
       }

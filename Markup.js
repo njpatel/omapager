@@ -86,13 +86,40 @@ function unescapeAllowed(text) {
 var LINKABLE = /^(?:https?|mailto):/i
 
 function linkable(url) {
-  return LINKABLE.test(String(url || ""))
+  var value = String(url || "")
+  if (!LINKABLE.test(value)) return false
+  // Userinfo before the host is how a link is made to read as somewhere it is
+  // not: https://paypal.com@evil.example goes to evil.example. Nothing a
+  // notification legitimately links to needs it. (mailto: has no // and so
+  // never matches this.)
+  if (/^[a-z]+:\/\/[^\/\?#]*@/i.test(value)) return false
+  return true
+}
+
+// A hostname and nothing else: no port, no userinfo, no path, no IP literal.
+// bin/omapager-icon applies the same test before it will fetch anything, and
+// for the same reason - "https://" + something-shaped-like-a-host is a URL
+// pointing wherever that something says, and a notification is what writes it.
+// The two sides have to agree on what a hostname is.
+var HOSTNAME = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/
+
+function hostname(value) {
+  var h = String(value || "").trim().toLowerCase().replace(/\.+$/, "")
+  if (!HOSTNAME.test(h)) return ""
+  if (/^\d+$/.test(h.split(".").pop())) return ""   // a dotted quad in a hostname's shape
+  return h
 }
 
 function hostOf(url) {
-  var m = String(url || "").match(/^[a-z]+:\/\/([^\/\?#:]+)/i)
+  var m = String(url || "").match(/^[a-z]+:\/\/([^\/\?#]+)/i)
   if (!m) return ""
-  return m[1].replace(/^www\./i, "")
+  var authority = m[1]
+  // Userinfo is not the host, and this is the whole trick:
+  // https://paypal.com@evil.example goes to evil.example, while a card built
+  // from the text before the @ reads as PayPal. Take what a browser would.
+  var at = authority.lastIndexOf("@")
+  if (at >= 0) authority = authority.slice(at + 1)
+  return hostname(authority.replace(/:\d*$/, "").replace(/^www\./i, ""))
 }
 
 // A body that opens with a link to the sender's own origin is not a message
@@ -107,7 +134,12 @@ function liftSource(body) {
   // or a bare domain. A real in-body link stays where the sender put it.
   var looksLikeSource = label === host || /^[\w.-]+\.[a-z]{2,}$/i.test(label)
   if (!looksLikeSource) return { source: "", body: text }
-  return { source: host || label, body: text.slice(m[0].length) }
+  // The label is the sender's text too. It stands in only when the href was
+  // never a URL - if the href *is* one and its host does not survive the test,
+  // that is the case worth refusing, not worth papering over with the label.
+  var source = host || (/^[a-z]+:\/\//i.test(m[1]) ? "" : hostname(label))
+  if (!source) return { source: "", body: text }
+  return { source: source, body: text.slice(m[0].length) }
 }
 
 function linkify(escaped) {
