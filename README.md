@@ -24,6 +24,12 @@ without leaving the card.
 deck. Hovering expands it. Nothing is hidden behind a "3 more" summary —
 every notification is a real card you can act on.
 
+A body is held to two lines while you are scanning a deck, and opens to its
+full length — up to eight lines — once the deck is expanded, or on hover when
+it is the only card on screen. Phone messages are why: a sentence and a half
+arriving as a sentence and an ellipsis is the commonest way to lose the point
+of a message.
+
 **Reads the contents.** A verification code, a link or a phone number in the
 body becomes a labelled button: `Copy code`, `Open link`, `Copy number`. A mark
 on the headline tells you a card is

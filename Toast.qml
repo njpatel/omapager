@@ -22,6 +22,7 @@ Item {
   // rather than breaking if it is not there.
   property var scene: null
   property bool expanded: false
+  property bool sole: false                  // the only card on screen
   property bool paused: false
   property bool hovered: false
   property double now: Date.now()
@@ -58,6 +59,15 @@ Item {
   // the cards are translucent, so its text would otherwise read straight
   // through the card in front of it.
   readonly property bool showsContent: expanded || place.front
+
+  // Two lines is right for a deck you are scanning. It is wrong for the one
+  // message you stopped to read - and phone messages are the worst of it, a
+  // sentence and a half arriving as a sentence and an ellipsis. So the body
+  // opens when the deck is open, and on hover when there is nothing else on
+  // screen to open. A card in a collapsed stack never does: every card there
+  // is drawn at the front one's height, so a tall one would hang out of it.
+  readonly property bool bodyOpen: expanded || (hovered && sole)
+  readonly property int bodyLines: bodyOpen ? 8 : 2
   readonly property int stands: place.count || 1     // how many this card speaks for
 
   // Everything this card can do, in one row: what it found in its own text
@@ -211,11 +221,17 @@ Item {
   // buttons appear. Summed explicitly rather than taken from the laid-out
   // height minus the action area, because that area's height is derived from
   // the card's - and subtracting it back out is a binding loop.
-  // The words, without whatever the deeds are doing underneath them. Both the
-  // card's resting height and the icon beside it are measured from this, so
-  // they cannot drift apart.
+  // The words, without whatever the deeds are doing underneath them. The card's
+  // height is measured from this, so it grows when the body opens.
   readonly property real textBlock:
       headline.height + (bodyBox.visible ? column.spacing + bodyBox.height : 0)
+
+  // The same block at its two-line height, whatever the body is doing now. The
+  // icon is centred on this rather than on the live one: a body that opens on
+  // hover would otherwise walk the mark down the card exactly as the buttons
+  // used to, and the mark is how you recognise the sender before reading.
+  readonly property real restingBlock:
+      headline.height + (bodyBox.visible ? column.spacing + bodyBox.restHeight : 0)
 
   readonly property real fixedHeight: Style.space(12) * 2
       + Math.max(thumb.height, textBlock)
@@ -369,7 +385,7 @@ Item {
         // column - the column grows when the buttons or the reply field open,
         // and centring on that walked the icon down every time you hovered.
         // The one fixed thing on the card should be fixed.
-        y: Math.max(0, (card.textBlock - height) / 2)
+        y: Math.max(0, (card.restingBlock - height) / 2)
         opacity: card.showsContent ? 1 : 0
         Behavior on opacity { NumberAnimation { duration: card.fade } }
 
@@ -633,14 +649,28 @@ Item {
           // lines, so a single sentence that visibly takes two lines still
           // reports one - which sized the box to one line and clipped the rest.
           readonly property real lineH: Math.max(1, metrics.height * parent.bodyLeading)
-          readonly property bool overflow: rich.contentHeight > lineH * 2.4
+          // The cap the body is being held to right now, and the slack that
+          // decides overflow: a body a hair over the cap is not worth
+          // flattening, it is worth one more pixel.
+          readonly property real cap: lineH * card.bodyLines
+          readonly property bool overflow: rich.contentHeight > cap + lineH * 0.4
           // The height of the text that is actually on screen, capped at two
           // lines - not a line count derived from it. Rounding a measurement
           // into 1 or 2 and multiplying back out is where the clipped second
           // line came from: a body that needed a hair over one line rounded
           // down, and the rest was cut off inside a clipped box.
           readonly property real shown: overflow ? plain.contentHeight : rich.contentHeight
-          height: Math.min(Math.ceil(lineH * 2), Math.ceil(shown))
+          // Not clamped to `cap`. The line limit is enforced where the lines
+          // are - `plain.maximumLineCount` - and its laid-out height is a hair
+          // taller than lineH x lines once leading and descenders are counted.
+          // Clamping the box to the arithmetic instead sliced the last line
+          // through the middle rather than eliding it.
+          height: Math.ceil(shown)
+
+          // What this box would be if the body were closed. Only the icon reads
+          // it, and only so that it does not move when the body opens.
+          readonly property real restHeight:
+              Math.min(Math.ceil(lineH * 2), Math.ceil(rich.contentHeight))
           visible: String(card.row.body || "").length > 0
           opacity: card.showsContent ? 0.72 : 0
           Behavior on opacity { NumberAnimation { duration: card.fade } }
@@ -678,7 +708,7 @@ Item {
             font.family: Style.font.family
             font.pixelSize: Style.font.bodySmall
             wrapMode: Text.Wrap
-            maximumLineCount: 2
+            maximumLineCount: card.bodyLines
             elide: Text.ElideRight
           }
 
