@@ -830,17 +830,21 @@ Item {
                 onClicked: { card.replySent(replyInput.text); replyInput.text = "" }
 
                 // True when the reply text starts with an RTL script.
-                // Skips spaces, digits, and punctuation to find the first
-                // character that actually has a direction.
+                // Skips anything without a strong direction (spaces,
+                // digits, brackets, punctuation) to find the first
+                // character that actually picks a side. 
                 property bool isRtl: {
                   var t = replyInput.text;
-                  for (var i = 0; i < t.length; i++) {
-                    var c = t.charCodeAt(i);
-                    if (c < 0x41) continue;                         // skip ASCII controls, digits, punctuation
-                    if (c <= 0x024F) return false;                  // Latin
-                    if (c >= 0x0590 && c <= 0x08FF) return true;    // Hebrew, Arabic, Syriac, Thaana (Dhivehi)
-                    if (c >= 0xFB50 && c <= 0xFDFF) return true;    // Arabic Presentation Forms-A
-                    if (c >= 0xFE70 && c <= 0xFEFF) return true;    // Arabic Presentation Forms-B
+                  for (var i = 0; i < t.length;) {
+                    var c = t.codePointAt(i);
+                    i += c > 0xFFFF ? 2 : 1;                         // step past surrogate pairs
+                    if (c <= 0x7F && !(c >= 0x41 && c <= 0x5A)
+                                  && !(c >= 0x61 && c <= 0x7A))
+                      continue;                                       // skip all ASCII non-letters
+                    if (c <= 0x024F) return false;                    // Latin
+                    if (c >= 0x0590 && c <= 0x08FF) return true;      // Hebrew, Arabic, Syriac, Thaana
+                    if (c >= 0xFB50 && c <= 0xFDFF) return true;      // Arabic Presentation Forms-A
+                    if (c >= 0xFE70 && c <= 0xFEFF) return true;      // Arabic Presentation Forms-B
                     return false;
                   }
                   return false;
