@@ -23,5 +23,10 @@ jobs:
           QT_QPA_PLATFORM: offscreen
           QT_QPA_PLATFORMTHEME: ''
         run: /usr/lib/qt6/bin/qmltestrunner -input tests/tst_security.qml
-      - name: QML syntax (Omarchy imports require integration host)
-        run: /usr/lib/qt6/bin/qmllint Service.qml Toast.qml Widget.qml DeedButton.qml
+      - name: Production QML syntax (without unavailable desktop imports)
+        # qmlformat parses without loading Omarchy/Quickshell types. Full qmllint
+        # remains an integration-host check; QtTest above executes policy code.
+        run: |
+          for file in Service.qml Toast.qml Widget.qml DeedButton.qml; do
+            /usr/lib/qt6/bin/qmlformat "$file" > /dev/null
+          done

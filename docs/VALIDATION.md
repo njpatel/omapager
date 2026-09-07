@@ -72,3 +72,12 @@ the desktop's system Python by this patch.
 - Repository owner: fork/publication decision, private vulnerability reporting,
   secret scanning/push protection, required reviews and release signing identity.
 - Optional independent audit, Scorecard CLI and GitHub Actions/zizmor review.
+
+## Hosted draft checks
+
+The first Ubuntu 24.04 hosted run passed JS, Python, HTTP and actual Qt policy
+tests. Full-plugin qmllint then failed on unavailable Omarchy/Quickshell imports
+(Qt's older linter treats those warnings as a failure). CI now uses qmlformat as
+a non-mutating production syntax parser, while keeping actual Qt policy tests.
+Full qmllint/type integration remains required on an Omarchy host. No blanket
+continue-on-error or suppression of malformed QML was added.
