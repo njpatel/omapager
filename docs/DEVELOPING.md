@@ -1,5 +1,12 @@
 # Working on omapager
 
+> Not called `AGENTS.md`, and not at the repository root, on purpose. Omarchy
+> installs a plugin's whole tree into `~/.config/omarchy/plugins/`, so a root
+> agent-instruction file would become ambient context for any coding agent the
+> *installing user* happens to run — instructions they never chose to load.
+> Marketplace review raised it; this is the fix. If you keep a `CLAUDE.md`
+> symlink to this file locally, leave it untracked.
+
 A notification daemon for Omarchy (Quickshell/QML + Hyprland). It replaces
 `omarchy.notifications`, so that plugin must be in `disabledPlugins` or the two
 fight over the `org.freedesktop.Notifications` bus name.
