@@ -81,6 +81,22 @@ Crop to the card and check a corner pixel is the card's own colour.
 - Iterate a **snapshot of keys** when closing many cards. `closeToast` marks a
   row leaving and removes it 200ms later, so `while (count > 0)` never makes
   progress and spins the main thread at 100% with no error and no log.
+- **Nothing a card's `visible` reads may come from the layout.** Toggling
+  `visible` changes what the card contributes, the layout is measured back into
+  `heights`, and `heights` is where the scene gets opacity from — a closed
+  circle. `visible: opacity > 0.01` cost ~120 binding-loop warnings per scene
+  and the re-evaluation behind them; deriving it from `place.hidden` only moved
+  the loop, because `place` is layout output too. It is now bound to nothing,
+  and `enabled` refuses the pointer instead. A fully transparent subtree is
+  skipped by the scene graph, so nothing is drawn either way.
+- An **id is file-scoped, not a property**. `toasts` is the `ListModel`'s id;
+  `service.toasts` is `undefined` and throws a TypeError per evaluation. Inside
+  the delegate, write `toasts.count`.
+- Bindings here **span lines**. `expanded:` is two lines, and a patch anchored
+  on the first line inserted itself into the middle of it: `expanded` silently
+  lost its second half and the orphaned `&&` was grafted onto the new property
+  below. Anchor on something that includes the whole binding, and read the
+  journal afterwards — both of those sat there as warnings for a morning.
 
 **Omarchy**
 
