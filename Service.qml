@@ -55,6 +55,7 @@ Item {
   // Which end of a card its buttons sit at. Settings plumbing has not landed
   // for plugins yet, so this is a property with an IPC verb, the same as
   // stacking above.
+  property real fontScale: 1
   property string actionsAlign: "right"  // right | left
 
   // Chrome puts a "Settings" action on every web notification, which opens
@@ -1465,6 +1466,7 @@ Item {
                      JSON.stringify(service.actionsOf(key, service.refsRevision)))
       }
       return JSON.stringify({
+        fontScale: service.fontScale,
         toasts: toasts.count, route: route, actions: actions, heights: heights,
         replyPath: toasts.count > 0 ? String(toasts.get(0).replyPath || "") : "",
         replying: service.replyingKey !== "",
@@ -1911,6 +1913,7 @@ Item {
                    || ({ y: 0, scale: 1, opacity: 0, z: 1, front: false, hidden: true })
             hovered: service.hoverKey === model.key
             actions: service.actionsOf(model.key, service.refsRevision)
+            fontScale: service.fontScale
             actionsAlign: service.actionsAlign
             replying: service.replyingKey === model.key
             onReplyRequested: {

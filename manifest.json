@@ -44,7 +44,8 @@
       "alwaysShow": false,
       "codesBypassQuiet": true,
       "timeFormat": "system",
-      "smartRaise": true
+      "smartRaise": true,
+      "fontScale": 100
     },
     "schema": [
       {
@@ -68,6 +69,16 @@
         ],
         "defaultValue": "right",
         "description": "Which end of a card its action buttons sit at."
+      },
+      {
+        "key": "fontScale",
+        "type": "integer",
+        "label": "Notification font size (%)",
+        "description": "Scale notification text, action buttons and inline replies relative to the theme. 100 follows the theme; the bar and panel keep their usual sizes.",
+        "min": 75,
+        "max": 200,
+        "step": 5,
+        "defaultValue": 100
       },
       {
         "key": "hideSettingsAction",

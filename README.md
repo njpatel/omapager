@@ -131,6 +131,7 @@ icons for good.
 | key | default | what it does |
 | --- | --- | --- |
 | `stacking` | `source` | `source` gives each sender its own deck; `all` puts everything in one |
+| `fontScale` | `100` | notification font size as a percentage of the theme (75–200); scales card text, actions and inline replies, leaving the bar and panel unchanged |
 | `actionsAlign` | `right` | which end of a card its buttons sit at |
 | `hideSettingsAction` | `true` | drop the browser's "Settings" button, which is on every web notification and is never the one you wanted |
 | `snoozeDurations` | `30, 60, 240, tomorrow` | what the snooze menus offer — minutes, or `tomorrow` |
@@ -141,6 +142,12 @@ icons for good.
 | `timeFormat` | `system` | `system` follows `LC_TIME`; `24h` and `12h` pin it |
 | `sourceLimit` | `8` | how many quietened sources the panel lists |
 | `heldPerSource` | `10` | how many held notifications it shows per source |
+
+Notification text at 100% and 150% of the theme size:
+
+| 100% (default) | 150% |
+| --- | --- |
+| ![Sample notification at 100%](assets/font-scale-100.png) | ![Sample notification at 150%](assets/font-scale-150.png) |
 
 Every history entry is the text of a message somebody sent you, so it is
 trimmed by age as well as count: **7 days or 200 entries**, whichever comes

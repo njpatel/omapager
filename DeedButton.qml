@@ -46,7 +46,7 @@ Button {
   foreground: Color.notifications.text
   accent: Color.notifications.border
   fontFamily: Style.font.family
-  fontSize: Style.font.caption
+  fontSize: Style.font.caption * (toast ? toast.fontScale : 1)
   verticalPadding: Math.max(2, Style.spacing.controlPaddingY - 2)
 
   // Full width in the "More" list, its own width in the row.

@@ -16,6 +16,7 @@ import "Markup.js" as Markup
 Item {
   id: card
 
+  property real fontScale: 1
   property var row: ({})
   property var place: ({ y: 0, scale: 1, opacity: 1, z: 1, front: true, hidden: false })
   // The scene that owns the clock. Everything below degrades to a still card
@@ -426,7 +427,7 @@ Item {
             color: Color.notifications.text
             opacity: 0.55
             font.family: Style.font.family
-            font.pixelSize: Style.font.body
+            font.pixelSize: Style.font.body * card.fontScale
             font.weight: Font.DemiBold
           }
         }
@@ -490,7 +491,7 @@ Item {
             text: String(card.row.summary || "")
             color: Color.notifications.text
             font.family: Style.font.family
-            font.pixelSize: Style.font.body
+            font.pixelSize: Style.font.body * card.fontScale
             font.weight: Font.DemiBold
             maximumLineCount: 1
             elide: Text.ElideRight
@@ -517,7 +518,7 @@ Item {
                 color: Color.notifications.text
                 opacity: 0.9
                 font.family: Style.font.family
-                font.pixelSize: Style.font.body
+                font.pixelSize: Style.font.body * card.fontScale
               }
             }
           }
@@ -543,7 +544,7 @@ Item {
               color: Color.notifications.text
               opacity: 0.85
               font.family: Style.font.family
-              font.pixelSize: Style.font.caption
+              font.pixelSize: Style.font.caption * card.fontScale
             }
 
           }
@@ -568,8 +569,8 @@ Item {
             // thing changing into another reads as a single control, and
             // nothing has to move to make room.
             Item {
-              width: Math.max(stamp.implicitWidth, Style.space(18))
-              height: Style.space(18)
+              width: Math.max(stamp.implicitWidth, shut.width)
+              height: Math.max(Style.space(18), stamp.implicitHeight)
               anchors.verticalCenter: parent.verticalCenter
 
               Text {
@@ -580,14 +581,14 @@ Item {
                 opacity: card.hovered ? 0 : 0.6
                 visible: opacity > 0.01
                 font.family: Style.font.family
-                font.pixelSize: Style.font.bodySmall
+                font.pixelSize: Style.font.bodySmall * card.fontScale
                 Behavior on opacity { NumberAnimation { duration: card.fade } }
               }
 
               Rectangle {
                 id: shut
                 anchors.centerIn: parent
-                width: Style.space(18)
+                width: Style.space(18) * Math.max(1, card.fontScale)
                 height: width
                 radius: Math.max(2, Style.cornerRadius - 1)
                 color: Qt.rgba(Color.notifications.text.r, Color.notifications.text.g,
@@ -603,7 +604,7 @@ Item {
                   color: Color.notifications.text
                   opacity: shutHit.containsMouse ? 1.0 : 0.75
                   font.family: Style.font.family
-                  font.pixelSize: Style.font.caption
+                  font.pixelSize: Style.font.caption * card.fontScale
                 }
 
                 MouseArea {
@@ -627,7 +628,7 @@ Item {
         FontMetrics {
           id: metrics
           font.family: Style.font.family
-          font.pixelSize: Style.font.bodySmall
+          font.pixelSize: Style.font.bodySmall * card.fontScale
         }
 
         // Two lines of a notification body are one sentence that happened to
@@ -686,7 +687,7 @@ Item {
             lineHeight: bodyBox.parent.bodyLeading
             lineHeightMode: Text.ProportionalHeight
             font.family: Style.font.family
-            font.pixelSize: Style.font.bodySmall
+            font.pixelSize: Style.font.bodySmall * card.fontScale
             wrapMode: Text.Wrap
             // Second gate on the same rule. Markup drops an anchor it will
             // not vouch for, so nothing unsafe should arrive here - but this
@@ -706,7 +707,7 @@ Item {
             lineHeight: bodyBox.parent.bodyLeading
             lineHeightMode: Text.ProportionalHeight
             font.family: Style.font.family
-            font.pixelSize: Style.font.bodySmall
+            font.pixelSize: Style.font.bodySmall * card.fontScale
             wrapMode: Text.Wrap
             maximumLineCount: card.bodyLines
             elide: Text.ElideRight
@@ -790,7 +791,7 @@ Item {
             // A step, not an animation. This height is part of what the
             // layout reads, and anything the layout reads must not move
             // between frames - the scene animates the slack around it.
-            height: card.replying ? Style.space(24) : 0
+            height: card.replying ? Math.max(Style.space(24), replyInput.implicitHeight + Style.space(3)) : 0
             visible: height > 0
             anchors.bottom: parent.bottom
             clip: true
@@ -805,7 +806,7 @@ Item {
               foreground: Color.notifications.text
               accent: Color.notifications.border
               font.family: Style.font.family
-              font.pixelSize: Style.font.caption
+              font.pixelSize: Style.font.caption * card.fontScale
               verticalPadding: 2
               placeholderText: "Reply to " + String(card.row.replyTo || card.row.summary || "")
               onAccepted: { card.replySent(text); text = "" }
@@ -823,7 +824,7 @@ Item {
                 foreground: Color.notifications.text
                 accent: Color.notifications.border
                 fontFamily: Style.font.family
-                fontSize: Style.font.caption
+                fontSize: Style.font.caption * card.fontScale
                 verticalPadding: 1
                 onClicked: { card.replySent(replyInput.text); replyInput.text = "" }
               }
