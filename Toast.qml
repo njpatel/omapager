@@ -12,6 +12,7 @@ import qs.Commons
 import qs.Ui
 
 import "Markup.js" as Markup
+import "Security.js" as Security
 
 Item {
   id: card
@@ -180,6 +181,7 @@ Item {
   // put them on the wire. A restored card has none, because the sender that
   // would have to carry them out is gone.
   property var actions: []
+  property string replyError: ""
   signal actionInvoked(string identifier)
 
   // Replying to a message forwarded from the phone.
@@ -421,6 +423,7 @@ Item {
                          Color.notifications.text.b, 0.10)
 
           Text {
+            textFormat: Text.PlainText
             anchors.centerIn: parent
             text: String(card.row.source || card.row.app || "?").substring(0, 1).toUpperCase()
             color: Color.notifications.text
@@ -481,6 +484,7 @@ Item {
           Behavior on opacity { NumberAnimation { duration: card.fade } }
 
           Text {
+            textFormat: Text.PlainText
             id: title
             anchors.left: parent.left
             width: parent.width - rightSide.width
@@ -512,6 +516,7 @@ Item {
             Repeater {
               model: card.marks
               Text {
+            textFormat: Text.PlainText
                 required property var modelData
                 text: modelData
                 color: Color.notifications.text
@@ -537,6 +542,7 @@ Item {
                            Color.notifications.text.b, 0.16)
 
             Text {
+            textFormat: Text.PlainText
               id: badgeText
               anchors.centerIn: parent
               text: String(card.stands)
@@ -573,6 +579,7 @@ Item {
               anchors.verticalCenter: parent.verticalCenter
 
               Text {
+            textFormat: Text.PlainText
                 id: stamp
                 anchors.centerIn: parent
                 text: card.ago()
@@ -598,6 +605,7 @@ Item {
                 Behavior on color { ColorAnimation { duration: card.fade } }
 
                 Text {
+            textFormat: Text.PlainText
                   anchors.centerIn: parent
                   text: "\u2715"
                   color: Color.notifications.text
@@ -693,11 +701,12 @@ Item {
             // is one regex away from being wrong, and the cost of the check
             // is a function call.
             onLinkActivated: function(url) {
-              if (Markup.linkable(url)) Qt.openUrlExternally(url)
+              Security.openExternalUrl(url)
             }
           }
 
           Text {
+            textFormat: Text.PlainText
             id: plain
             width: parent.width
             visible: bodyBox.overflow
@@ -807,7 +816,7 @@ Item {
               font.family: Style.font.family
               font.pixelSize: Style.font.caption
               verticalPadding: 2
-              placeholderText: "Reply to " + String(card.row.replyTo || card.row.summary || "")
+              placeholderText: card.replyError || ("Reply to " + String(card.row.replyTo || card.row.summary || ""))
               onAccepted: { card.replySent(text); text = "" }
               Keys.onEscapePressed: { text = ""; card.replyCancelled() }
 
