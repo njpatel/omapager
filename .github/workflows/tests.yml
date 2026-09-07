@@ -1,0 +1,27 @@
+name: Tests
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  regression:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - run: node tests/baseline.cjs && node tests/security.cjs
+      - run: python3 -m unittest discover -s tests -v
+      - run: python3 security/check_invariants.py
+      - run: python3 tests/http_server.py
+      - name: Qt tooling
+        run: sudo apt-get update && sudo apt-get install -y qt6-declarative-dev-tools qml6-module-qttest qml6-module-qtquick qml6-module-qtquick-window qml6-module-qtqml-workerscript
+      - name: QML runtime regression tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QT_QPA_PLATFORMTHEME: ''
+        run: /usr/lib/qt6/bin/qmltestrunner -input tests/tst_security.qml
+      - name: QML syntax (Omarchy imports require integration host)
+        run: /usr/lib/qt6/bin/qmllint Service.qml Toast.qml Widget.qml DeedButton.qml
