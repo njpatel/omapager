@@ -1,3 +1,15 @@
+> **Unreleased hardening branch:** based on upstream commit
+> `29548e5761f1b9f419afe988d77f67e3dd3e81cb`. See
+> [upstream handoff](docs/UPSTREAM_HANDOFF.md) for the implementation and review
+> notes. Bubblewrap is required for helpers; remote icons and implicit sender
+> default actions are off by default. History defaults to 24 hours/100 entries,
+> and detected-code notifications are stored as redacted placeholders.
+> This branch is a draft review proposal and has not passed live integration testing.
+> The original feature documentation below describes the upstream UX; the
+> [security architecture](docs/SECURITY_ARCHITECTURE.md) overrides conflicting
+> security/default-behavior statements. Use reviewed commits for installation,
+> and complete disposable-session integration checks before enabling this branch.
+
 <img src="assets/title.png" width="1266" alt="Omapager">
 
 <!--

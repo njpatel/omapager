@@ -168,24 +168,37 @@ every close. Icons are pruned at 60 days by `tidy`, which the daemon runs at
 startup. Nothing is written to the journal: no `console.log` anywhere, and the
 Python helpers speak on stdout, which is the IPC channel.
 
-## The parts an attacker writes
+## Security boundaries in this branch
 
-An app name, a summary, a body, an action label and a source are all written by
-whoever sent the notification, and anything derived from them is too. Two places
-turn that text into something with consequences, and both are guarded:
+Read SECURITY.md and docs/SECURITY_ARCHITECTURE.md before editing capability
+paths. Security.js is the only URL-opening broker. Never add direct desktop
+opens elsewhere, raw helper launches, command shells, or automatic URL/action
+side effects. Notification labels are plain text; only sanitized body markup is
+RichText. Store.sanitiseForPersistence and the Python store independently redact
+code-bearing notifications. Do not remove either boundary.
 
-- **`bin/omapager-icon` fetches.** `reachable()` allows `http(s)` hostnames
-  only; `connect_public()` resolves each connection once, rejects the whole
-  answer if any address is non-public, and connects directly to a checked
-  socket address. HTTP Host and TLS SNI/certificate verification still use the
-  URL hostname. `GuardedRedirect` checks each redirect URL, and the redirected
-  connection gets the same address pinning. Environment proxies are disabled
-  because their destination resolution would bypass that check. The next URL
-  may be chosen by the page (its `<link rel=icon>`) or a redirect. Without these
-  checks a site you allowed
-  notifications from could read `file:///etc/passwd` or aim a GET at
-  `127.0.0.1`. `host_names()` gates the first hop the same way: a source is a
-  plain dotted hostname or it is nothing, so no ports, userinfo or paths.
+- **`bin/omapager-icon` fetches, through `bin/omapager_http.py`.** This is the
+  single network-security implementation for icon fetching; there is no second,
+  competing HTTP client. `parse_url()` requires `http(s)`, a public-looking
+  hostname, no userinfo and the scheme's default port only, and rejects control
+  characters and percent-encoded control bytes that could confuse the request
+  line or inject headers. `resolve_public_host()` resolves once and rejects the
+  whole DNS answer if any address is non-global, reserved, multicast, or an
+  IPv6-mapped IPv4 address (a documented `ipaddress.is_global` gap upstream's
+  own transport does not check). `PinnedHTTPConnection.connect()` then connects
+  directly to that checked sockaddr — never re-resolving — while still using
+  the URL hostname for the HTTP `Host` header, TLS SNI, and normal certificate
+  hostname verification. `fetch()` re-validates every redirect target the same
+  way, caps hops at `MAX_REDIRECTS`, and rejects control characters in the
+  `Location` header. `fetch_once()` enforces a byte limit (`Content-Length`
+  pre-check plus an incremental read that never exceeds it), a response
+  deadline, and `identity`-only `Content-Encoding`. `http.client` is used
+  directly rather than `urllib.request`, so there is no opener to route through
+  an environment proxy in the first place. Without these checks a site you
+  allowed notifications from could read `file:///etc/passwd`, aim a GET at
+  `127.0.0.1`, or hold the connection open past a reasonable budget.
+  `host_names()` gates the first hop the same way: a source is a plain dotted
+  hostname or it is nothing, so no ports, userinfo or paths.
 - **`Markup.js` renders.** Everything is escaped, then a fixed tag list is put
   back — no `img`, so a body cannot pull a remote image. An anchor survives only
   if `linkable()` vouches for its scheme; `Toast.onLinkActivated` asks again
@@ -194,6 +207,14 @@ turn that text into something with consequences, and both are guarded:
 
 Adding anything that fetches, opens, or writes a path from notification text
 means extending one of these, not working around it.
+
+Use the `bin/omapager-run-*` wrappers: Bubblewrap is required, with no
+unsandboxed fallback. Remote icons are off by default, use the pinned
+transport above, and require sandboxed Pillow raster decoding. Tests use
+synthetic data only. Run `node tests/baseline.cjs`, `node tests/security.cjs`,
+Python unittest discovery, Qt policy tests and `security/check_invariants.py`
+after changes. See `docs/VALIDATION.md` for exact commands and integration
+limits.
 
 The transport regression uses synthetic DNS and a test-owned loopback server
 for real HTTP, redirects and TLS; it never contacts an external or existing
@@ -207,8 +228,9 @@ python3 -B -m unittest discover -s tests -p test_icon_network.py -v
 
 Comments say **why**, and especially why not the obvious thing — most of them
 are a bug that took a while to find. Keep them when you move code; delete them
-when they stop being true. No new runtime dependencies: Quickshell, Hyprland,
-Python 3.
+when they stop being true. Runtime dependencies: Quickshell, Hyprland, Python 3 and Bubblewrap.
+Pillow is optional for local icons and required for opted-in remote icons.
+Additional dependencies require an explicit security/compatibility review.
 
 `wl-clipboard` is **not** an Omarchy dependency and may simply be absent, so
 nothing may assume `wl-copy`. The copy buttons probe once at startup
