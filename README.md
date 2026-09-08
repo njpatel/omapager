@@ -149,6 +149,12 @@ Notification text at 100% and 150% of the theme size:
 | --- | --- |
 | ![Sample notification at 100%](assets/font-scale-100.png) | ![Sample notification at 150%](assets/font-scale-150.png) |
 
+Long titles wrap, and actions that do not fit move behind **More**. At 200%:
+
+| Action row | More expanded |
+| --- | --- |
+| ![Actions at 200%](assets/font-scale-200.png) | ![All actions at 200%](assets/font-scale-200-more.png) |
+
 Every history entry is the text of a message somebody sent you, so it is
 trimmed by age as well as count: **7 days or 200 entries**, whichever comes
 first. Resolved icons are dropped after 60 days unused, and nothing is ever

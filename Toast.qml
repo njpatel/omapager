@@ -128,14 +128,51 @@ Item {
     return out
   }
 
-  // Three buttons is what fits across a card without the labels shrinking.
-  // Past that the last slot becomes "More", which opens the lot as a list
-  // rather than a floating menu: this surface is clipped, and a popup that can
-  // be cut off is worse than one more row.
-  readonly property int fits: 3
+  // Measure the actual themed buttons: a fixed count overflows with larger
+  // fonts or longer action labels. Reserve More before admitting each action.
+  readonly property var actionWidths: {
+    var widths = []
+    for (var i = 0; i < deedMeasures.count; i++) {
+      var button = deedMeasures.itemAt(i)
+      if (button) widths.push(button.implicitWidth)
+    }
+    return widths
+  }
+  readonly property int fits: {
+    var widths = actionWidths, gap = deedRow.spacing, available = deedArea.width
+    if (widths.length !== allDeeds.length) return 0
+    var total = 0
+    for (var i = 0; i < widths.length; i++) total += widths[i] + (i ? gap : 0)
+    if (total <= available) return widths.length
+    var used = moreMeasure.implicitWidth, count = 0
+    for (var j = 0; j < widths.length; j++) {
+      if (used + gap + widths[j] > available) break
+      used += gap + widths[j]
+      count++
+    }
+    return count
+  }
   readonly property bool overflows: allDeeds.length > fits
-  readonly property var deeds: allDeeds.slice(0, overflows ? fits - 1 : fits)
-  readonly property var spare: overflows ? allDeeds.slice(fits - 1) : []
+  readonly property var deeds: allDeeds.slice(0, fits)
+  readonly property var spare: allDeeds.slice(fits)
+
+  Item {
+    visible: false
+    Repeater {
+      id: deedMeasures
+      model: card.allDeeds
+      DeedButton {
+        required property var modelData
+        deed: modelData
+        toast: card
+      }
+    }
+    DeedButton {
+      id: moreMeasure
+      deed: ({ kind: "more", label: "More", value: "" })
+      toast: card
+    }
+  }
   property bool deedsOpen: false
   property bool menuOpen: false
   property string actionsAlign: "right"      // right | left
@@ -484,16 +521,19 @@ Item {
           Text {
             id: title
             anchors.left: parent.left
-            width: parent.width - rightSide.width
+            width: Math.max(1, parent.width - rightSide.width
                    - (badge.visible ? badge.width + Style.space(6) : 0)
                    - (titleMarks.visible ? titleMarks.width + Style.space(7) : 0)
-                   - Style.space(8)
+                   - Style.space(8))
             text: String(card.row.summary || "")
             color: Color.notifications.text
             font.family: Style.font.family
             font.pixelSize: Style.font.body * card.fontScale
             font.weight: Font.DemiBold
-            maximumLineCount: 1
+            // Larger fonts should wrap the summary, not hide it after a few words.
+            // Bound unusually long titles just as we bound the message body.
+            wrapMode: Text.Wrap
+            maximumLineCount: card.bodyOpen ? 8 : 3
             elide: Text.ElideRight
           }
 
@@ -739,7 +779,7 @@ Item {
                                        : card.menuOpen ? "menu"
                                        : card.deedsOpen ? "list"
                                        : (card.hovered && card.expanded
-                                          && card.deeds.length > 0) ? "row" : ""
+                                          && card.allDeeds.length > 0) ? "row" : ""
 
           readonly property real contentHeight: mode === "reply" ? replyBox.height
                                               : mode === "menu" ? menuColumn.implicitHeight
