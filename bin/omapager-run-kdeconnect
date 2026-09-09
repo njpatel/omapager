@@ -1,1 +1,13 @@
-omapager-run-helper
+#!/usr/bin/python3
+"""Regular launcher, not a symlink: Omarchy plugin validation rejects
+symlinks inside a plugin directory. Execs the one sandbox implementation
+in omapager-run-helper with an explicit kind; no logic lives here."""
+import os
+import sys
+
+helper = os.path.join(
+    os.path.dirname(os.path.realpath(__file__)),
+    "omapager-run-helper"
+)
+
+os.execv(helper, [helper, "kdeconnect", *sys.argv[1:]])

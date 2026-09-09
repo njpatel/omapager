@@ -3,8 +3,19 @@
 import ast
 from pathlib import Path
 import re
+import subprocess
 ROOT=Path(__file__).resolve().parents[1]
 errors=[]
+# Omarchy plugin validation rejects symlinks anywhere inside a plugin
+# directory, and this whole repository is the plugin folder `omarchy plugin
+# add <git-url>` clones. A committed symlink (bin/omapager-run-icon used to
+# alias bin/omapager-run-helper this way) installs cleanly by hand but fails
+# that validator, blocking the documented git-install path. Check what git
+# actually tracks, since that is what a fresh clone ships.
+tracked=subprocess.run(['git','-C',str(ROOT),'ls-files','-s'],capture_output=True,text=True,check=True).stdout
+for line in tracked.splitlines():
+    mode,rel=line.split(None,1)[0],line.split('\t',1)[1]
+    if mode=='120000':errors.append(rel+': tracked symlink (Omarchy plugin validation rejects symlinks inside plugin directories)')
 for path in [*ROOT.glob('*.qml'),*ROOT.glob('*.js'),*(ROOT/'bin').glob('*')]:
     if not path.is_file() or path.is_symlink():continue
     text=path.read_text()

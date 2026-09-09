@@ -53,13 +53,14 @@ by driving the daemon's own IPC on the real desktop, then reverted.
 ### Live Omarchy session
 
 Installed via the real `omarchy plugin` CLI — `omarchy plugin validate` first
-rejected the plugin folder (`bin/omapager-run-icon` etc. are committed
-symlinks to `omapager-run-helper`; Omarchy's validator disallows symlinks
-inside a plugin folder). That validator is not invoked by `plugin add`/`enable`
-for an already-present local folder, so install proceeded; **this is a real,
-previously-undiscovered packaging gap for anyone installing this plugin
-through `omarchy plugin add` from git rather than a manual symlink**, tracked
-below under Risks. `shell.json` was backed up and its SHA-256 recorded first;
+rejected the plugin folder (`bin/omapager-run-icon` etc. were committed
+symlinks to `omapager-run-helper` at the time; Omarchy's validator disallows
+symlinks inside a plugin folder). That validator is not invoked by `plugin
+add`/`enable` for an already-present local folder, so install proceeded here,
+but this blocked the documented `omarchy plugin add <git-url>` path for
+anyone installing this plugin from git rather than a manual symlink — see
+"Helper launchers are regular files, not symlinks" below for the fix and its
+own validation pass. `shell.json` was backed up and its SHA-256 recorded first;
 `omarchy plugin disable omarchy.notifications` / `enable njpatel.omapager
 center` brought the plugin up, and disable/enable in reverse plus `plugin
 remove njpatel.omapager` afterward restored it — `diff` against the backup
@@ -90,6 +91,41 @@ Not exercised in this pass, and explicitly left untested rather than faked:
 - **KDE Connect**: no device paired and no `kdeconnectd`/`kdeconnect-cli` installed on this host. Reply, stale-target, ambiguous-target and failed-target behavior against a real phone remain untested; current coverage is the mocked-bus argv/logic tests only.
 - **Remote-icon opt-in fetch**, an explicit sender action button's D-Bus `ActionInvoked` round trip, and pointer-driven card click / hover — no safe input injection was available, and toggling `fetchRemoteIcons` needs a config change not attempted this pass.
 - **Failure-injection**: Bubblewrap missing, the icon/store helpers failing, or `wl-clipboard` absent were not reproduced live (would mean uninstalling working tooling from this machine); the fail-closed behavior for each is exercised in `tests/security.cjs`/`test_security.py` instead, not on this host.
+
+## 2026-09-09 (third pass) — helper launchers are regular files, not symlinks
+
+The live-session pass above found that `omarchy plugin validate` rejects a
+plugin folder containing symlinks, and that `bin/omapager-run-icon`,
+`bin/omapager-run-store` and `bin/omapager-run-kdeconnect` were committed as
+symlinks to `bin/omapager-run-helper` (an argv0-dispatch trick: the helper
+reads `Path(sys.argv[0]).name` to pick `icon`/`store`/`kdeconnect`). That
+validator isn't invoked by `plugin add`/`enable` on an already-local folder,
+which is how the previous pass installed it, but it blocks the documented
+`omarchy plugin add <git-url>` distribution path for anyone else.
+
+Fixed by replacing the three symlinks with regular executable Python files
+that `os.execv()` into `omapager-run-helper <kind> ...`, passing argv through
+unchanged — `bin/omapager-run-helper` (the sandbox/Bubblewrap implementation)
+is untouched and still the only place that logic lives; the launchers already
+matched an existing, previously-untested `kind == "helper"` dispatch branch
+in `omapager-run-helper` designed for exactly this call shape.
+
+| Check | Result |
+| --- | --- |
+| `git ls-files -s bin/omapager-run-{icon,store,kdeconnect,helper}` | All four now `100755` (`omapager-run-helper` was already a regular file; the other three changed from `120000` symlink mode) |
+| `find . -type l -not -path './.git/*'` | Only under `.venv/` (this machine's own gitignored, untracked dev venv — not part of the plugin tree) |
+| `node tests/baseline.cjs` / `security.cjs` | Pass |
+| `python3 -m unittest discover -s tests -v` | 27 pass, none skipped |
+| `python3 security/check_invariants.py` | Pass — now also asserts, via `git ls-files -s`, that no tracked path in the repository (the plugin folder a git-based install ships) is a symlink; verified this actually fails by reintroducing a symlink in a scratch tree and re-running the check before committing the fix |
+| `python3 tests/sandbox.py` | Pass |
+| `bin/omapager-run-helper status` | `{"bubblewrapAvailable": true, "sandboxOperational": true, "required": true, "unsandboxedFallback": false}` |
+| `bin/omapager-run-icon --help` / `bin/omapager-run-store restore` / `bin/omapager-run-store quiet` / `bin/omapager-run-kdeconnect list` | Each launcher exercised end-to-end through the real Bubblewrap sandbox with a safe, read-only verb; all returned the same output the pre-fix symlinks did |
+| `omarchy plugin validate <fresh checkout of this commit's tree>` | **Exit 0.** (Running it against the live working directory in place first failed — on `.venv/lib64`, this machine's own untracked venv, not this fix; a clean export of the exact tree passes) |
+| `omarchy plugin add <local clone of this branch>` | See below |
+
+Not touched, per scope: `bin/omapager_http.py public_hostname()`'s documented
+hex-host follow-up, KDE Connect logic, and no new hardening features were
+added — this is a packaging/compatibility fix only.
 
 ## 2026-09-06/07 — original hardening pass
 
@@ -156,13 +192,11 @@ the desktop's system Python by this patch.
   reply, cancellation and dismissal. No device or `kdeconnectd` was available
   on the host used for the 2026-09-09 live-session pass above. Current
   automated coverage mocks the bus and validates argv/logic only.
-- **Plugin-folder symlinks**: `omarchy plugin validate` rejects this plugin's
-  folder because `bin/omapager-run-icon`/`-store`/`-kdeconnect` are committed
-  symlinks to `omapager-run-helper`. Installing by hand-symlinking the repo
-  into `~/.config/omarchy/plugins/` (as this pass did) or via `plugin
-  add`/`enable` on an already-present local folder both skip that validator,
-  but a real `omarchy plugin add <git-url>` install path may not. Not fixed in
-  this pass — flagging as a packaging follow-up, not a security finding.
+- ~~Plugin-folder symlinks~~ — **resolved**: the hardened helper aliases were
+  converted from Git symlinks to regular executable launchers because current
+  Omarchy validation rejects symlinks inside plugins. `omarchy plugin
+  validate` now passes on the exact branch head; see "helper launchers are
+  regular files, not symlinks" above.
 - Remote-icon opt-in fetch, an explicit sender action button's D-Bus
   `ActionInvoked` round trip, pointer-driven card click/hover, and visual
   confirmation of icon rendering (no screenshot was taken) — not exercised in
