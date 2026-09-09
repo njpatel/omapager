@@ -29,7 +29,15 @@ def parse_url(raw):
         raise ValueError('forbidden destination')
     return p, h, port
 
-def resolve_public_host(host, port):
+def resolve_public_answers(host, port):
+    """Every validated address for host, in resolver order.
+
+    All of them are checked before any of them is used, so DNS cannot swap a
+    private address in between this check and the connect() that follows -
+    but "validated" is not "reachable": a multi-homed host may have one
+    address down or filtered, so the caller may move on to the next
+    validated answer. It must never fall back to an address that was not
+    itself part of this same, fully-checked response."""
     answers = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM, proto=socket.IPPROTO_TCP)
     if not answers:
         raise ValueError('empty DNS response')
@@ -39,28 +47,49 @@ def resolve_public_host(host, port):
                 or not ip.is_global or ip.is_multicast or ip.is_reserved
                 or (isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None)):
             raise ValueError('non-public DNS response')
-    return answers[0]
+    return answers
+
+def resolve_public_host(host, port):
+    """The first validated address, for callers that only want one."""
+    return resolve_public_answers(host, port)[0]
 
 class PinnedHTTPConnection(http.client.HTTPConnection):
-    def __init__(self, host, port, answer, tls=False):
+    def __init__(self, host, port, answers, tls=False):
         super().__init__(host, port, timeout=5)
-        self.answer, self.tls = answer, tls
+        # A single 4-tuple answer is accepted too, for callers with exactly
+        # one already-validated address to connect to.
+        self.answers = [answers] if isinstance(answers, tuple) else answers
+        self.tls = tls
 
     def connect(self):
-        family, socktype, proto, _, address = self.answer
-        sock = socket.socket(family, socktype, proto)
-        try:
-            sock.settimeout(self.timeout)
-            # Numeric sockaddr from the validated resolution: no second lookup.
-            sock.connect(address)
-            self.sock = ssl.create_default_context().wrap_socket(sock, server_hostname=self.host) if self.tls else sock
-        except BaseException:
-            sock.close()
-            raise
+        last_error = None
+        for family, socktype, proto, _, address in self.answers:
+            sock = socket.socket(family, socktype, proto)
+            try:
+                sock.settimeout(self.timeout)
+                # Numeric sockaddr from the validated resolution: no second lookup.
+                sock.connect(address)
+            except OSError as error:
+                sock.close()
+                last_error = error
+                continue
+            if not self.tls:
+                self.sock = sock
+                return
+            try:
+                # A TLS failure (bad cert, hostname mismatch) is not a
+                # connectivity failure: it must not be masked by quietly
+                # trying a different address for the same hostname.
+                self.sock = ssl.create_default_context().wrap_socket(sock, server_hostname=self.host)
+                return
+            except BaseException:
+                sock.close()
+                raise
+        raise last_error
 
 def fetch_once(url, limit):
     p, host, port = parse_url(url)
-    conn = PinnedHTTPConnection(host, port, resolve_public_host(host, port), p.scheme == 'https')
+    conn = PinnedHTTPConnection(host, port, resolve_public_answers(host, port), p.scheme == 'https')
     try:
         conn.request('GET', urlunsplit(('', '', p.path or '/', p.query, '')),
                      headers={'Host': host, 'User-Agent': 'omapager-hardened/0.1', 'Accept-Encoding': 'identity'})

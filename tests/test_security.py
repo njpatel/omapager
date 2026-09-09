@@ -96,7 +96,7 @@ class Network(unittest.TestCase):
         response.getheader.side_effect=lambda k,d=None: d
         response.read1.return_value=b'x'*11
         conn=MagicMock();conn.getresponse.return_value=response
-        with patch.object(net,'resolve_public_host',return_value=()),patch.object(net,'PinnedHTTPConnection',return_value=conn):
+        with patch.object(net,'resolve_public_answers',return_value=()),patch.object(net,'PinnedHTTPConnection',return_value=conn):
             with self.assertRaises(ValueError):net.fetch_once('https://example.com',10)
         conn.close.assert_called_once()
 

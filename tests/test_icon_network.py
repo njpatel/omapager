@@ -13,14 +13,18 @@ import runpy
 import socket
 import ssl
 import subprocess
+import sys
 import tempfile
 import threading
 import unittest
 from unittest import mock
 import urllib.error
 
-
-ICON = Path(__file__).resolve().parents[1] / "bin" / "omapager-icon"
+ROOT = Path(__file__).resolve().parents[1]
+ICON = ROOT / "bin" / "omapager-icon"
+# omapager-icon imports its network layer from bin/omapager_http.py; runpy
+# does not add the script's own directory to sys.path for a plain file.
+sys.path.insert(0, str(ROOT / "bin"))
 PUBLIC = "93.184.216.34"
 PUBLIC_V6 = "2606:4700:4700::1111"
 BLOCKED = (
@@ -59,7 +63,7 @@ class IconNetworkTest(unittest.TestCase):
                 requests.append((self.headers["Host"], self.path))
                 if redirect and self.path == "/start":
                     self.send_response(302)
-                    self.send_header("Location", f"{scheme}://target.test:8443/icon")
+                    self.send_header("Location", f"{scheme}://target.test/icon")
                     body = b""
                 else:
                     self.send_response(200)
@@ -116,7 +120,7 @@ class IconNetworkTest(unittest.TestCase):
             with mock.patch.dict(os.environ, environment, clear=True), \
                     mock.patch.object(socket, "getaddrinfo", resolve), \
                     mock.patch.object(socket.socket, "connect", connect), \
-                    mock.patch.object(ssl, "_create_default_https_context",
+                    mock.patch.object(ssl, "create_default_context",
                                       return_value=self.client_context):
                 icon = runpy.run_path(str(ICON))
                 yield icon["get"], state
@@ -131,14 +135,14 @@ class IconNetworkTest(unittest.TestCase):
                 for redirect in (False, True):
                     with self.subTest(scheme=scheme, address=address, redirect=redirect):
                         with self.transport(scheme, address, redirect) as (get, state):
-                            url = f"{scheme}://source.test:8443/start"
+                            url = f"{scheme}://source.test/start"
                             body, final = get(url)
                             self.assertEqual(body, b"fixture icon")
-                            self.assertEqual(final, f"{scheme}://target.test:8443/icon"
+                            self.assertEqual(final, f"{scheme}://target.test/icon"
                                              if redirect else url)
-                            expected = [("source.test:8443", "/start")]
+                            expected = [("source.test", "/start")]
                             if redirect:
-                                expected.append(("target.test:8443", "/icon"))
+                                expected.append(("target.test", "/icon"))
                             self.assertEqual(state["requests"], expected)
                             self.assertEqual(state["attempts"], [PUBLIC] * len(expected))
                             self.assertEqual(dict(state["calls"]),
@@ -155,10 +159,10 @@ class IconNetworkTest(unittest.TestCase):
                         return [PUBLIC] if redirect and host == "source.test" else [address]
                     with self.transport(redirect=redirect, answers=answers) as (get, state):
                         with self.assertRaises((ValueError, urllib.error.URLError)):
-                            get("http://source.test:8443/start")
+                            get("http://source.test/start")
                         self.assertEqual(state["attempts"], [PUBLIC] if redirect else [])
                         self.assertEqual(state["requests"],
-                                         [("source.test:8443", "/start")] if redirect else [])
+                                         [("source.test", "/start")] if redirect else [])
 
     def test_empty_and_mixed_answers_fail_before_connect(self):
         for addresses in ([], [PUBLIC, "10.0.0.1"], [PUBLIC, "fd00::1"]):
@@ -179,10 +183,12 @@ class IconNetworkTest(unittest.TestCase):
             self.assertEqual(state["sni"], ["source.test"])
 
     def test_tls_rejects_wrong_hostname_before_http(self):
+        # The pinned transport talks http.client directly rather than through
+        # urllib.request, so a certificate failure surfaces as the raw ssl
+        # exception rather than a wrapped urllib.error.URLError.
         with self.transport("https") as (get, state):
-            with self.assertRaises(urllib.error.URLError) as error:
+            with self.assertRaises(ssl.SSLCertVerificationError):
                 get("https://mismatch.test/icon")
-            self.assertIsInstance(error.exception.reason, ssl.SSLCertVerificationError)
             self.assertEqual(state["requests"], [])
             self.assertEqual(state["sni"], ["mismatch.test"])
 
