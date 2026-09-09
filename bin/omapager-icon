@@ -334,6 +334,53 @@ def fetch_site(host, scheme):
     return None
 
 
+def remote_cache_path(host, scheme):
+    """Where a validated fetch_site(host, scheme) result would live."""
+    return os.path.join(CACHE, "web-" + hashlib.sha256((host + scheme).encode()).hexdigest() + ".png")
+
+
+def safe_cached_remote_icon(host, scheme, cached):
+    """cached, if it is a raster this code itself would have produced for
+    (host, scheme) and it still passes today's format policy. Otherwise None.
+
+    A cache entry from before raster validation existed - most notably a
+    remote SVG, cached and handed straight to the unsandboxed UI by an older
+    build - must not survive into a hardened build merely because it
+    predates this check. Trusted local theme icons (from_config,
+    from_icon_theme, from_desktop_entries) are a separate path entirely and
+    are untouched by this: this function only ever runs on a hit from the
+    web/remote cache."""
+    if not isinstance(cached, str):
+        return None
+    real = os.path.realpath(cached)
+    if real != os.path.realpath(remote_cache_path(host, scheme)):
+        return None            # wrong shape/location for this code's own cache
+    if not real.startswith(os.path.realpath(CACHE) + os.sep) or not os.path.isfile(real):
+        return None
+    try:
+        from PIL import Image
+        Image.MAX_IMAGE_PIXELS = 2048 * 2048
+        with Image.open(real) as im:
+            if im.format != "PNG" or max(im.size) > 2048:
+                return None
+    except Exception:
+        return None
+    return real
+
+
+def invalidate_cached_remote_icon(cached):
+    """Remove a cache entry that failed safe_cached_remote_icon(), so a
+    future fetch starts clean instead of tripping over it again."""
+    if not isinstance(cached, str):
+        return
+    real = os.path.realpath(cached)
+    if real.startswith(os.path.realpath(CACHE) + os.sep) and os.path.isfile(real):
+        try:
+            os.unlink(real)
+        except OSError:
+            pass
+
+
 # ---------------------------------------------------------------- resolve
 def host_names(source):
     """app.slack.com -> slack, app.slack.com. The middle label is almost always
@@ -390,8 +437,18 @@ def resolve(args):
         for host in [web[0]]:
             note = index.get(host) or {}
             cached = note.get(args.scheme)
-            if cached and isinstance(cached, str) and os.path.realpath(cached).startswith(os.path.realpath(CACHE) + os.sep) and os.path.isfile(cached):
-                return cached, "cache"
+            if cached:
+                safe = safe_cached_remote_icon(host, args.scheme, cached)
+                if safe:
+                    return safe, "cache"
+                # Fails the current format policy - a legacy or tampered
+                # entry. Drop it and fall through to a fresh, validated
+                # fetch rather than trusting it because it is already there.
+                invalidate_cached_remote_icon(cached)
+                note.pop(args.scheme, None)
+                note["failed_at"] = 0
+                index[host] = note
+                save_index(index)
             if note.get("failed_at", 0) > time.time() - RETRY_AFTER:
                 continue
             hit = fetch_site(host, args.scheme)

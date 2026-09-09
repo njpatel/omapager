@@ -1,3 +1,4 @@
+import argparse
 import importlib.machinery
 import importlib.util
 import io
@@ -195,6 +196,47 @@ class Icons(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp,patch.object(icon,'CACHE',temp),patch.object(icon,'get',return_value=(b'<svg xmlns="http://www.w3.org/2000/svg"></svg>','https://example.com')):
             self.assertIsNone(icon.fetch_site('example.com','dark'))
             self.assertEqual(list(Path(temp).iterdir()),[])
+    # PR 4 review finding 2 (P2): a remote cache hit used to be trusted purely
+    # because the path was inside CACHE and existed, so a cache entry written
+    # by a pre-hardening build - most dangerously a raw remote SVG - would be
+    # handed straight to the unsandboxed UI on every later run, bypassing the
+    # raster validation a fresh fetch goes through. safe_cached_remote_icon()
+    # now requires a cache hit to be exactly the validated raster this code
+    # itself would have produced.
+    def test_review_p2_legacy_remote_svg_cache_rejected(self):
+        icon=module('omapager-icon')
+        with tempfile.TemporaryDirectory() as temp:
+            legacy=os.path.join(temp,'web-example-com-dark.svg')
+            with open(legacy,'w') as f:
+                f.write('<svg xmlns="http://www.w3.org/2000/svg"><script>evil()</script></svg>')
+            index={'example.com':{'dark':legacy}}
+            with patch.object(icon,'CACHE',temp), \
+                 patch.object(icon,'INDEX',os.path.join(temp,'index.json')), \
+                 patch.object(icon,'load_index',return_value=index), \
+                 patch.object(icon,'save_index') as save_index, \
+                 patch.object(icon,'fetch_site',return_value=None) as fetch_site:
+                args=argparse.Namespace(source='example.com',app_icon='',app='',key='',
+                                        scheme='dark',fetch=True)
+                with patch.object(icon,'from_config',return_value=None), \
+                     patch.object(icon,'from_icon_theme',return_value=None), \
+                     patch.object(icon,'from_desktop_entries',return_value=None):
+                    hit,how=icon.resolve(args)
+            self.assertNotEqual(hit,legacy)
+            self.assertFalse(os.path.exists(legacy),'poisoned cache entry must be deleted, not reused')
+            fetch_site.assert_called_once_with('example.com','dark')
+            self.assertTrue(save_index.called)
+    def test_review_p2_local_theme_svg_preserved(self):
+        # A trusted local theme SVG is a completely separate path
+        # (from_icon_theme) and must be unaffected by remote-cache hardening.
+        icon=module('omapager-icon')
+        with tempfile.TemporaryDirectory() as temp:
+            theme_dir=os.path.join(temp,'hicolor','scalable','apps')
+            os.makedirs(theme_dir)
+            svg_path=os.path.join(theme_dir,'kitty.svg')
+            with open(svg_path,'w') as f:
+                f.write('<svg xmlns="http://www.w3.org/2000/svg"></svg>')
+            with patch.object(icon,'ICON_DIRS',[temp]):
+                self.assertEqual(icon.from_icon_theme(['kitty']),svg_path)
 
 class Raster(unittest.TestCase):
     def test_valid_raster_and_dimension_limit(self):
