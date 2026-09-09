@@ -410,6 +410,38 @@ Item {
 
   ListModel { id: toasts }
 
+  // ------------------------------------------------------ live capacity
+  //
+  // toasts.count alone undercounts what is actually live: a card can be
+  // accepted and tracked while sitting in `held` (never inserted into
+  // toasts until the deck is released) or mid-flight in a Qt.callLater
+  // waiting to be inserted. A flood during either window used to sail past
+  // any check keyed on toasts.count alone - 150 held notifications read as
+  // toasts.count === 0. liveKeys is reserved for a key the moment it is
+  // admitted (not a replacement of an existing row) and released only when
+  // that row actually leaves - closed, dismissed, expired, or found to be
+  // muted and never shown at all - so it counts a row through every state
+  // it can be in: held, awaiting insertion, or visible.
+  readonly property int maxLiveNotifications: 100
+  property var liveKeys: ({})
+
+  function liveCount() { return Object.keys(liveKeys).length }
+
+  function reserveLive(key) {
+    if (liveKeys[key]) return
+    var next = {}
+    for (var k in liveKeys) next[k] = true
+    next[key] = true
+    liveKeys = next
+  }
+
+  function releaseLive(key) {
+    if (!(key in liveKeys)) return
+    var next = {}
+    for (var k in liveKeys) if (k !== key) next[k] = true
+    liveKeys = next
+  }
+
   // ------------------------------------------------------------- icons
   //
   // Resolved once per source and remembered, so a chatty Slack does not spawn
@@ -755,14 +787,22 @@ Item {
 
   // ------------------------------------------------------------- arrival
   function handleNotification(notification) {
-    // Without this the object is destroyed as soon as this handler returns,
-    // taking the actions and the image with it.
-    if (toasts.count >= 100 && rowIndexForOriginal(notification.id) < 0) { notification.tracked = false; return }
-    notification.tracked = true
-
-    // replaces_id: the sender is updating something already on screen.
+    // replaces_id: the sender is updating something already on screen. That
+    // row already holds a reservation, so a replacement never needs a new
+    // one - only a genuinely new key does, and only a genuinely new key can
+    // be turned away for capacity.
     var replacing = rowIndexForOriginal(notification.id)
     var key = replacing >= 0 ? toasts.get(replacing).key : nextKey()
+    var newSlot = replacing < 0
+
+    // Without this the object is destroyed as soon as this handler returns,
+    // taking the actions and the image with it.
+    if (newSlot && service.liveCount() >= service.maxLiveNotifications) {
+      notification.tracked = false
+      return
+    }
+    notification.tracked = true
+    if (newSlot) service.reserveLive(key)
 
     var row = Store.snapshot(notification, key, NotificationUrgency)
     row.duration = durationFor(notification.urgency, row.expireTimeout)
@@ -790,6 +830,7 @@ Item {
       Store.write(storeProc, storeBin, "put", row)
       Store.write(storeProc, storeBin, "close", null, [key, muted])
       release(key)
+      if (newSlot) service.releaseLive(key)   // never became live: not held, never shown
       return
     }
 
@@ -799,7 +840,8 @@ Item {
 
     // An update to something already on screen goes through either way: it
     // changes a card in place rather than moving anything. Only a genuinely
-    // new card waits, and only while the deck is being held.
+    // new card waits, and only while the deck is being held - and it keeps
+    // its reservation the whole time it sits there, unshown.
     if (service.holding() && service.rowIndexFor(key) < 0) {
       var queue = service.held.slice()
       queue.push(row)
@@ -885,6 +927,7 @@ Item {
       } catch (e) {}
     }
     release(key)
+    service.releaseLive(key)
     toasts.remove(at)
     delete heights[key]
     Store.write(storeProc, storeBin, "close", null, [key, reason])
@@ -1411,6 +1454,7 @@ Item {
           // handle it left died with the last shell, so without this every
           // card that came back wore a letter.
           service.wantIcon(row)
+          service.reserveLive(String(row.key || ""))
           toasts.insert(0, row)
         }
       }

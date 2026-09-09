@@ -52,4 +52,117 @@ scope.focusWindow({address:'0x123);bad()',wmClass:'x'});
 assert.equal(calls.length,0);
 scope.focusWindow({address:'0x123abc'});assert.equal(calls.length,1);
 assert.equal(calls[0],'hl.dsp.focus({window = hl.get_window("address:0x123abc")})');
+
+// PR 4 review finding 3 (P2): the arrival cap used to check toasts.count
+// alone, which a notification sitting in `held` (queued while the pointer is
+// over the deck) or mid-flight inside Qt.callLater (queued for insertion)
+// never incremented. 150 notifications could be accepted with toasts.count
+// at 0 the whole time, then all land on screen the moment the deck let go or
+// the event loop drained. This runs the actual production functions -
+// handleNotification, showRow, finishClose, releaseHeld, reserveLive/
+// releaseLive - out of Service.qml against a minimal fake Quickshell/Store,
+// not a reimplementation of the accounting.
+function extract(src, startMarker, endMarker) {
+  const s = src.indexOf(startMarker);
+  if (s < 0) throw new Error('start marker not found: ' + startMarker);
+  const e = src.indexOf(endMarker, s + startMarker.length);
+  if (e < 0) throw new Error('end marker not found: ' + endMarker);
+  return src.slice(s, e);
+}
+const capacitySource = [
+  extract(source, 'function liveCount()', '// ------------------------------------------------------------- icons'),
+  extract(source, 'function nextKey()', 'function rowIndexFor(key)'),
+  extract(source, 'function rowIndexFor(key)', 'function rowIndexForOriginal(id)'),
+  extract(source, 'function rowIndexForOriginal(id)', '// ------------------------------------------------------------- arrival'),
+  extract(source, 'function handleNotification(notification)', '// Qt.callLater: mutating the model'),
+  extract(source, 'function showRow(row)', "// Let go of the sender's object"),
+  extract(source, 'function release(key)', '// ------------------------------------------------------------- departure'),
+  extract(source, 'function finishClose(key, reason)', 'function clearAll(reason)'),
+  extract(source, 'function releaseHeld()', '// Nothing waits forever'),
+].join('\n');
+
+function newCapacityScope() {
+  const fakeToasts = { rows: [],
+    get count() { return this.rows.length; },
+    get(i) { return this.rows[i]; },
+    insert(i, row) { this.rows.splice(i, 0, row); },
+    remove(i) { this.rows.splice(i, 1); } };
+  const callLaterQueue = [];
+  const s = {
+    toasts: fakeToasts, refs: {}, refsRevision: 0, keySeed: 0, liveKeys: {},
+    heights: {}, leaving: {}, layoutRevision: 0, replyingKey: '', held: [],
+    doNotDisturb: false, globalSnoozeUntil: 0, codesBypassQuiet: false,
+    snoozedUntil: () => 0, storeProc: {}, storeBin: '', wantIcon: () => {},
+    lookForReply: () => {}, Store: { snapshot: (n, k) => ({ key: k, originalId: n.id, urgency: n.urgency, groupKey: '', expireTimeout: -1 }),
+      write: () => {}, applyTo: () => {} },
+    durationFor: () => 5000, NotificationUrgency: { Critical: 2, Normal: 1, Low: 0 },
+    Qt: { callLater: fn => callLaterQueue.push(fn) },
+    Style: { space: n => n },
+  };
+  // `handleNotification`/`releaseHeld`/`finishClose` reach the same
+  // properties both bare (they are defined on `service` itself in the real
+  // QML) and as `service.x` (called from elsewhere), so both spellings must
+  // resolve to the same storage here too - a shared object reference for
+  // anything only ever mutated in place (refs), a getter/setter for
+  // anything reassigned wholesale (held).
+  s.service = {
+    refs: s.refs,
+    maxLiveNotifications: 100,
+    liveCount: () => s.liveCount(), reserveLive: k => s.reserveLive(k), releaseLive: k => s.releaseLive(k),
+    holding: () => s.pointerHolding === true,
+    get held() { return s.held; }, set held(v) { s.held = v; },
+    rowIndexFor: k => s.rowIndexFor(k), showRow: row => s.showRow(row),
+    releaseHeld: () => s.releaseHeld(),
+    snapshot: () => ({}), deckHeight: 0, retarget: () => {}, layout: { placements: {} },
+  };
+  vm.createContext(s);
+  vm.runInContext(capacitySource, s);
+  s.drainCallLater = () => { while (callLaterQueue.length) callLaterQueue.shift()(); };
+  s.fakeNotification = (id, urgency) => ({ id: id || 0, urgency: urgency === undefined ? 1 : urgency,
+    tracked: false, closed: { connect: () => {} } });
+  return s;
+}
+
+{ // review_p2_held_notifications_count_toward_limit
+  const s = newCapacityScope();
+  s.pointerHolding = true;             // every arrival queues into service.held, none reach toasts
+  for (let i = 0; i < 150; i++) s.handleNotification(s.fakeNotification());
+  assert.equal(s.toasts.count, 0, 'nothing is shown while the deck is held');
+  assert.equal(s.service.held.length, 100, 'held notifications must themselves be capped at the limit');
+  assert.equal(s.liveCount(), 100, 'held rows must count toward the live cap even though toasts.count is 0');
+  s.pointerHolding = false;
+  s.service.releaseHeld();
+  s.drainCallLater();
+  assert.equal(s.toasts.count, 100, 'released rows land on screen, still capped at 100, never the full 150 offered');
+}
+
+{ // review_p2_deferred_notifications_count_toward_limit
+  const s = newCapacityScope();       // not held: each arrival schedules a Qt.callLater insertion
+  for (let i = 0; i < 150; i++) s.handleNotification(s.fakeNotification());
+  assert.equal(s.toasts.count, 0, 'no callback has run yet - a burst arriving faster than the event loop drains');
+  assert.equal(s.liveCount(), 100, 'in-flight (not yet inserted) rows must still count toward the live cap');
+  s.drainCallLater();
+  assert.equal(s.toasts.count, 100, 'draining the queue must never produce more than the cap once admitted');
+}
+
+{ // review_p2_replacement_at_capacity_does_not_consume_slot
+  const s = newCapacityScope();
+  for (let i = 1; i <= 100; i++) { s.handleNotification(s.fakeNotification(i)); s.drainCallLater(); }
+  assert.equal(s.toasts.count, 100);
+  assert.equal(s.liveCount(), 100);
+  // At capacity: an update to an existing id (replaces_id) must still go
+  // through and must not be rejected or consume a second reservation.
+  const updated = s.fakeNotification(1);
+  s.handleNotification(updated);
+  assert.equal(updated.tracked, true, 'a replacement of an existing row must not be turned away at capacity');
+  s.drainCallLater();
+  assert.equal(s.toasts.count, 100, 'a replacement must not grow the deck past the cap');
+  assert.equal(s.liveCount(), 100, 'a replacement must not consume a second reservation');
+  // A genuinely new notification, still at capacity, must be rejected.
+  const rejected = s.fakeNotification(9999);
+  s.handleNotification(rejected);
+  assert.equal(rejected.tracked, false, 'a new notification at capacity must be rejected');
+  assert.equal(s.toasts.count, 100);
+}
+
 console.log('security JS: passed');
