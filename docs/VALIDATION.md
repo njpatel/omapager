@@ -121,7 +121,7 @@ in `omapager-run-helper` designed for exactly this call shape.
 | `bin/omapager-run-helper status` | `{"bubblewrapAvailable": true, "sandboxOperational": true, "required": true, "unsandboxedFallback": false}` |
 | `bin/omapager-run-icon --help` / `bin/omapager-run-store restore` / `bin/omapager-run-store quiet` / `bin/omapager-run-kdeconnect list` | Each launcher exercised end-to-end through the real Bubblewrap sandbox with a safe, read-only verb; all returned the same output the pre-fix symlinks did |
 | `omarchy plugin validate <fresh checkout of this commit's tree>` | **Exit 0.** (Running it against the live working directory in place first failed — on `.venv/lib64`, this machine's own untracked venv, not this fix; a clean export of the exact tree passes) |
-| `omarchy plugin add <local clone of this branch>` | See below |
+| `omarchy plugin add <local clone of this branch>` | Exit 0. `git clone`s the branch, installs into `~/.config/omarchy/plugins/njpatel.omapager` with no symlinks, `omarchy plugin enable` brings it up, a sent notification is delivered (`count: 1`), sandbox reports operational; fully reverted afterward with a byte-identical `shell.json` |
 
 Not touched, per scope: `bin/omapager_http.py public_hostname()`'s documented
 hex-host follow-up, KDE Connect logic, and no new hardening features were
