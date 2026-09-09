@@ -17,10 +17,19 @@ function snapshot(n, key, urgencyEnum) {
   // to an Image draws a broken-texture checkerboard for any name the icon
   // theme does not have.
   var img = Security.bounded(n.image, 256)
-  if (!/^image:\/\/qsimage\/[0-9]+\/[0-9]+$/.test(img)) img = ""
   var named = ""
+  // The name has to be pulled out before the qsimage-only shape check below,
+  // or that check throws it away first (it is never a qsimage handle) and
+  // "image://icon/kitty" is indistinguishable from having sent no icon at
+  // all - a real regression a prior ordering of these two checks had.
+  // Everything past "image://icon/" is a local icon-theme name to look up,
+  // never a path: the strict appIcon charset a few lines down
+  // (/^[a-zA-Z0-9_.-]{1,256}$/, no "/") is what actually keeps
+  // "../../etc/passwd" or a "file://" URL from being promoted into one.
   if (img.indexOf("image://icon/") === 0) {
     named = img.substring("image://icon/".length)
+    img = ""
+  } else if (!/^image:\/\/qsimage\/[0-9]+\/[0-9]+$/.test(img)) {
     img = ""
   }
   // Who actually sent it. The one identity that is never a guess: a terminal

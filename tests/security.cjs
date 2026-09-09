@@ -207,4 +207,36 @@ function newCapacityScope() {
 for (const u of ['https://example.com/', 'https://sub.example.co.uk/', 'https://x0.example.com/'])
   assert.ok(S.safeHttpUrl(u), u);
 
+// PR 4 review finding 5 (P2): snapshot() validated the raw image handle
+// against the qsimage-only shape /^image:\/\/qsimage\/\d+\/\d+$/ before the
+// image://icon/<name> extraction ever ran, so any image://icon/... handle -
+// exactly what `notify-send -i some-icon` produces - failed that check first
+// and was thrown away, indistinguishable from no icon at all. The name is
+// now pulled out before the qsimage-only check runs.
+{
+  const iconRow = Store.snapshot({ appName: 'Test', summary: 's', body: 'b', image: 'image://icon/kitty' }, 'n1', { Normal: 1 });
+  assert.equal(iconRow.appIcon, 'kitty', 'review_p2_named_icon_hint_preserved');
+  assert.equal(iconRow.image, '', 'a named-icon hint is not also a qsimage handle');
+}
+{
+  // The strict appIcon charset (no "/") is what actually keeps a traversal
+  // or a foreign scheme from being promoted into a local path lookup, not
+  // the extraction itself.
+  for (const hostile of ['image://icon/../../etc/passwd', 'image://icon/' + 'a'.repeat(500),
+                          'file:///etc/passwd', 'https://example/image.png']) {
+    const row = Store.snapshot({ appName: 'Test', summary: 's', body: 'b', image: hostile }, 'n1', { Normal: 1 });
+    assert.ok(!row.appIcon.includes('/'), 'review_p2_named_icon_path_traversal_rejected: ' + hostile + ' -> ' + JSON.stringify(row.appIcon));
+    assert.equal(row.image, '', hostile);
+  }
+  const traversal = Store.snapshot({ appName: 'Test', summary: 's', body: 'b', image: 'image://icon/../../etc/passwd' }, 'n1', { Normal: 1 });
+  assert.equal(traversal.appIcon, '', 'review_p2_named_icon_path_traversal_rejected');
+}
+{
+  // image://qsimage/<n>/<n> is the separate, already-validated internal
+  // handle and must be unaffected by the reordering.
+  const qs = Store.snapshot({ appName: 'Test', summary: 's', body: 'b', image: 'image://qsimage/12/1' }, 'n1', { Normal: 1 });
+  assert.equal(qs.image, 'image://qsimage/12/1');
+  assert.equal(qs.appIcon, '');
+}
+
 console.log('security JS: passed');
