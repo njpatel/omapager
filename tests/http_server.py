@@ -22,9 +22,9 @@ class Handler(BaseHTTPRequestHandler):
             except (BrokenPipeError,ConnectionResetError):pass
 server=ThreadingHTTPServer(('127.0.0.1',0),Handler)
 thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
-answer=(socket.AF_INET,socket.SOCK_STREAM,6,'',server.server_address)
+answer=[(socket.AF_INET,socket.SOCK_STREAM,6,'',server.server_address)]
 try:
-    with patch.object(net,'resolve_public_host',return_value=answer):
+    with patch.object(net,'resolve_public_answers',return_value=answer):
         assert net.fetch('http://example.com/ok',100)[0]==b'ok'
         for route in ('private','loop','large'):
             try:net.fetch('http://example.com/'+route,100)
