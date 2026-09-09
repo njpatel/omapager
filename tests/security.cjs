@@ -239,4 +239,47 @@ for (const u of ['https://example.com/', 'https://sub.example.co.uk/', 'https://
   assert.equal(qs.appIcon, '');
 }
 
+// PR 4 review finding 6 (P2): the Python persistence allowlist deliberately
+// drops link/meeting/phone on write - correctly, so a stored notification
+// cannot later assert its own capabilities - but restored() did not
+// recompute them, so "Open link"/"Copy number" never came back after a
+// restart even for an entirely ordinary notification. restored() now
+// re-runs Detect.scan() on the persisted summary/body and lets normalise()
+// re-validate the result, rather than persisting the derived fields again.
+{
+  // A persisted entry as the Python store actually returns one: bounded
+  // source text only, no link/meeting/phone - those keys are simply absent.
+  const persisted = { key: 'n1', app: 'Chat', summary: 'New message',
+    body: 'Join https://meet.google.com/abc-defg-hij or call +44 7911 123456',
+    rawBody: 'Join https://meet.google.com/abc-defg-hij or call +44 7911 123456',
+    urgency: 1 };
+  const row = Store.restored(persisted);
+  assert.equal(row.link, 'https://meet.google.com/abc-defg-hij', 'review_p2_restored_link_reconstructed');
+  assert.equal(row.meeting, true, 'review_p2_restored_link_reconstructed (meeting link)');
+  assert.equal(row.phone, '+44 7911 123456', 'review_p2_restored_phone_reconstructed');
+  assert.equal(row.restored, true);
+}
+{
+  // A legacy or tampered on-disk entry carrying a link/phone the current
+  // body does not actually support must not have it trusted through
+  // restore - it is recomputed from the text, not read off the entry.
+  const tampered = { key: 'n1', app: 'Chat', summary: 'New message',
+    body: 'Nothing to see here', rawBody: 'Nothing to see here', urgency: 1,
+    link: 'https://evil.example/phish', meeting: true, phone: '+1 555 0100' };
+  const row = Store.restored(tampered);
+  assert.equal(row.link, '', 'review_p2_restored_malicious_link_not_trusted');
+  assert.equal(row.meeting, false, 'review_p2_restored_malicious_link_not_trusted');
+  assert.equal(row.phone, '', 'review_p2_restored_malicious_link_not_trusted');
+}
+{
+  // A link present in the restored text itself but rejected by today's URL
+  // policy (here: a loopback address) must stay unavailable, not merely
+  // pass through because Detect found *something* link-shaped.
+  const dangerous = { key: 'n1', app: 'Chat', summary: 'New message',
+    body: 'See http://127.0.0.1/admin for details',
+    rawBody: 'See http://127.0.0.1/admin for details', urgency: 1 };
+  const row = Store.restored(dangerous);
+  assert.equal(row.link, '', 'review_p2_restored_malicious_link_not_trusted (loopback body link)');
+}
+
 console.log('security JS: passed');

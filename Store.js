@@ -144,6 +144,23 @@ function normalise(row) {
 function restored(entry) {
   if (!entry || !entry.key) return null
   var row = normalise(entry)
+  // The Python store's persistence allowlist drops link/meeting/phone on
+  // write - deliberately: a stored notification is bounded source text, not
+  // a bundle of pre-authorized capabilities a future restore should get to
+  // assert. So they are recomputed here from the persisted summary/body
+  // with today's detectors, and normalise() below re-validates the result
+  // (the link, in particular, through today's Security.js policy) exactly
+  // as it would for a freshly-arrived notification - rather than trusting
+  // whatever a legacy on-disk entry happens to still carry in those fields.
+  // Never derives a code/OTP from restored text: if the original write
+  // redacted a secret, the persisted body is "[redacted]" and there is
+  // nothing in it to find; code/codes are intentionally left as normalise()
+  // set them from the entry, not recomputed.
+  var found = Detect.scan(row.summary, row.body)
+  row.link = found.link
+  row.meeting = found.meeting
+  row.phone = found.phone
+  row = normalise(row)
   row.duration = row.urgency === 2 ? 0 : RESTORE_GRACE
   row.restored = true
   return row
