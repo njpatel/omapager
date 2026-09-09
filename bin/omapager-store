@@ -74,6 +74,39 @@ def safe(name):
     return value
 
 
+# A verification/OTP *keyword* on its own is an ordinary English word ("Code",
+# "PIN", "verification") and must never itself satisfy the code-shaped half of
+# the check below - "Visual Studio Code" and "Please review the code today"
+# have no digits anywhere near the word "code" and must not be flagged.
+CODE_KEYWORD = re.compile(
+    r"(?i)\b(code|otp|verification|verify|pin|passcode|2fa|one.time|two.factor)\b")
+
+# A code-shaped token is a short run that carries at least one digit - real
+# OTPs are numeric or numeric-heavy ("938271", "A9F3K2"), or two digit groups
+# joined by a space or dash ("938 271", "72-9182"). A bare word never
+# qualifies: "Studio", "review", "successfully", "Xcode" carry no digit.
+CODE_SHAPE = re.compile(r"\b(?=[A-Za-z0-9]*\d)[A-Za-z0-9]{4,8}\b|\b\d{2,4}[ -]\d{2,5}\b")
+
+# How close a code-shaped token has to sit to a keyword to count as "this
+# message's code", rather than an unrelated number that happens to share a
+# notification with the word "code" (a ticket number, a build number).
+CODE_PROXIMITY = 40
+
+
+def looks_like_a_code(text):
+    keywords = [m.span() for m in CODE_KEYWORD.finditer(text)]
+    if not keywords:
+        return False
+    for shape in CODE_SHAPE.finditer(text):
+        s_start, s_end = shape.span()
+        for k_start, k_end in keywords:
+            if s_end <= k_start or s_start >= k_end:      # a distinct token
+                gap = max(k_start - s_end, s_start - k_end)
+                if gap <= CODE_PROXIMITY:
+                    return True
+    return False
+
+
 def sanitise(entry):
     # Independently defend raw helper callers and legacy state migrations.
     allowed = {"key", "originalId", "senderPid", "app", "appIcon", "summary",
@@ -83,9 +116,7 @@ def sanitise(entry):
     for _ in range(3):
         text = html.unescape(text)
     text = re.sub(r"<[^>]*>", "", text)
-    secret = bool(entry.get("code") or entry.get("codes")) or bool(
-        re.search(r"(?i)\b(code|otp|verification|verify|pin|passcode|2fa|one.time|two.factor)\b", text)
-        and re.search(r"[A-Za-z0-9]{4,8}|\d{2,4}[ -]\d{2,5}", text))
+    secret = bool(entry.get("code") or entry.get("codes")) or looks_like_a_code(text)
     out = {k: v for k, v in entry.items() if k in allowed and isinstance(v, (str, int, float, bool))}
     if secret:
         out = {k: v for k, v in out.items() if not isinstance(v, str) or k == "key"}

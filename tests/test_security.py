@@ -66,6 +66,65 @@ class Storage(unittest.TestCase):
         live.write_text(json.dumps({'key':'n1','summary':'OTP 938271','rawBody':'938271'}))
         self.run_store('restore')
         self.assertNotIn('938271',live.read_text())
+    # PR 4 review finding 1 (P1): the keyword regex alone used to satisfy the
+    # secret check, so ordinary "Code" notifications were redacted and, worse,
+    # ensure()/restore could rewrite already-stored benign entries into
+    # "[redacted]" in place. looks_like_a_code() now requires a distinct,
+    # nearby, digit-bearing token - see bin/omapager-store.
+    def test_review_p1_visual_studio_code_not_redacted(self):
+        cases = [
+            ('Visual Studio Code', 'Build completed successfully'),
+            ('Chat', 'Please review the code today'),
+            ('Claude', 'Claude Code finished the task'),
+            ('Build', 'Source code updated'),
+            ('Xcode', 'Xcode build completed'),
+            ('Auth', 'Verification completed successfully'),
+            ('Settings', 'PIN configuration updated'),
+        ]
+        for i, (app, body) in enumerate(cases):
+            # No digits in the key itself: it joins the detection text too,
+            # and a digit there would be an unrelated false positive of its
+            # own, not a test of the code/keyword proximity rule.
+            key = 'benign-' + chr(ord('a') + i)
+            r = self.run_store('put', payload={'key': key, 'app': app, 'body': body, 'rawBody': body})
+            self.assertEqual(r.returncode, 0)
+            live = json.loads((self.home/'.local/state/omarchy/omapager/live'/f'{key}.json').read_text())
+            self.assertEqual(live['body'], body, msg=(app, body))
+            self.assertEqual(live['rawBody'], body, msg=(app, body))
+            self.assertNotEqual(live.get('summary'), 'Verification notification', msg=(app, body))
+    def test_review_p1_restore_does_not_mutate_benign_legacy_state(self):
+        # A read/restore path must never destructively rewrite ordinary text,
+        # including state written before this fix existed.
+        self.run_store('restore')
+        live_dir = self.home/'.local/state/omarchy/omapager/live'
+        fixtures = {
+            'legacy-vscode.json': {'key': 'legacy-vscode', 'app': 'Visual Studio Code',
+                                    'summary': 'Build finished', 'body': 'Build completed successfully',
+                                    'rawBody': 'Build completed successfully'},
+            'legacy-review.json': {'key': 'legacy-review', 'app': 'Chat',
+                                    'summary': 'New message', 'body': 'Please review the code today',
+                                    'rawBody': 'Please review the code today'},
+        }
+        for name, entry in fixtures.items():
+            (live_dir/name).write_text(json.dumps(entry))
+        self.run_store('restore')
+        for name, entry in fixtures.items():
+            on_disk = json.loads((live_dir/name).read_text())
+            self.assertEqual(on_disk['body'], entry['body'], msg=name)
+            self.assertEqual(on_disk['rawBody'], entry['rawBody'], msg=name)
+            self.assertEqual(on_disk['summary'], entry['summary'], msg=name)
+    def test_review_p1_real_otp_is_redacted(self):
+        # The same legacy-migration path must still sanitise a genuine OTP.
+        self.run_store('restore')
+        live = self.home/'.local/state/omarchy/omapager/live/legacy-otp.json'
+        live.write_text(json.dumps({'key': 'legacy-otp', 'app': 'Bank',
+                                     'summary': 'Your verification code is 938271',
+                                     'body': 'Your verification code is 938271',
+                                     'rawBody': 'Your verification code is 938271'}))
+        self.run_store('restore')
+        on_disk = live.read_text()
+        self.assertNotIn('938271', on_disk)
+        self.assertIn('[redacted]', on_disk)
 
 class Network(unittest.TestCase):
     def test_destinations(self):
