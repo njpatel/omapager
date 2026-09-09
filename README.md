@@ -155,6 +155,11 @@ Long titles wrap, and actions that do not fit move behind **More**. At 200%:
 | --- | --- |
 | ![Actions at 200%](assets/font-scale-200.png) | ![All actions at 200%](assets/font-scale-200-more.png) |
 
+Long action labels wrap inside the expanded list, with the button growing to
+fit the full text:
+
+![Wrapped action label at 200%](assets/font-scale-200-long.png)
+
 Every history entry is the text of a message somebody sent you, so it is
 trimmed by age as well as count: **7 days or 200 entries**, whichever comes
 first. Resolved icons are dropped after 60 days unused, and nothing is ever

@@ -9,4 +9,7 @@ ln -s "$shell_dir/Commons" "$test_dir/Commons"
 ln -s "$shell_dir/Ui" "$test_dir/Ui"
 ln -s "$plugin_dir" "$test_dir/Plugin"
 cp "$plugin_dir/tests/FontLayout.qml" "$test_dir/shell.qml"
-QT_QPA_PLATFORM=offscreen timeout 15 quickshell -p "$test_dir"
+for profile in default large proportional; do
+  OMAPAGER_TEST_PROFILE="$profile" QT_QPA_PLATFORM=offscreen \
+    timeout 60 quickshell -p "$test_dir"
+done
