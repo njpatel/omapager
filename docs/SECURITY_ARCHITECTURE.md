@@ -18,8 +18,18 @@ integration stability, as the plan requires.
    unsandboxed fallback exists. The probe distinguishes availability from an
    operational namespace test. It does not claim every helper operation succeeded.
 6. Remote icons are opt-in. `omapager_http.py` resolves once per hop, validates
-   every address and connects to a numeric sockaddr. TLS validates the original
-   hostname. The original host supplies SNI and Host; proxies are ignored.
+   every address (including against an IPv6-mapped-IPv4 bypass) and connects
+   to a numeric sockaddr, falling back across every validated address for that
+   hop but never re-resolving and never letting a TLS failure be masked by a
+   fallback attempt. TLS validates the original hostname. The original host
+   supplies SNI and Host; there is no urllib opener to route through an
+   environment proxy in the first place. This is the sole HTTP implementation
+   `bin/omapager-icon` uses — upstream (06f511) independently reached the same
+   resolve-once/validate-all/connect-direct design inline in that file; this
+   module is kept as the one transport rather than carrying both. A remote
+   cache hit is re-validated against the same raster/format policy a fresh
+   fetch uses before being trusted, so a cache entry from before that policy
+   existed (a cached SVG, most notably) cannot bypass it merely by predating it.
 7. Explicit actions use argv. Generic card clicks do not invoke the sender's
    default action unless configured; that action is available as an explicit
    "Open in app" button. Replies require unique exact app/body matching, valid
@@ -31,15 +41,23 @@ QML's JS engine does not expose the browser WHATWG URL constructor. Rather than
 simulate all browser parsing, accept a restricted grammar: HTTP(S), dotted ASCII
 hostnames (Punycode allowed), valid decimal ports, no userinfo, backslashes,
 controls, nested percent escapes or raw quotation/angle brackets. IP literals,
-single-label hosts and raw Unicode hosts fail closed. Mailto accepts one address,
-no query headers/attachments/percent escapes. External browser links may use
-valid nonstandard ports; automatic icon requests allow only HTTP:80/HTTPS:443.
+single-label hosts and raw Unicode hosts fail closed. A hostname's last label
+is rejected as numeric-looking in every form a real WHATWG parser would accept
+as "ends in a number" — plain decimal, and 0x-prefixed hex, not only the
+decimal case — so a browser-recognized alternate IPv4 spelling cannot pass this
+grammar as an ordinary hostname and later canonicalize to a private/loopback
+address. Mailto accepts one address, no query headers/attachments/percent
+escapes. External browser links may use valid nonstandard ports; automatic
+icon requests allow only HTTP:80/HTTPS:443.
 
 ## Limits and defaults
 
 App 256; summary 2,048; body/raw body 32,768 characters; URL 4,096; source 253;
 actions 16 with 256-character labels/IDs; codes 8; phone 64; JSON entry 65,536
-bytes; live cards and pending icon/reply lookups 100; store queue 256. Oversized
+bytes; live notifications 100 (`maxLiveNotifications`, counting every one
+currently visible, held while the deck is occupied, or mid-flight in a
+deferred insertion — not just what is on screen at the instant of the check);
+pending icon/reply lookups 100; store queue 256. Oversized
 serialized entries fail closed rather than writing partial JSON. Queue overflow
 may drop persistence work; this bounds resource use, not reliable delivery under
 notification floods. The sender's underlying bus allocation is outside this cap.

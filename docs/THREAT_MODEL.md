@@ -46,7 +46,19 @@ formats and password-reset links can remain in ordinary history. Disable history
 for stronger message privacy. Clipboard conditional clearing has the usual race
 between checking and clearing; it is not an atomic compare-and-swap.
 
-Remote SVGs are rejected. Local theme SVGs remain trusted; user-installed themes
-and application directories are user-controlled trusted configuration. A remote
-icon request may still reveal IP and timing when explicitly enabled. Domain
-ownership/public DNS does not imply a benign destination or prevent phishing.
+Remote SVGs are rejected, including a cache entry left behind by a build that
+predates that check — a cache hit is re-validated against today's raster
+policy, not trusted merely because it already exists on disk. Local theme
+SVGs remain trusted; user-installed themes and application directories are
+user-controlled trusted configuration. A remote icon request may still reveal
+IP and timing when explicitly enabled. Domain ownership/public DNS does not
+imply a benign destination or prevent phishing.
+
+Notification-derived text is treated as untrusted for classification, not
+only for rendering: heuristics that decide "is this a secret" or "is this a
+number" are themselves adversarial-input surfaces. A verification-keyword
+heuristic that trusted the keyword alone previously misclassified ordinary
+product names ("Visual Studio Code") as secrets, destructively, on every
+restore. The Python detector now requires a distinct nearby code-shaped
+token; it remains a heuristic, not a proof, and an unusual OTP format can
+still be missed in either direction.
