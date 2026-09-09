@@ -10,7 +10,15 @@ function canonicalHostname(raw) {
   if (typeof raw !== 'string' || raw.length > MAX_SOURCE) return ''
   var h=raw.toLowerCase().replace(/\.$/,'')
   if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(h)) return ''
-  if (/^\d+$/.test(h.split('.').pop())) return ''
+  // WHATWG host parsing treats a URL as a numeric (IPv4) address whenever its
+  // last label "looks like a number" - not only plain decimal ("127.0.0.1"),
+  // but also 0x-prefixed hex ("0x7f.0x0.0x0.0x1" -> 127.0.0.1) and
+  // leading-zero octal ("0177.0.0.1"), which a browser's URL parser (and any
+  // library replicating it) will canonicalise to a numeric/private address
+  // even though this label-shape check alone would pass it through as an
+  // ordinary hostname. Octal is already all-decimal-digit and so already
+  // matched by the plain digit alternative; hex needs its own alternative.
+  if (/^(?:0x[0-9a-f]+|[0-9]+)$/i.test(h.split('.').pop())) return ''
   return h
 }
 function urlHasUserInfo(s) { return /^[a-z]+:\/\/[^/?#]*@/i.test(s) }

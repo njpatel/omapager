@@ -165,4 +165,46 @@ function newCapacityScope() {
   assert.equal(s.toasts.count, 100);
 }
 
+// PR 4 review finding 4 (P2): canonicalHostname() only rejected a last label
+// of plain decimal digits ("127.0.0.1"), so a WHATWG-style numeric label
+// using 0x-prefixed hex ("0x7f.0x0.0x0.0x1") slipped through as if it were
+// an ordinary hostname, even though a real URL parser canonicalises it to a
+// numeric address. Node's own URL implements the same WHATWG algorithm, so
+// it is used here to prove the risk is real - not just asserted - before
+// checking our policy rejects the un-canonicalised form outright.
+{
+  const NodeURL = require('node:url').URL;
+  const hexQuad = 'http://0x7f.0x0.0x0.0x1/';
+  const canon = new NodeURL(hexQuad).hostname;
+  assert.equal(canon, '127.0.0.1', 'sanity: this environment\'s URL parser must actually canonicalise hex-quad host forms, or this test proves nothing');
+  assert.equal(S.safeHttpUrl(hexQuad), '', 'review_p2_hex_ipv4_rejected');
+  assert.equal(S.safeHttpUrl('http://0xa.0x0.0x0.0x1/'), '', 'review_p2_hex_ipv4_rejected');
+  assert.equal(new NodeURL('http://0xa.0x0.0x0.0x1/').hostname, '10.0.0.1');
+}
+{
+  const octalQuad = 'http://0177.0.0.1/';
+  assert.equal(new (require('node:url').URL)(octalQuad).hostname, '127.0.0.1',
+    'sanity: this environment\'s URL parser must actually canonicalise octal host forms, or this test proves nothing');
+  assert.equal(S.safeHttpUrl(octalQuad), '', 'review_p2_octal_ipv4_rejected');
+  assert.equal(S.safeHttpUrl('http://0177.00.00.01/'), '', 'review_p2_octal_ipv4_rejected');
+}
+{
+  const NodeURL = require('node:url').URL;
+  assert.equal(new NodeURL('http://2130706433/').hostname, '127.0.0.1',
+    'sanity: this environment\'s URL parser must actually canonicalise integer host forms, or this test proves nothing');
+  assert.equal(S.safeHttpUrl('http://2130706433/'), '', 'review_p2_integer_ipv4_rejected');
+  assert.equal(S.safeHttpUrl('http://0x7f000001/'), '', 'review_p2_integer_ipv4_rejected');
+}
+{
+  const NodeURL = require('node:url').URL;
+  assert.equal(new NodeURL('http://10.0.0x0.0x1/').hostname, '10.0.0.1',
+    'sanity: this environment\'s URL parser must actually canonicalise mixed-radix host forms, or this test proves nothing');
+  assert.equal(S.safeHttpUrl('http://10.0.0x0.0x1/'), '', 'review_p2_mixed_numeric_ipv4_rejected');
+  assert.equal(S.safeHttpUrl('http://10.0.00.01/'), '', 'review_p2_mixed_numeric_ipv4_rejected');
+  assert.equal(S.safeHttpUrl('http://0X7F.0X0.0X0.0X1/'), '', 'review_p2_mixed_numeric_ipv4_rejected (uppercase 0X)');
+}
+// Ordinary DNS-style hostnames remain unaffected.
+for (const u of ['https://example.com/', 'https://sub.example.co.uk/', 'https://x0.example.com/'])
+  assert.ok(S.safeHttpUrl(u), u);
+
 console.log('security JS: passed');
