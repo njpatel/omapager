@@ -32,6 +32,65 @@ Not re-run in this pass (validated earlier in this branch's history, see the
 2026-09-06/07 record below, and not affected by the rebase or the six fixes):
 Bubblewrap HOME/network/write tests, `bin/omapager-run-helper status`.
 
+## 2026-09-09 (later same day) — Omarchy host: qmllint, QtTest, Bubblewrap, live session
+
+Run directly on an Arch/Omarchy host with Quickshell, Hyprland, Bubblewrap and
+`wl-clipboard` present, closing every gap the previous pass on this same day
+listed under "Still required" except KDE Connect (no device or daemon on this
+host). Commands and exit codes below; the live-session results were produced
+by driving the daemon's own IPC on the real desktop, then reverted.
+
+| Check | Result |
+| --- | --- |
+| `/usr/lib/qt6/bin/qmllint Service.qml Toast.qml Widget.qml DeedButton.qml` | Exit 0. 455 warnings, 0 errors — all in the documented unresolved Omarchy/Quickshell import/unqualified-access categories; none are runtime errors |
+| `QT_QPA_PLATFORM=offscreen ... qmltestrunner -input tests/tst_security.qml` | 4 passed, 0 failed (`initTestCase`, `test_markup_and_storage`, `test_urls`, `cleanupTestCase`) |
+| `python3 tests/sandbox.py` | Pass — real Bubblewrap namespaces: HOME contents denied, repo parent directory denied, network denied, scoped writes to `STATE`/`STATE/icons` succeed, OTP redacted on the synthetic store `put` |
+| `bin/omapager-run-helper status` | `{"bubblewrapAvailable": true, "sandboxOperational": true, "required": true, "unsandboxedFallback": false}` |
+| `bin/omapager-run-helper capabilities` | Exit 0 (`wl-copy`/`wl-paste` both present) |
+| `python3 tests/http_server.py` | Pass |
+| `bin/omapager-demo --list` | Pass (7 scenes, 25 notifications total) |
+
+### Live Omarchy session
+
+Installed via the real `omarchy plugin` CLI — `omarchy plugin validate` first
+rejected the plugin folder (`bin/omapager-run-icon` etc. are committed
+symlinks to `omapager-run-helper`; Omarchy's validator disallows symlinks
+inside a plugin folder). That validator is not invoked by `plugin add`/`enable`
+for an already-present local folder, so install proceeded; **this is a real,
+previously-undiscovered packaging gap for anyone installing this plugin
+through `omarchy plugin add` from git rather than a manual symlink**, tracked
+below under Risks. `shell.json` was backed up and its SHA-256 recorded first;
+`omarchy plugin disable omarchy.notifications` / `enable njpatel.omapager
+center` brought the plugin up, and disable/enable in reverse plus `plugin
+remove njpatel.omapager` afterward restored it — `diff` against the backup
+and a repeat SHA-256 both confirmed `shell.json` came back byte-identical.
+Synthetic data only (`notify-send`, no real accounts/messages); the test-only
+state directory was removed afterward. Single `quickshell` instance
+throughout, confirmed by `pgrep -xc quickshell` after every restart; no
+QML runtime error or warning attributable to Omapager appeared in
+`journalctl --user` at any point (the two warnings present are pre-existing,
+from the unrelated `OmaDisplay` and `axelkalo.agents` plugins).
+
+| Area | Result |
+| --- | --- |
+| Load / restart | Loads with no Omapager QML error or warning; one `quickshell` process across three restarts |
+| Appear/disappear, stacking, expand/collapse | `probe`/`expand` IPC confirmed: 1→4 toasts, `expanded` true/false toggled correctly |
+| DND | `dnd` IPC on/off; a notification sent while on did not increment `count`; normal notifications resumed after `dnd` off |
+| Per-source snooze | Snoozing `app:notify-send` held a same-source notification (`count` stayed 0) but not a distinctly-named source (`notify-send -a OtherSrc`, `count` → 1); `unsnooze` restored delivery |
+| Restore across restart | A notification with a link and a phone number persisted, survived `omarchy-restart-shell`, and both `offer link`/`offer phone` still returned `performed` afterward |
+| OTP redaction | `Your verification code is 415926` persisted as `body:"[redacted]"`; recursive `grep -rl` for the digits across the whole state directory found nothing |
+| Link policy | `https://example.com/` → `offer link` = `performed` (opened). `https://paypal.com@evil.example/`, `http://0x7f.0x0.0x0.0x1/`, `file:///etc/passwd`, `javascript:alert(1)`, `http://127.0.0.1/admin` → all `none` (never reached the opener) |
+| Capacity | 130 concurrent synthetic notifications across 5 sources admitted exactly 100 (`count`); a further notification while at capacity did not raise it; one `quickshell` process throughout, no crash |
+| Clipboard | Plain-code copy via `offer code` landed on `wl-paste`; copied with `--sensitive` (confirmed by code path, `hasWlCopy: true`); untouched, it was cleared after the configured 60s `clipboardTimeout`; when the user overwrote the clipboard first, the 60s timeout left the user's text untouched |
+| Default-action policy | `probe` showed `allowDefaultActionOnCardClick: false` at every check, including mid-flood and after restore |
+| Local/named icons | `notify-send -i utilities-terminal` and `notify-send -i archlinux-logo` both delivered and survived a restart with no crash; **not visually confirmed** — no screenshot was taken (icon rendering is checked by the automated `test_review_p2_*` suite, not this pass) |
+
+Not exercised in this pass, and explicitly left untested rather than faked:
+
+- **KDE Connect**: no device paired and no `kdeconnectd`/`kdeconnect-cli` installed on this host. Reply, stale-target, ambiguous-target and failed-target behavior against a real phone remain untested; current coverage is the mocked-bus argv/logic tests only.
+- **Remote-icon opt-in fetch**, an explicit sender action button's D-Bus `ActionInvoked` round trip, and pointer-driven card click / hover — no safe input injection was available, and toggling `fetchRemoteIcons` needs a config change not attempted this pass.
+- **Failure-injection**: Bubblewrap missing, the icon/store helpers failing, or `wl-clipboard` absent were not reproduced live (would mean uninstalling working tooling from this machine); the fail-closed behavior for each is exercised in `tests/security.cjs`/`test_security.py` instead, not on this host.
+
 ## 2026-09-06/07 — original hardening pass
 
 | Check | Result |
@@ -93,28 +152,31 @@ the desktop's system Python by this patch.
 
 ## Still required before a release
 
-- Re-run `qmllint`/`qmltestrunner` (Qt6 declarative tooling) and the Bubblewrap
-  sandbox tests: this environment does not have that tooling installed, so the
-  2026-09-09 pass validated the JS/Python/network layers but not these. Nothing
-  in the six PR #4 fixes touched the sandbox wrappers; the QtTest policy suite
-  covers `Security.js`/`Markup.js`/`Store.js`, and finding 4's fix (Security.js)
-  is the one most worth re-confirming there.
-- Disposable Omarchy session: render production deck, restore, DND, snooze,
-  named/local icons, remote-icon opt-in, clipboard copy, OTP copy+expiry,
-  default-action strict behavior, browser/source navigation, notification
-  flood behavior, restart/failure behavior, settings propagation,
-  default-action buttons, clipboard expiry, failures and hot reload. qmllint
-  with missing dynamic imports does not prove visual behavior, and none of
-  this was exercised in this pass.
-- Consenting real KDE Connect phone: target identity, reply, failed/stale reply,
-  cancellation and dismissal. Current tests mock the bus and validate argv/logic.
-- CI run on the actual maintained GitHub repository. CodeQL is configured for
-  JavaScript/Python/Actions but was not run locally. It does not model QML natively;
-  the custom broker/static checks and actual Qt policy tests cover that gap only
-  partially. No hosted runner execution is claimed here.
+- **Consenting real KDE Connect phone**: target identity, reply, failed/stale
+  reply, cancellation and dismissal. No device or `kdeconnectd` was available
+  on the host used for the 2026-09-09 live-session pass above. Current
+  automated coverage mocks the bus and validates argv/logic only.
+- **Plugin-folder symlinks**: `omarchy plugin validate` rejects this plugin's
+  folder because `bin/omapager-run-icon`/`-store`/`-kdeconnect` are committed
+  symlinks to `omapager-run-helper`. Installing by hand-symlinking the repo
+  into `~/.config/omarchy/plugins/` (as this pass did) or via `plugin
+  add`/`enable` on an already-present local folder both skip that validator,
+  but a real `omarchy plugin add <git-url>` install path may not. Not fixed in
+  this pass — flagging as a packaging follow-up, not a security finding.
+- Remote-icon opt-in fetch, an explicit sender action button's D-Bus
+  `ActionInvoked` round trip, pointer-driven card click/hover, and visual
+  confirmation of icon rendering (no screenshot was taken) — not exercised in
+  the live-session pass above; see that section for what was.
+- Failure-injection (Bubblewrap missing, icon/store helper failure,
+  `wl-clipboard` absent) — not reproduced on live hardware; covered instead by
+  `tests/security.cjs`/`test_security.py`'s fail-closed unit coverage.
 - Repository owner: fork/publication decision, private vulnerability reporting,
   secret scanning/push protection, required reviews and release signing identity.
 - Optional independent audit, Scorecard CLI and GitHub Actions/zizmor review.
+
+Hosted CI (Tests, CodeQL, Security scanners) is confirmed green on the current
+head via `gh api repos/theaxlklo/omapager/commits/<head>/check-runs` — see the
+PR description for the run links.
 
 ## Hosted draft checks
 
