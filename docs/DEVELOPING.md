@@ -174,10 +174,15 @@ An app name, a summary, a body, an action label and a source are all written by
 whoever sent the notification, and anything derived from them is too. Two places
 turn that text into something with consequences, and both are guarded:
 
-- **`bin/omapager-icon` fetches.** `reachable()` allows `http(s)` only and
-  refuses any host that resolves to a non-global address, and `GuardedRedirect`
-  re-tests every hop, because the next URL is chosen by the page (its
-  `<link rel=icon>`) or by a redirect. Without it a site you allowed
+- **`bin/omapager-icon` fetches.** `reachable()` allows `http(s)` hostnames
+  only; `connect_public()` resolves each connection once, rejects the whole
+  answer if any address is non-public, and connects directly to a checked
+  socket address. HTTP Host and TLS SNI/certificate verification still use the
+  URL hostname. `GuardedRedirect` checks each redirect URL, and the redirected
+  connection gets the same address pinning. Environment proxies are disabled
+  because their destination resolution would bypass that check. The next URL
+  may be chosen by the page (its `<link rel=icon>`) or a redirect. Without these
+  checks a site you allowed
   notifications from could read `file:///etc/passwd` or aim a GET at
   `127.0.0.1`. `host_names()` gates the first hop the same way: a source is a
   plain dotted hostname or it is nothing, so no ports, userinfo or paths.
@@ -189,6 +194,14 @@ turn that text into something with consequences, and both are guarded:
 
 Adding anything that fetches, opens, or writes a path from notification text
 means extending one of these, not working around it.
+
+The transport regression uses synthetic DNS and a test-owned loopback server
+for real HTTP, redirects and TLS; it never contacts an external or existing
+local service. It needs Python 3 and `openssl` (test certificate generation):
+
+```sh
+python3 -B -m unittest discover -s tests -p test_icon_network.py -v
+```
 
 ## Conventions
 

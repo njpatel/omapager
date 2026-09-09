@@ -11,6 +11,7 @@
 # the one step that has to be asked for.
 import argparse
 import glob
+import http.client
 import ipaddress
 import json
 import os
@@ -290,13 +291,10 @@ def public_hostname(host):
 
 
 def reachable(url):
-    """The URL, if it is one we are allowed to fetch. Otherwise None.
+    """The URL, if its scheme and hostname are allowed. Otherwise None.
 
-    The address check resolves the name and refuses loopback, private,
-    link-local and reserved space. A name can resolve differently between this
-    check and urllib's own connect, which is a rebinding window we accept: the
-    prize is a GET to a local port, and closing it properly means holding the
-    socket ourselves."""
+    Address checks belong to the connection, so DNS cannot change between a
+    public-address check here and a second lookup by the HTTP transport."""
     try:
         parts = urllib.parse.urlsplit(url)
     except ValueError:
@@ -305,18 +303,61 @@ def reachable(url):
         return None
     if not public_hostname(parts.hostname):
         return None
-    try:
-        infos = socket.getaddrinfo(parts.hostname, parts.port or 0,
-                                   proto=socket.IPPROTO_TCP)
-    except (OSError, ValueError):
-        return None
-    for info in infos:
-        try:
-            if not ipaddress.ip_address(info[4][0]).is_global:
-                return None
-        except ValueError:
-            return None
     return url
+
+
+def connect_public(host, port, timeout):
+    """Resolve once, check the whole answer, then connect to a checked sockaddr."""
+    infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM,
+                               proto=socket.IPPROTO_TCP)
+    if not infos:
+        raise OSError("no addresses for " + host)
+    for _, _, _, _, address in infos:
+        ip = ipaddress.ip_address(address[0])
+        if not ip.is_global or ip.is_multicast or ip.is_reserved:
+            raise OSError("refusing non-public address for " + host)
+    last_error = None
+    for family, kind, proto, _, address in infos:
+        sock = None
+        try:
+            sock = socket.socket(family, kind, proto)
+            sock.settimeout(timeout)
+            # Unlike create_connection(), this accepts the resolved sockaddr
+            # directly and cannot perform another hostname lookup.
+            sock.connect(address)
+            return sock
+        except OSError as error:
+            last_error = error
+            if sock is not None:
+                sock.close()
+    raise last_error
+
+
+class PublicHTTPConnection(http.client.HTTPConnection):
+    def connect(self):
+        self.sock = connect_public(self.host, self.port, self.timeout)
+
+
+class PublicHTTPSConnection(http.client.HTTPSConnection):
+    def connect(self):
+        sock = connect_public(self.host, self.port, self.timeout)
+        try:
+            # Keep the URL hostname for SNI and certificate verification, not
+            # the numeric address used to establish the TCP connection.
+            self.sock = self._context.wrap_socket(sock, server_hostname=self.host)
+        except BaseException:
+            sock.close()
+            raise
+
+
+class PublicHTTPHandler(urllib.request.HTTPHandler):
+    def http_open(self, req):
+        return self.do_open(PublicHTTPConnection, req)
+
+
+class PublicHTTPSHandler(urllib.request.HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(PublicHTTPSConnection, req, context=self._context)
 
 
 class GuardedRedirect(urllib.request.HTTPRedirectHandler):
@@ -328,7 +369,11 @@ class GuardedRedirect(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-OPENER = urllib.request.build_opener(GuardedRedirect)
+# A proxy would resolve the destination itself, outside our address check.
+# Keep the original URL so urllib supplies its Host header on every hop.
+OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}),
+                                     PublicHTTPHandler, PublicHTTPSHandler,
+                                     GuardedRedirect)
 
 
 def get(url):
