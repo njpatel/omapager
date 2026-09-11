@@ -74,36 +74,46 @@ def safe(name):
     return value
 
 
-# A verification/OTP *keyword* on its own is an ordinary English word ("Code",
-# "PIN", "verification") and must never itself satisfy the code-shaped half of
-# the check below - "Visual Studio Code" and "Please review the code today"
-# have no digits anywhere near the word "code" and must not be flagged.
+# Keep the raw-helper/legacy check independent of caller-supplied code flags,
+# but use Detect.js's vocabulary, windows and shapes. Product names and years
+# are ordinary notification text; migrating them must not destroy history.
 CODE_KEYWORD = re.compile(
-    r"(?i)\b(code|otp|verification|verify|pin|passcode|2fa|one.time|two.factor)\b")
-
-# A code-shaped token is a short run that carries at least one digit - real
-# OTPs are numeric or numeric-heavy ("938271", "A9F3K2"), or two digit groups
-# joined by a space or dash ("938 271", "72-9182"). A bare word never
-# qualifies: "Studio", "review", "successfully", "Xcode" carry no digit.
-CODE_SHAPE = re.compile(r"\b(?=[A-Za-z0-9]*\d)[A-Za-z0-9]{4,8}\b|\b\d{2,4}[ -]\d{2,5}\b")
-
-# How close a code-shaped token has to sit to a keyword to count as "this
-# message's code", rather than an unrelated number that happens to share a
-# notification with the word "code" (a ticket number, a build number).
-CODE_PROXIMITY = 40
+    r"\b(code|otp|one[\s-]?time|verification|verify|passcode|pin|2fa|"
+    r"two[\s-]factor|security key|confirm(?:ation)?)\b", re.IGNORECASE | re.ASCII)
+CODE_SHAPE = re.compile(
+    r"(?:^|[^A-Za-z0-9_-])((?:[A-Za-z]-)?[0-9]{2,4}[\s-][0-9]{2,5}|"
+    r"(?:[A-Za-z]-)?[0-9]{4,8})(?![A-Za-z0-9_-])")
+CODE_ALNUM = re.compile(r"(?:^|[^A-Za-z0-9_-])([A-Z0-9]{5,8})(?![A-Za-z0-9_-])")
+CODE_BEFORE = 24
+CODE_AFTER = 72
+MAX_CODES = 8
+MAX_BODY = 32768
+MAX_SUMMARY = 2048
 
 
 def looks_like_a_code(text):
-    keywords = [m.span() for m in CODE_KEYWORD.finditer(text)]
-    if not keywords:
-        return False
-    for shape in CODE_SHAPE.finditer(text):
-        s_start, s_end = shape.span()
-        for k_start, k_end in keywords:
-            if s_end <= k_start or s_start >= k_end:      # a distinct token
-                gap = max(k_start - s_end, s_start - k_end)
-                if gap <= CODE_PROXIMITY:
-                    return True
+    text = text[:MAX_BODY]
+    windows = 0
+    for keyword in CODE_KEYWORD.finditer(text):
+        word = keyword.group()
+        if word.lower() == "code" and word[0].isupper():
+            before = re.search(r"([A-Za-z][A-Za-z0-9_.]*)\s+$",
+                               text[max(0, keyword.start() - 20):keyword.start()])
+            if (before and re.fullmatch(r"[A-Z][a-z]+|[A-Z]{2,}", before[1])
+                    and not CODE_KEYWORD.search(before[1])):
+                continue
+        chunk = text[max(0, keyword.start() - CODE_BEFORE):keyword.end() + CODE_AFTER]
+        for shape in CODE_SHAPE.finditer(chunk):
+            value = re.sub(r"^[A-Za-z]-", "", shape[1])
+            value = re.sub(r"[\s-]", "", value)
+            if 4 <= len(value) <= 8 and not re.fullmatch(r"(?:19|20)[0-9]{2}", value):
+                return True
+        for shape in CODE_ALNUM.finditer(chunk):
+            if re.search(r"[0-9]", shape[1]) and re.search(r"[A-Z]", shape[1]):
+                return True
+        windows += 1
+        if windows == MAX_CODES:
+            break
     return False
 
 
@@ -112,10 +122,17 @@ def sanitise(entry):
     allowed = {"key", "originalId", "senderPid", "app", "appIcon", "summary",
                "body", "rawBody", "bodyLine", "source", "groupKey", "urgency",
                "expireTimeout", "duration", "ts", "closed_ts", "closed_reason"}
-    text = " ".join(v for v in entry.values() if isinstance(v, str))[:65536]
+    # Match Store.sanitiseForPersistence's bounded summary/rawBody/body view,
+    # not metadata: keys/groupKey and app names can contain unrelated numbers
+    # or product keywords. Strip tags to spaces before decoding, as oneLine
+    # does, so formatting and split digit groups keep their word boundaries.
+    text = " ".join(entry.get(k, "")[:limit] if isinstance(entry.get(k), str) else ""
+                    for k, limit in (("summary", MAX_SUMMARY), ("rawBody", MAX_BODY),
+                                     ("body", MAX_BODY)))[:MAX_BODY]
+    text = re.sub(r"<[^>]+>", " ", text)
     for _ in range(3):
         text = html.unescape(text)
-    text = re.sub(r"<[^>]*>", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
     secret = bool(entry.get("code") or entry.get("codes")) or looks_like_a_code(text)
     out = {k: v for k, v in entry.items() if k in allowed and isinstance(v, (str, int, float, bool))}
     if secret:

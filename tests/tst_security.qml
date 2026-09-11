@@ -8,6 +8,7 @@ TestCase {
   function test_urls() {
     compare(Security.safeHttpUrl("https://paypal.com@evil.example"), "")
     compare(Security.safeHttpUrl("https://example.com/%250a"), "")
+    compare(Security.safeHttpUrl("http://127.0x/"), "")
     compare(Security.safeHttpUrl("https://EXAMPLE.com"), "https://example.com/")
     compare(Security.safeMailtoUrl("mailto:a@example.com?attach=/etc/passwd"), "")
   }

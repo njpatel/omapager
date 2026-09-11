@@ -53,15 +53,9 @@ assert.equal(calls.length,0);
 scope.focusWindow({address:'0x123abc'});assert.equal(calls.length,1);
 assert.equal(calls[0],'hl.dsp.focus({window = hl.get_window("address:0x123abc")})');
 
-// PR 4 review finding 3 (P2): the arrival cap used to check toasts.count
-// alone, which a notification sitting in `held` (queued while the pointer is
-// over the deck) or mid-flight inside Qt.callLater (queued for insertion)
-// never incremented. 150 notifications could be accepted with toasts.count
-// at 0 the whole time, then all land on screen the moment the deck let go or
-// the event loop drained. This runs the actual production functions -
-// handleNotification, showRow, finishClose, releaseHeld, reserveLive/
-// releaseLive - out of Service.qml against a minimal fake Quickshell/Store,
-// not a reimplementation of the accounting.
+// Execute the production admission/close/replay functions and Store transforms.
+// Only the ListModel, QObject signals, deferred event loop and external effects
+// are faked: assertions observe cards, sender lifetime and reusable capacity.
 function extract(src, startMarker, endMarker) {
   const s = src.indexOf(startMarker);
   if (s < 0) throw new Error('start marker not found: ' + startMarker);
@@ -70,99 +64,350 @@ function extract(src, startMarker, endMarker) {
   return src.slice(s, e);
 }
 const capacitySource = [
+  extract(source, 'function durationFor(urgency, requested)', '// ------------------------------------------------------------- snooze'),
   extract(source, 'function liveCount()', '// ------------------------------------------------------------- icons'),
-  extract(source, 'function nextKey()', 'function rowIndexFor(key)'),
-  extract(source, 'function rowIndexFor(key)', 'function rowIndexForOriginal(id)'),
-  extract(source, 'function rowIndexForOriginal(id)', '// ------------------------------------------------------------- arrival'),
+  extract(source, 'function nextKey()', '// ------------------------------------------------------------- arrival'),
   extract(source, 'function handleNotification(notification)', '// Qt.callLater: mutating the model'),
   extract(source, 'function showRow(row)', "// Let go of the sender's object"),
-  extract(source, 'function release(key)', '// ------------------------------------------------------------- departure'),
-  extract(source, 'function finishClose(key, reason)', 'function clearAll(reason)'),
+  extract(source, 'function release(key, reason)', '// ------------------------------------------------------------- departure'),
+  extract(source, 'function closeToast(key, reason)', '// What the sender said can be done'),
   extract(source, 'function releaseHeld()', '// Nothing waits forever'),
+  extract(source, 'function restoreRows(rows, replay)', '\n  Process {'),
+  extract(source, 'function actionsOf(key, revision)', 'function invokeAction(key, identifier)'),
 ].join('\n');
 
 function newCapacityScope() {
-  const fakeToasts = { rows: [],
+  const toasts = { rows: [],
     get count() { return this.rows.length; },
     get(i) { return this.rows[i]; },
-    insert(i, row) { this.rows.splice(i, 0, row); },
+    insert(i, row) { this.rows.splice(i, 0, { ...row }); },
+    setProperty(i, role, value) { this.rows[i][role] = value; },
     remove(i) { this.rows.splice(i, 1); } };
-  const callLaterQueue = [];
+  const later = [];
   const s = {
-    toasts: fakeToasts, refs: {}, refsRevision: 0, keySeed: 0, liveKeys: {},
-    heights: {}, leaving: {}, layoutRevision: 0, replyingKey: '', held: [],
-    doNotDisturb: false, globalSnoozeUntil: 0, codesBypassQuiet: false,
+    toasts, refs: {}, refsRevision: 0, keySeed: 0, liveKeys: Object.create(null),
+    maxLiveNotifications: 100, heights: {}, leaving: {}, layoutRevision: 0,
+    replyingKey: '', held: [], doNotDisturb: false, globalSnoozeUntil: 0,
+    codesBypassQuiet: false, hideSettingsAction: false,
+    lowDuration: 5000, normalDuration: 8000, maxDuration: 30000,
     snoozedUntil: () => 0, storeProc: {}, storeBin: '', wantIcon: () => {},
-    lookForReply: () => {}, Store: { snapshot: (n, k) => ({ key: k, originalId: n.id, urgency: n.urgency, groupKey: '', expireTimeout: -1 }),
-      write: () => {}, applyTo: () => {} },
-    durationFor: () => 5000, NotificationUrgency: { Critical: 2, Normal: 1, Low: 0 },
-    Qt: { callLater: fn => callLaterQueue.push(fn) },
-    Style: { space: n => n },
-  };
-  // `handleNotification`/`releaseHeld`/`finishClose` reach the same
-  // properties both bare (they are defined on `service` itself in the real
-  // QML) and as `service.x` (called from elsewhere), so both spellings must
-  // resolve to the same storage here too - a shared object reference for
-  // anything only ever mutated in place (refs), a getter/setter for
-  // anything reassigned wholesale (held).
-  s.service = {
-    refs: s.refs,
-    maxLiveNotifications: 100,
-    liveCount: () => s.liveCount(), reserveLive: k => s.reserveLive(k), releaseLive: k => s.releaseLive(k),
+    lookForReply: () => {}, Security: S,
+    Store: { ...Store, write: () => {} },
+    NotificationUrgency: { Critical: 2, Normal: 1, Low: 0 },
+    Qt: { callLater: fn => later.push(fn) }, Style: { space: n => n },
     holding: () => s.pointerHolding === true,
-    get held() { return s.held; }, set held(v) { s.held = v; },
-    rowIndexFor: k => s.rowIndexFor(k), showRow: row => s.showRow(row),
-    releaseHeld: () => s.releaseHeld(),
     snapshot: () => ({}), deckHeight: 0, retarget: () => {}, layout: { placements: {} },
   };
+  // Bare QML properties and service-qualified accesses are the same object.
+  s.service = s;
   vm.createContext(s);
   vm.runInContext(capacitySource, s);
-  s.drainCallLater = () => { while (callLaterQueue.length) callLaterQueue.shift()(); };
-  s.fakeNotification = (id, urgency) => ({ id: id || 0, urgency: urgency === undefined ? 1 : urgency,
-    tracked: false, closed: { connect: () => {} } });
+  s.drainCallLater = () => { while (later.length) later.shift()(); };
+  s.fakeNotification = (id = 0, summary = 'Synthetic', urgency = 1) => {
+    let tracked = false, destroyed = false;
+    const signal = () => {
+      const listeners = [];
+      return { connect: fn => listeners.push(fn), emit: () => listeners.slice().forEach(fn => fn()) };
+    };
+    const close = reason => {
+      n.closeAttempts++;
+      if (destroyed) { n.destroyedCloseAttempts++; return; }
+      destroyed = true;
+      tracked = false;
+      if (reason === 'expired') n.expiries++;
+      else n.dismissals++;
+      n.closed.emit();
+    };
+    const n = { id, summary, body: 'Synthetic body: ' + summary, urgency, appName: 'Fixture',
+      actions: [{ identifier: 'open', text: summary }], dismissals: 0, expiries: 0,
+      closeAttempts: 0, destroyedCloseAttempts: 0, closed: signal(),
+      get tracked() { return tracked; },
+      set tracked(value) { if (value) tracked = true; else close('dismissed'); },
+      dismiss() { close('dismissed'); },
+      expire() { close('expired'); },
+      replace(properties) {
+        // NotificationServer::Notify mutates the same QObject in a property
+        // update group. It does NOT emit a new server notification event.
+        const changed = Object.keys(properties).filter(field => n[field] !== properties[field]);
+        Object.assign(n, properties);
+        for (const field of changed) n[field + 'Changed'].emit();
+      },
+    };
+    for (const field of ['summary', 'body', 'appName', 'appIcon', 'image', 'urgency', 'expireTimeout', 'hints', 'actions'])
+      n[field + 'Changed'] = signal();
+    return n;
+  };
   return s;
 }
 
-{ // review_p2_held_notifications_count_toward_limit
+for (const held of [true, false]) {
   const s = newCapacityScope();
-  s.pointerHolding = true;             // every arrival queues into service.held, none reach toasts
-  for (let i = 0; i < 150; i++) s.handleNotification(s.fakeNotification());
-  assert.equal(s.toasts.count, 0, 'nothing is shown while the deck is held');
-  assert.equal(s.service.held.length, 100, 'held notifications must themselves be capped at the limit');
-  assert.equal(s.liveCount(), 100, 'held rows must count toward the live cap even though toasts.count is 0');
+  s.pointerHolding = held;
+  const arrivals = Array.from({ length: 150 }, (_, i) => s.fakeNotification(i + 1));
+  arrivals.forEach(n => s.handleNotification(n));
+  assert.equal(s.toasts.count, 0, 'held/deferred arrivals have not entered the model');
+  assert.equal(arrivals.filter(n => n.tracked).length, 100);
+  assert.equal(s.liveCount(), 100);
+  if (held) assert.equal(s.held.length, 100);
+
+  const updated = arrivals[0];
+  for (const summary of ['First replacement', 'Second replacement', 'Latest replacement']) {
+    updated.replace({ summary, body: 'Synthetic body: ' + summary,
+      actions: [{ identifier: 'open', text: summary }] });
+    assert.equal(updated.tracked, true, 'pending replacement stays accepted at capacity');
+    assert.equal(s.liveCount(), 100);
+    if (held) assert.equal(s.held.length, 100, 'replacement does not queue a second card');
+  }
   s.pointerHolding = false;
-  s.service.releaseHeld();
+  s.releaseHeld();
   s.drainCallLater();
-  assert.equal(s.toasts.count, 100, 'released rows land on screen, still capped at 100, never the full 150 offered');
+  assert.equal(s.toasts.count, 100);
+  const replacements = s.toasts.rows.filter(row => row.originalId === 1);
+  assert.equal(replacements.length, 1);
+  assert.equal(replacements[0].summary, 'Latest replacement');
+  assert.equal(replacements[0].body, 'Synthetic body: Latest replacement');
 }
 
-{ // review_p2_deferred_notifications_count_toward_limit
-  const s = newCapacityScope();       // not held: each arrival schedules a Qt.callLater insertion
-  for (let i = 0; i < 150; i++) s.handleNotification(s.fakeNotification());
-  assert.equal(s.toasts.count, 0, 'no callback has run yet - a burst arriving faster than the event loop drains');
-  assert.equal(s.liveCount(), 100, 'in-flight (not yet inserted) rows must still count toward the live cap');
-  s.drainCallLater();
-  assert.equal(s.toasts.count, 100, 'draining the queue must never produce more than the cap once admitted');
-}
-
-{ // review_p2_replacement_at_capacity_does_not_consume_slot
+{ // Visible replacements keep their position and expose only the latest sender's actions.
   const s = newCapacityScope();
-  for (let i = 1; i <= 100; i++) { s.handleNotification(s.fakeNotification(i)); s.drainCallLater(); }
+  const original = s.fakeNotification(1, 'Original');
+  s.handleNotification(original);
+  for (let i = 2; i <= 100; i++) s.handleNotification(s.fakeNotification(i));
+  s.drainCallLater();
+  const key = s.keyForOriginal(1), index = s.rowIndexFor(key);
+  s.pointerHolding = true;
+  const updated = original;
+  updated.replace({ summary: 'Updated', actions: [{ identifier: 'open', text: 'Updated' }] });
+  updated.replace({ summary: 'Same object latest', body: 'Latest body', expireTimeout: 12345 });
+  s.drainCallLater();
+  assert.equal(s.rowIndexFor(key), index);
+  assert.equal(s.toasts.get(index).summary, 'Same object latest');
+  assert.equal(s.toasts.get(index).body, 'Latest body');
+  assert.equal(s.toasts.get(index).duration, 12345);
+  assert.equal(s.actionsOf(key)[0].text, 'Updated');
+  assert.equal(s.held.length, 0);
+  assert.equal(s.toasts.count, 100);
+  const rejected = s.fakeNotification(1001);
+  s.handleNotification(rejected);
+  assert.equal(rejected.tracked, false);
+  updated.replace({ summary: 'Cancelled visible update' });
+  s.closeToast(key, 'expired');
+  assert.equal(s.liveCount(), 100, 'a leaving visible row retains its reservation');
+  s.finishClose(key, 'expired');
+  s.finishClose(key, 'expired');
+  s.drainCallLater();
+  assert.equal(s.toasts.count, 99, 'a pending visible update cannot resurrect a closed card');
+  assert.equal(updated.expiries, 1);
+  assert.equal(updated.closeAttempts, 1, 'expire must not be followed by a second close via tracked=false');
+  assert.equal(updated.destroyedCloseAttempts, 0);
+  assert.equal(updated.tracked, false);
+  assert.equal(s.actionsOf(key).length, 0);
+  assert.equal(s.liveCount(), 99);
+}
+
+for (const held of [true, false]) {
+  const s = newCapacityScope();
+  s.pointerHolding = held;
+  const dropped = s.fakeNotification(1, 'Cancelled');
+  s.handleNotification(dropped);
+  for (let i = 2; i <= 100; i++) s.handleNotification(s.fakeNotification(i));
+  dropped.replace({ summary: 'Cancelled pending update' });
+  const key = s.keyForOriginal(1);
+  s.closeToast(key, 'dismissed');
+  s.closeToast(key, 'dismissed');
+  assert.equal(dropped.dismissals, 1);
+  assert.equal(dropped.closeAttempts, 1, 'dismiss must not be followed by tracked=false');
+  assert.equal(dropped.destroyedCloseAttempts, 0);
+  assert.equal(dropped.tracked, false);
+  assert.equal(s.liveCount(), 99);
+  const replacement = s.fakeNotification(1, 'Reused sender ID');
+  s.handleNotification(replacement);
+  assert.equal(replacement.tracked, true);
+  dropped.closed.emit();
+  const rejected = s.fakeNotification(1001);
+  s.handleNotification(rejected);
+  assert.equal(rejected.tracked, false, 'cancellation frees exactly one slot');
+  s.pointerHolding = false;
+  s.releaseHeld();
+  s.drainCallLater();
+  assert.equal(s.toasts.count, 100);
+  assert.equal(s.toasts.rows.filter(r => r.summary === 'Cancelled').length, 0);
+  assert.equal(s.toasts.rows.filter(r => r.summary === 'Reused sender ID').length, 1);
+}
+
+{ // A callback queued before the pointer arrived must not insert or overwrite the held update.
+  const s = newCapacityScope();
+  const pending = s.fakeNotification(1, 'Deferred');
+  s.handleNotification(pending);
+  s.pointerHolding = true;
+  pending.replace({ summary: 'Held update' });
+  s.drainCallLater();
+  assert.equal(s.toasts.count, 0);
+  s.pointerHolding = false;
+  s.releaseHeld();
+  pending.replace({ summary: 'Update after release' });
+  s.drainCallLater();
+  assert.equal(s.toasts.count, 1);
+  assert.equal(s.toasts.get(0).summary, 'Update after release');
+}
+
+{ // Sender withdrawal cancels pending cards but leaves an already visible snapshot intact.
+  const s = newCapacityScope();
+  const withdrawn = s.fakeNotification(1, 'Withdrawn');
+  s.handleNotification(withdrawn);
+  withdrawn.replace({ summary: 'Withdrawn pending update' });
+  withdrawn.tracked = false;
+  s.drainCallLater();
+  assert.equal(s.liveCount(), 0);
+  assert.equal(s.toasts.count, 0);
+  const visible = s.fakeNotification(2, 'Visible');
+  s.handleNotification(visible);
+  s.drainCallLater();
+  const key = s.keyForOriginal(2);
+  visible.tracked = false;
+  assert.equal(s.toasts.get(0).summary, 'Visible');
+  assert.equal(s.actionsOf(key).length, 0);
+  assert.equal(s.liveCount(), 1);
+  s.finishClose(key, 'dismissed');
+  assert.equal(s.liveCount(), 0);
+}
+
+for (const quiet of ['silenced', 'snoozed']) {
+  const s = newCapacityScope();
+  s.pointerHolding = quiet === 'snoozed';
+  const muted = s.fakeNotification(1, 'Before quiet');
+  s.handleNotification(muted);
+  if (quiet === 'silenced') s.doNotDisturb = true;
+  else s.snoozedUntil = () => 12345;
+  muted.replace({ summary: 'Quiet update' });
+  s.releaseHeld();
+  s.drainCallLater();
+  assert.equal(muted.tracked, false);
+  assert.equal(s.liveCount(), 0);
+  assert.equal(muted.closeAttempts, 1);
+  assert.equal(s.toasts.count, 0);
+  const critical = s.fakeNotification(2, 'Critical', 2);
+  s.handleNotification(critical);
+  s.releaseHeld();
+  s.drainCallLater();
+  assert.equal(s.toasts.get(0).summary, 'Critical');
+}
+
+{ // A muted visible replacement keeps the old card, not a previously queued update.
+  const s = newCapacityScope();
+  const visible = s.fakeNotification(1, 'Visible original');
+  s.handleNotification(visible);
+  s.drainCallLater();
+  visible.replace({ summary: 'Pending update' });
+  s.doNotDisturb = true;
+  visible.replace({ summary: 'Muted update' });
+  s.drainCallLater();
+  assert.equal(s.toasts.get(0).summary, 'Visible original');
+  assert.equal(s.liveCount(), 1);
+  assert.equal(s.actionsOf(s.keyForOriginal(1)).length, 0);
+}
+
+{ // Non-text updates also refresh the snapshot: priority can remove expiry,
+  // and a changed sender-pid hint must reach the routing row without new text.
+  const s = newCapacityScope();
+  const n = s.fakeNotification(1, 'Unchanged text');
+  s.handleNotification(n);
+  s.drainCallLater();
+  n.replace({ urgency: 2 });
+  s.drainCallLater();
+  assert.equal(s.toasts.get(0).urgency, 2);
+  assert.equal(s.toasts.get(0).duration, 0);
+  n.replace({ hints: { 'sender-pid': 1234 } });
+  s.drainCallLater();
+  assert.equal(s.toasts.get(0).senderPid, 1234);
+  assert.equal(s.toasts.count, 1);
+}
+
+const storedRows = count => Array.from({ length: count }, (_, i) => ({ key: 'stored-' + i, summary: 'Stored ' + i }));
+for (const replay of [false, true]) {
+  const s = newCapacityScope();
+  s.pointerHolding = true;
+  for (let i = 1; i <= 98; i++) s.handleNotification(s.fakeNotification(i));
+  s.restoreRows(storedRows(4), replay);
+  assert.equal(s.liveCount(), 100, 'replay and startup restore share held reservations');
+  s.restoreRows([{ key: 'overflow', summary: 'Overflow' }], !replay);
+  s.drainCallLater();
+  assert.equal(s.toasts.count, 2);
+  const key = s.toasts.get(0).key;
+  s.finishClose(key, 'dismissed');
+  s.restoreRows([{ key: 'reused-slot', summary: 'Slot reused' }], !replay);
+  s.pointerHolding = false;
+  s.releaseHeld();
+  s.drainCallLater();
+  assert.equal(s.toasts.count, 100);
+  assert.equal(s.toasts.rows.filter(r => r.summary === 'Slot reused').length, 1);
+  assert.equal(s.toasts.rows.filter(r => r.summary === 'Overflow').length, 0);
+  assert.equal(new Set(s.toasts.rows.map(r => r.key)).size, 100);
+}
+
+{ // Startup itself is bounded, including a replay before its deferred insertions drain.
+  const s = newCapacityScope();
+  s.restoreRows(storedRows(150), false);
+  s.restoreRows([{ key: 'history-a' }, { key: 'history-b' }], true);
+  s.drainCallLater();
   assert.equal(s.toasts.count, 100);
   assert.equal(s.liveCount(), 100);
-  // At capacity: an update to an existing id (replaces_id) must still go
-  // through and must not be rejected or consume a second reservation.
-  const updated = s.fakeNotification(1);
-  s.handleNotification(updated);
-  assert.equal(updated.tracked, true, 'a replacement of an existing row must not be turned away at capacity');
+  assert.equal(s.toasts.get(0).summary, 'Stored 99', 'startup order remains newest first');
+  s.clearAll('dismissed');
+  for (const row of [...s.toasts.rows]) s.finishClose(row.key, 'dismissed');
+  s.restoreRows([{ key: 'history-a' }, { key: 'history-b' }], true);
   s.drainCallLater();
-  assert.equal(s.toasts.count, 100, 'a replacement must not grow the deck past the cap');
-  assert.equal(s.liveCount(), 100, 'a replacement must not consume a second reservation');
-  // A genuinely new notification, still at capacity, must be rejected.
-  const rejected = s.fakeNotification(9999);
-  s.handleNotification(rejected);
-  assert.equal(rejected.tracked, false, 'a new notification at capacity must be rejected');
-  assert.equal(s.toasts.count, 100);
+  assert.equal(s.toasts.count, 2);
+}
+
+{ // Repeated replay creates distinct cards; restore cannot overwrite an admitted key.
+  const s = newCapacityScope();
+  s.restoreRows([{ key: 'same', summary: 'Original' }], true);
+  s.restoreRows([{ key: 'same', summary: 'Replay' }], true);
+  s.restoreRows([{ key: 'same', summary: 'Stale startup' }], false);
+  s.drainCallLater();
+  assert.equal(s.toasts.count, 2);
+  assert.equal(new Set(s.toasts.rows.map(r => r.key)).size, 2);
+  assert.equal(s.toasts.get(0).summary, 'Replay');
+  assert.equal(s.toasts.get(1).summary, 'Original');
+}
+
+{ // Clearing pending rows cancels their callbacks even if replay reuses the exact key.
+  const s = newCapacityScope();
+  s.restoreRows([{ key: 'same', summary: 'Cancelled replay' }], true);
+  s.pointerHolding = true;
+  const held = s.fakeNotification(1, 'Cancelled held');
+  s.handleNotification(held);
+  s.clearAll('cleared');
+  assert.equal(s.liveCount(), 0);
+  assert.equal(held.tracked, false);
+  s.restoreRows([{ key: 'same', summary: 'Latest replay' }], true);
+  s.releaseHeld();
+  s.drainCallLater();
+  assert.equal(s.toasts.count, 1);
+  assert.equal(s.toasts.get(0).summary, 'Latest replay');
+  assert.equal(s.liveCount(), 1);
+}
+
+{ // A restarted server may allocate an ID that persisted rows carried last session.
+  const s = newCapacityScope();
+  s.restoreRows([{ key: 'previous-session', originalId: 1, summary: 'Previous session' }], false);
+  s.drainCallLater();
+  s.handleNotification(s.fakeNotification(1, 'New session'));
+  s.drainCallLater();
+  assert.equal(s.toasts.count, 2);
+  assert.deepEqual(s.toasts.rows.map(row => row.summary), ['New session', 'Previous session']);
+}
+
+{ // ID zero never replaces a pending notification or a restored card.
+  const s = newCapacityScope();
+  s.restoreRows([{ key: 'restored-zero', summary: 'Restored zero' }], false);
+  s.handleNotification(s.fakeNotification(0, 'First zero'));
+  s.handleNotification(s.fakeNotification(0, 'Second zero'));
+  s.drainCallLater();
+  assert.equal(s.toasts.count, 3);
+  assert.equal(new Set(s.toasts.rows.map(r => r.key)).size, 3);
+  assert.equal(s.liveCount(), 3);
 }
 
 // PR 4 review finding 4 (P2): canonicalHostname() only rejected a last label

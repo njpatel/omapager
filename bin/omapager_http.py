@@ -64,13 +64,15 @@ class PinnedHTTPConnection(http.client.HTTPConnection):
     def connect(self):
         last_error = None
         for family, socktype, proto, _, address in self.answers:
-            sock = socket.socket(family, socktype, proto)
+            sock = None
             try:
+                sock = socket.socket(family, socktype, proto)
                 sock.settimeout(self.timeout)
                 # Numeric sockaddr from the validated resolution: no second lookup.
                 sock.connect(address)
             except OSError as error:
-                sock.close()
+                if sock is not None:
+                    sock.close()
                 last_error = error
                 continue
             if not self.tls:

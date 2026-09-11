@@ -18,7 +18,7 @@ function canonicalHostname(raw) {
   // even though this label-shape check alone would pass it through as an
   // ordinary hostname. Octal is already all-decimal-digit and so already
   // matched by the plain digit alternative; hex needs its own alternative.
-  if (/^(?:0x[0-9a-f]+|[0-9]+)$/i.test(h.split('.').pop())) return ''
+  if (/^(?:0x[0-9a-f]*|[0-9]+)$/i.test(h.split('.').pop())) return ''
   return h
 }
 function urlHasUserInfo(s) { return /^[a-z]+:\/\/[^/?#]*@/i.test(s) }

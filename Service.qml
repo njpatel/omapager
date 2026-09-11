@@ -412,34 +412,26 @@ Item {
 
   // ------------------------------------------------------ live capacity
   //
-  // toasts.count alone undercounts what is actually live: a card can be
-  // accepted and tracked while sitting in `held` (never inserted into
-  // toasts until the deck is released) or mid-flight in a Qt.callLater
-  // waiting to be inserted. A flood during either window used to sail past
-  // any check keyed on toasts.count alone - 150 held notifications read as
-  // toasts.count === 0. liveKeys is reserved for a key the moment it is
-  // admitted (not a replacement of an existing row) and released only when
-  // that row actually leaves - closed, dismissed, expired, or found to be
-  // muted and never shown at all - so it counts a row through every state
-  // it can be in: held, awaiting insertion, or visible.
+  // One reservation follows each row through held, deferred and visible states.
+  // Its pending snapshot is replaced in place; callbacks retain the reservation
+  // identity so closing a row cannot resurrect it, even if its key is reused.
   readonly property int maxLiveNotifications: 100
-  property var liveKeys: ({})
+  property var liveKeys: Object.create(null)
 
   function liveCount() { return Object.keys(liveKeys).length }
 
   function reserveLive(key) {
-    if (liveKeys[key]) return
-    var next = {}
-    for (var k in liveKeys) next[k] = true
-    next[key] = true
-    liveKeys = next
+    if (!key) return false
+    if (liveKeys[key]) return true
+    if (liveCount() >= maxLiveNotifications) return false
+    liveKeys[key] = { originalId: 0, row: null, scheduled: false, held: false }
+    return true
   }
 
   function releaseLive(key) {
-    if (!(key in liveKeys)) return
-    var next = {}
-    for (var k in liveKeys) if (k !== key) next[k] = true
-    liveKeys = next
+    if (!liveKeys[key]) return
+    delete liveKeys[key]
+    held = held.filter(function(heldKey) { return heldKey !== key })
   }
 
   // ------------------------------------------------------------- icons
@@ -574,7 +566,12 @@ Item {
     if (!held.length) return
     var queue = held
     held = []
-    for (var i = 0; i < queue.length; i++) service.showRow(queue[i])
+    for (var i = 0; i < queue.length; i++) {
+      var pending = liveKeys[queue[i]]
+      if (!pending || !pending.row) continue
+      pending.held = false
+      service.showRow(pending.row)
+    }
   }
 
   // Nothing waits forever: a pointer parked over the deck should not silence
@@ -765,8 +762,12 @@ Item {
   // Our own identity for a notification. The sender's id is reused (that is
   // what replaces_id is for), so it identifies a slot, not an event.
   function nextKey() {
-    keySeed += 1
-    return "n" + Date.now().toString(36) + keySeed.toString(36)
+    var key
+    do {
+      keySeed += 1
+      key = "n" + Date.now().toString(36) + keySeed.toString(36)
+    } while (liveKeys[key])
+    return key
   }
 
   function rowIndexFor(key) {
@@ -778,31 +779,26 @@ Item {
   // id 0 means "this is a new notification", not "replace the one with id 0".
   // Matching on it made every notify-send take over whichever restored row
   // happened to have no id.
-  function rowIndexForOriginal(id) {
-    if (!id) return -1
-    for (var i = 0; i < toasts.count; i++)
-      if (toasts.get(i).originalId === id) return i
-    return -1
+  function keyForOriginal(id) {
+    if (!id) return ""
+    for (var key in liveKeys)
+      if (liveKeys[key].originalId === id && refs[key]) return key
+    return ""
   }
 
   // ------------------------------------------------------------- arrival
   function handleNotification(notification) {
-    // replaces_id: the sender is updating something already on screen. That
-    // row already holds a reservation, so a replacement never needs a new
-    // one - only a genuinely new key does, and only a genuinely new key can
-    // be turned away for capacity.
-    var replacing = rowIndexForOriginal(notification.id)
-    var key = replacing >= 0 ? toasts.get(replacing).key : nextKey()
-    var newSlot = replacing < 0
+    // Replacements reuse the same slot, including before its first insertion.
+    var key = keyForOriginal(notification.id) || nextKey()
 
     // Without this the object is destroyed as soon as this handler returns,
     // taking the actions and the image with it.
-    if (newSlot && service.liveCount() >= service.maxLiveNotifications) {
+    if (!reserveLive(key)) {
       notification.tracked = false
       return
     }
+    liveKeys[key].originalId = notification.id || 0
     notification.tracked = true
-    if (newSlot) service.reserveLive(key)
 
     var row = Store.snapshot(notification, key, NotificationUrgency)
     row.duration = durationFor(notification.urgency, row.expireTimeout)
@@ -813,9 +809,7 @@ Item {
     // card's action buttons are bound through this counter, or they would be
     // read once - before the sender was recorded - and stay empty forever.
     refsRevision += 1
-    notification.closed.connect(function() {
-      if (service.refs[key] === notification) delete service.refs[key]
-    })
+    if (previous !== notification) watchNotification(notification, key)
     if (previous && previous !== notification) {
       try { previous.tracked = false } catch (e) {}
     }
@@ -830,7 +824,8 @@ Item {
       Store.write(storeProc, storeBin, "put", row)
       Store.write(storeProc, storeBin, "close", null, [key, muted])
       release(key)
-      if (newSlot) service.releaseLive(key)   // never became live: not held, never shown
+      if (rowIndexFor(key) < 0) releaseLive(key)
+      else liveKeys[key].row = null
       return
     }
 
@@ -843,20 +838,76 @@ Item {
     // new card waits, and only while the deck is being held - and it keeps
     // its reservation the whole time it sits there, unshown.
     if (service.holding() && service.rowIndexFor(key) < 0) {
-      var queue = service.held.slice()
-      queue.push(row)
-      service.held = queue
+      var pending = liveKeys[key]
+      pending.row = row
+      if (!pending.held) {
+        pending.held = true
+        service.held = service.held.concat([key])
+      }
       return
     }
 
     service.showRow(row)
   }
 
+  function watchNotification(notification, key) {
+    var reservation = liveKeys[key]
+    notification.closed.connect(function() {
+      if (service.refs[key] !== notification) return
+      delete service.refs[key]
+      service.refsRevision += 1
+      // Visible snapshots outlive their sender; pending rows must not appear
+      // after the sender withdraws them.
+      if (service.rowIndexFor(key) < 0) service.finishClose(key, "closed")
+    })
+    // NotificationServer emits onNotification only for new objects. A
+    // replaces_id update mutates this QObject and emits its property signals.
+    // Snapshot once after the whole update, not once per changed field.
+    var queued = false
+    var refresh = function() {
+      if (!queued) return
+      queued = false
+      if (reservation.refresh === refresh) reservation.refresh = null
+      if (service.liveKeys[key] !== reservation || service.refs[key] !== notification) return
+      service.handleNotification(notification)
+    }
+    var schedule = function() {
+      if (queued || service.liveKeys[key] !== reservation || service.refs[key] !== notification) return
+      queued = true
+      reservation.refresh = refresh
+      Qt.callLater(refresh)
+    }
+    var signals = [notification.summaryChanged, notification.bodyChanged,
+                   notification.appNameChanged, notification.appIconChanged,
+                   notification.imageChanged, notification.urgencyChanged,
+                   notification.expireTimeoutChanged, notification.hintsChanged,
+                   notification.actionsChanged]
+    for (var i = 0; i < signals.length; i++) signals[i].connect(schedule)
+  }
+
   // Qt.callLater: mutating the model while a Repeater is mid-incubation
   // crashes in QV4::Object::insertMember.
   function showRow(row) {
     var key = String(row.key || "")
+    if (!reserveLive(key)) return
+    var pending = liveKeys[key]
+    pending.row = row
+    pending.originalId = row.originalId || 0
+    if (pending.held) {
+      pending.held = false
+      held = held.filter(function(heldKey) { return heldKey !== key })
+    }
+    if (pending.scheduled) return
+    pending.scheduled = true
     Qt.callLater(function() {
+      if (service.liveKeys[key] !== pending) return
+      // This insertion may have been queued before a replaces_id update.
+      // Consume that update first, including its quiet/cancellation decision.
+      if (pending.refresh) pending.refresh()
+      pending.scheduled = false
+      if (service.liveKeys[key] !== pending || pending.held || !pending.row) return
+      var row = pending.row
+      pending.row = null
       var at = service.rowIndexFor(key)
       var snap = service.snapshot(), deckNow = service.deckHeight
       if (at >= 0) {
@@ -880,11 +931,20 @@ Item {
 
   // Let go of the sender's object. Untracking tells it the notification
   // closed, which is when Chromium deletes the avatar it handed us.
-  function release(key) {
+  function release(key, reason) {
     var ref = refs[key]
     if (!ref) return
-    try { ref.tracked = false } catch (e) {}
+    // Clear identity before invoking the QObject: its close signal can run
+    // synchronously and must not cancel a row or release a newer sender.
     delete refs[key]
+    refsRevision += 1
+    // Untracking itself dismisses the notification. Do exactly one close:
+    // dismiss()/expire() have already destroyed it before they return.
+    try {
+      if (reason === "expired") ref.expire()
+      else if (reason) ref.dismiss()
+      else ref.tracked = false
+    } catch (e) {}
   }
 
   // ------------------------------------------------------------- departure
@@ -898,7 +958,11 @@ Item {
   // jump - three motions for one event, and the hole was visible in every
   // recording.
   function closeToast(key, reason) {
-    if (rowIndexFor(key) < 0 || leaving[key]) return
+    if (leaving[key]) return
+    if (rowIndexFor(key) < 0) {
+      finishClose(key, reason || "dismissed")
+      return
+    }
     // Where it is *before* the layout stops giving it room. Marking it first
     // and asking afterwards gets the answer the pinned placement invented,
     // which is wherever it happened to come in from.
@@ -916,19 +980,10 @@ Item {
     for (var k in leaving) if (k !== key) rest[k] = leaving[k]
     leaving = rest
     var at = rowIndexFor(key)
-    if (at < 0) return
-    var ref = refs[key]
-    if (ref) {
-      // Tell the sender which way it went: expired and dismissed are
-      // different events on the bus, and some apps act on the difference.
-      try {
-        if (reason === "expired" && typeof ref.expire === "function") ref.expire()
-        else ref.dismiss()
-      } catch (e) {}
-    }
-    release(key)
-    service.releaseLive(key)
-    toasts.remove(at)
+    if (!liveKeys[key]) return
+    releaseLive(key)
+    release(key, reason)
+    if (at >= 0) toasts.remove(at)
     delete heights[key]
     Store.write(storeProc, storeBin, "close", null, [key, reason])
     layoutRevision += 1        // the row is gone; nothing moves, the gap already closed
@@ -942,8 +997,7 @@ Item {
     // the count stayed put, and the loop spun the main thread at 100% with no
     // error and no log. Every wedge traced back to here, because the demo
     // script clears before it starts.
-    var keys = []
-    for (var i = 0; i < toasts.count; i++) keys.push(toasts.get(i).key)
+    var keys = Object.keys(liveKeys)
     for (var k = 0; k < keys.length; k++) closeToast(keys[k], reason || "cleared")
   }
 
@@ -1437,6 +1491,25 @@ Item {
   // ------------------------------------------------------------- store
   Process { id: storeProc; running: false }
 
+  function restoreRows(rows, replay) {
+    // Restore is oldest first; history is newest first. Both insert at zero.
+    for (var i = replay ? rows.length - 1 : 0;
+         replay ? i >= 0 : i < rows.length; i += replay ? -1 : 1) {
+      var row = Store.restored(rows[i])
+      if (!row) continue
+      if (liveKeys[row.key]) {
+        // Startup must not overwrite a newer live arrival. Replaying the same
+        // entry deliberately creates a separate card, even while pending.
+        if (!replay) continue
+        row.key = nextKey()
+      }
+      if (!reserveLive(row.key)) break
+      // Live image handles died with the old shell; restore a durable icon.
+      if (!replay) wantIcon(row)
+      showRow(row)
+    }
+  }
+
   Process {
     id: restoreProc
     running: false
@@ -1444,19 +1517,7 @@ Item {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        var rows = Store.parseList(text)
-        // Oldest first out of the store, and insert(0) reverses it, so the
-        // deck comes back in the order it was in before the restart.
-        for (var i = 0; i < rows.length; i++) {
-          var row = Store.restored(rows[i])
-          if (!row) continue
-          // Restored rows need an icon too. Their sender is gone and any live
-          // handle it left died with the last shell, so without this every
-          // card that came back wore a letter.
-          service.wantIcon(row)
-          service.reserveLive(String(row.key || ""))
-          toasts.insert(0, row)
-        }
+        service.restoreRows(Store.parseList(text), false)
       }
     }
   }
@@ -1735,15 +1796,7 @@ Item {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        var rows = Store.parseList(text)          // newest first out of the store
-        for (var i = rows.length - 1; i >= 0; i--) {
-          var row = Store.restored(rows[i])
-          // A fresh key, or replaying something still on screen would land on
-          // the row that is already there and replace it.
-          if (!row) continue
-          if (service.rowIndexFor(row.key) >= 0) row.key = service.nextKey()
-          service.showRow(row)
-        }
+        service.restoreRows(Store.parseList(text), true)
       }
     }
   }

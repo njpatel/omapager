@@ -10,6 +10,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch, MagicMock
 
@@ -30,16 +31,27 @@ class Storage(unittest.TestCase):
     def tearDown(self): self.tmp.cleanup()
     def run_store(self,*args,payload=None):
         return subprocess.run([sys.executable,str(ROOT/'bin/omapager-store'),*args],input=json.dumps(payload) if payload is not None else '',text=True,capture_output=True,env=self.env)
-    def test_secret_never_on_disk(self):
-        for i,body in enumerate(['Your code is 938271','Your code is 938 271','Your code is &#57;38271','Your code is A9F3K2']):
-            self.assertEqual(self.run_store('put',payload={'key':f'n{i}','body':body,'rawBody':body,'codes':'938271','image':'/etc/passwd'}).returncode,0)
-            self.assertEqual(self.run_store('close',f'n{i}','done').returncode,0)
-        for path in self.home.rglob('*'):
-            if path.is_file():
-                content=path.read_text()
-                for secret in ['938271','938 271','&#57;38271','A9F3K2','/etc/passwd']: self.assertNotIn(secret,content)
-                self.assertEqual(path.stat().st_mode&0o777,0o600)
-        self.assertEqual((self.home/'.local/state/omarchy/omapager').stat().st_mode&0o777,0o700)
+    def test_explicit_code_flags_redact_whole_row(self):
+        for flag in ('code', 'codes'):
+            entry = {'key': flag, flag: '938271', 'app': '938271',
+                     'summary': '938271', 'body': '938271', 'rawBody': '&#57;38271',
+                     'bodyLine': '938 271', 'groupKey': '938271',
+                     'image': '/etc/passwd', 'replyTo': '938271'}
+            self.assertEqual(self.run_store('put', payload=entry).returncode, 0)
+            self.assertEqual(self.run_store('close', flag, 'done').returncode, 0)
+        result = self.run_store('history')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual({row['key']: row['body'] for row in json.loads(result.stdout)},
+                         {'code': '[redacted]', 'codes': '[redacted]'})
+        history = self.home/'.local/state/omarchy/omapager/history'
+        for path in history.glob('*.json'):
+            row = json.loads(path.read_text())
+            self.assertEqual(row['summary'], 'Verification notification')
+            self.assertEqual(row['body'], '[redacted]')
+            for secret in ('938271', '&#57;38271', '938 271', '/etc/passwd'):
+                self.assertNotIn(secret, path.read_text())
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual((self.home/'.local/state/omarchy/omapager').stat().st_mode & 0o777, 0o700)
     def test_ordinary_restore_and_off(self):
         self.assertEqual(self.run_store('put',payload={'key':'n1','body':'ordinary message'}).returncode,0)
         self.assertEqual(json.loads(self.run_store('restore').stdout)[0]['body'],'ordinary message')
@@ -61,71 +73,103 @@ class Storage(unittest.TestCase):
         (root/'omapager').symlink_to(target,target_is_directory=True)
         self.assertNotEqual(self.run_store('put',payload={'key':'n1'}).returncode,0)
         self.assertEqual(list(target.iterdir()),[])
-    def test_legacy_redaction(self):
-        self.run_store('restore')
-        live=self.home/'.local/state/omarchy/omapager/live/n1.json'
-        live.write_text(json.dumps({'key':'n1','summary':'OTP 938271','rawBody':'938271'}))
-        self.run_store('restore')
-        self.assertNotIn('938271',live.read_text())
-    # PR 4 review finding 1 (P1): the keyword regex alone used to satisfy the
-    # secret check, so ordinary "Code" notifications were redacted and, worse,
-    # ensure()/restore could rewrite already-stored benign entries into
-    # "[redacted]" in place. looks_like_a_code() now requires a distinct,
-    # nearby, digit-bearing token - see bin/omapager-store.
-    def test_review_p1_visual_studio_code_not_redacted(self):
+    def test_numbered_ordinary_notifications_survive_put_and_legacy_reads(self):
         cases = [
-            ('Visual Studio Code', 'Build completed successfully'),
-            ('Chat', 'Please review the code today'),
-            ('Claude', 'Claude Code finished the task'),
-            ('Build', 'Source code updated'),
-            ('Xcode', 'Xcode build completed'),
-            ('Auth', 'Verification completed successfully'),
-            ('Settings', 'PIN configuration updated'),
+            ('Visual Studio Code', 'Build finished', 'Build 4123 completed successfully'),
+            ('Assistant', 'Task finished', 'Claude Code finished build 4123'),
+            ('Chat', 'New message', 'Please review the code from 2025'),
+            ('VS Code', 'Build finished', 'VS Code finished build 4123'),
+            ('Xcode', 'Build finished', 'Xcode build 4123 completed'),
+            ('Chat', 'Review requested', 'Please review code abc123'),
+            ('OTP Monitor', 'Build finished', 'Build 4123 completed successfully'),
+            ('Auth', 'Verification completed successfully', 'Account ready'),
+            ('Settings', 'PIN configuration updated', 'Settings saved'),
         ]
-        for i, (app, body) in enumerate(cases):
-            # No digits in the key itself: it joins the detection text too,
-            # and a digit there would be an unrelated false positive of its
-            # own, not a test of the code/keyword proximity rule.
-            key = 'benign-' + chr(ord('a') + i)
-            r = self.run_store('put', payload={'key': key, 'app': app, 'body': body, 'rawBody': body})
-            self.assertEqual(r.returncode, 0)
-            live = json.loads((self.home/'.local/state/omarchy/omapager/live'/f'{key}.json').read_text())
-            self.assertEqual(live['body'], body, msg=(app, body))
-            self.assertEqual(live['rawBody'], body, msg=(app, body))
-            self.assertNotEqual(live.get('summary'), 'Verification notification', msg=(app, body))
-    def test_review_p1_restore_does_not_mutate_benign_legacy_state(self):
-        # A read/restore path must never destructively rewrite ordinary text,
-        # including state written before this fix existed.
-        self.run_store('restore')
-        live_dir = self.home/'.local/state/omarchy/omapager/live'
-        fixtures = {
-            'legacy-vscode.json': {'key': 'legacy-vscode', 'app': 'Visual Studio Code',
-                                    'summary': 'Build finished', 'body': 'Build completed successfully',
-                                    'rawBody': 'Build completed successfully'},
-            'legacy-review.json': {'key': 'legacy-review', 'app': 'Chat',
-                                    'summary': 'New message', 'body': 'Please review the code today',
-                                    'rawBody': 'Please review the code today'},
-        }
-        for name, entry in fixtures.items():
-            (live_dir/name).write_text(json.dumps(entry))
-        self.run_store('restore')
-        for name, entry in fixtures.items():
-            on_disk = json.loads((live_dir/name).read_text())
-            self.assertEqual(on_disk['body'], entry['body'], msg=name)
-            self.assertEqual(on_disk['rawBody'], entry['rawBody'], msg=name)
-            self.assertEqual(on_disk['summary'], entry['summary'], msg=name)
-    def test_review_p1_real_otp_is_redacted(self):
-        # The same legacy-migration path must still sanitise a genuine OTP.
-        self.run_store('restore')
-        live = self.home/'.local/state/omarchy/omapager/live/legacy-otp.json'
-        live.write_text(json.dumps({'key': 'legacy-otp', 'app': 'Bank',
-                                     'summary': 'Your verification code is 938271',
-                                     'body': 'Your verification code is 938271',
-                                     'rawBody': 'Your verification code is 938271'}))
-        self.run_store('restore')
-        on_disk = live.read_text()
-        self.assertNotIn('938271', on_disk)
-        self.assertIn('[redacted]', on_disk)
+        self.assertEqual(self.run_store('restore').returncode, 0)
+        state = self.home/'.local/state/omarchy/omapager'
+        stamp = int(time.time() * 1000)
+        for i, (app, summary, body) in enumerate(cases):
+            # Real production rows carry numbered keys and derived lowercase
+            # product group keys; neither belongs in the content detector.
+            entry = {'key': f'notification-{4123+i}', 'app': app, 'summary': summary,
+                     'body': body, 'rawBody': body, 'bodyLine': body,
+                     'groupKey': app.lower(), 'source': app, 'urgency': 1}
+            with self.subTest(app=app, body=body):
+                self.assertEqual(self.run_store('put', payload=entry).returncode, 0)
+                live = state/'live'/f'{entry["key"]}.json'
+                self.assertEqual(json.loads(live.read_text()), entry)
+                history = state/'history'/f'{stamp}-{entry["key"]}.json'
+                for path in (live, history):
+                    path.write_text(json.dumps(entry))
+                    path.chmod(0o644)
+                for verb in ('restore', 'history'):
+                    result = self.run_store(verb)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    row = next(row for row in json.loads(result.stdout) if row['key'] == entry['key'])
+                    self.assertEqual(row, entry)
+                for path in (live, history):
+                    self.assertEqual(json.loads(path.read_text()), entry)
+                    self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
+    def test_raw_and_legacy_recognised_codes_redact_whole_row(self):
+        cases = [
+            {'body': 'Your code is 938271'},
+            {'body': 'Your code is G-938271'},
+            {'body': 'Your OTP is 938 271'},
+            {'body': 'Your OTP is 938\t271'},
+            {'body': 'Your OTP is 938\n271'},
+            {'body': 'Your OTP is 938\u00a0271'},
+            {'body': 'Your code is 72-9182'},
+            {'body': 'Your code is A9F3K2'},
+            {'body': 'Your code is &#57;38271'},
+            {'body': 'Your code is &amp;#57;38271'},
+            {'body': 'Your OTP is 938<br/>271'},
+            {'body': 'Your code to finish signing in to your account in this browser is 938271'},
+            {'body': '938271 is your verification code'},
+            {'body': 'Please confirm 938271'},
+            {'body': 'Your security key is 938271'},
+            {'body': 'Your Verification Code is 938271'},
+            {'summary': 'Your code is', 'body': '938271'},
+            {'summary': 'Your OTP is 938271'},
+            {'rawBody': 'Your OTP is 938\n271', 'body': 'Open the app'},
+        ]
+        self.assertEqual(self.run_store('restore').returncode, 0)
+        state = self.home/'.local/state/omarchy/omapager'
+        stamp = int(time.time() * 1000)
+        for mode in ('put', 'legacy-live', 'legacy-history'):
+            expected = {}
+            for i, text in enumerate(cases):
+                key = f'{mode}-{i}'
+                entry = {'key': key, 'urgency': 1, 'app': 'alternate-secret',
+                         'groupKey': 'alternate-secret', 'bodyLine': 'alternate-secret',
+                         'source': 'alternate-secret', 'appIcon': 'alternate-secret',
+                         'replyTo': 'alternate-secret', 'image': '/etc/passwd', **text}
+                expected[key] = {'key': key, 'urgency': 1,
+                                 'summary': 'Verification notification', 'body': '[redacted]',
+                                 'rawBody': '[redacted]', 'bodyLine': '[redacted]'}
+                directory = 'history' if mode == 'legacy-history' else 'live'
+                name = f'{stamp}-{key}.json' if directory == 'history' else f'{key}.json'
+                path = state/directory/name
+                with self.subTest(mode=mode, text=text):
+                    if mode == 'put':
+                        result = self.run_store('put', payload=entry)
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        # Check before restore: a migration must not mask a put leak.
+                        self.assertEqual(json.loads(path.read_text()), expected[key])
+                    else:
+                        path.write_text(json.dumps(entry))
+                        path.chmod(0o644)
+            verb = 'history' if mode == 'legacy-history' else 'restore'
+            result = self.run_store(verb)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            rows = {row['key']: row for row in json.loads(result.stdout)}
+            for key, clean in expected.items():
+                with self.subTest(mode=mode, key=key):
+                    self.assertEqual(rows[key], clean)
+                    name = f'{stamp}-{key}.json' if mode == 'legacy-history' else f'{key}.json'
+                    path = state/('history' if mode == 'legacy-history' else 'live')/name
+                    self.assertEqual(json.loads(path.read_text()), clean)
+                    self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
 class Network(unittest.TestCase):
     def test_destinations(self):

@@ -7,6 +7,7 @@ import resource
 import shutil
 import subprocess
 import sys
+from urllib.parse import unquote
 from omapager_files import private_dir
 
 BASE = Path(__file__).resolve().parent.parent
@@ -50,11 +51,19 @@ def command(kind, args):
     elif kind == 'kdeconnect':
         # This exposes the session bus, not all runtime files. Bus mediation is
         # a documented residual capability; no claim of destination filtering.
-        runtime = Path('/run/user') / str(os.getuid())
-        bus = runtime / 'bus'
-        if not bus.exists(): raise RuntimeError('session bus unavailable')
+        address = os.environ.get('DBUS_SESSION_BUS_ADDRESS', '')
+        if not address.startswith('unix:path=') or ';' in address:
+            raise RuntimeError('unsupported session bus address')
+        encoded_path, _, guid = address[len('unix:path='):].partition(',')
+        if guid and (not guid.startswith('guid=') or len(guid[5:]) != 32
+                     or any(c not in '0123456789abcdefABCDEF' for c in guid[5:])):
+            raise RuntimeError('unsupported session bus address')
+        bus = Path(unquote(encoded_path, errors='strict'))
+        runtime = Path(os.environ.get('XDG_RUNTIME_DIR', str(bus.parent)))
+        if not bus.is_absolute() or not runtime.is_absolute() or not bus.is_socket():
+            raise RuntimeError('session bus unavailable')
         cmd += ['--ro-bind', str(bus), str(bus), '--setenv', 'XDG_RUNTIME_DIR', str(runtime),
-                '--setenv', 'DBUS_SESSION_BUS_ADDRESS', 'unix:path='+str(bus)]
+                '--setenv', 'DBUS_SESSION_BUS_ADDRESS', address]
     return cmd + ['/usr/bin/python3', '/opt/omapager/bin/omapager-'+kind] + args
 
 def limits():

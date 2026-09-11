@@ -1,5 +1,28 @@
 # Security changelog
 
+## Unreleased — maintainer follow-up, 2026-09-11
+
+Follow-up to PR #4 at `8f3a16cef4d4f05860b7fe7b4808c0eba189797a`:
+
+- Align independent Python code recognition with the bounded content view,
+  product/year exclusions, split-code shapes and context windows used by JS.
+  Ordinary numbered build messages survive writes and legacy migration; recognised
+  split OTPs do not remain in raw or legacy history.
+- Keep one reservation through held, deferred and visible notification states.
+  Replace pending snapshots, cancel stale callbacks, and cap startup/history replay.
+  Only a live sender can claim a replacement ID from the current server session.
+- Observe Quickshell's in-place notification property changes, coalescing them
+  before resnapshotting. Close each native notification once, not twice.
+- Reject a bare terminal `0x` as an alternate numeric-host spelling.
+- Bind the explicitly selected local session-bus socket in the KDE sandbox;
+  unsupported addresses fail closed rather than selecting the host session.
+- Try the next validated address when socket creation fails, without another
+  DNS lookup or falling through a TLS validation failure.
+
+Focused regressions and a private Omarchy lab exercised held replacements at
+capacity, cancellation, replay limits, ordinary-message persistence and restored
+offer rendering. No real phone, external URL or clipboard action was used.
+
 ## Unreleased — hardening/main, 2026-09-09
 
 Rebased onto current upstream `njpatel/omapager:main` at `06f5117d4cca5730470100f3b7949933adccd839`

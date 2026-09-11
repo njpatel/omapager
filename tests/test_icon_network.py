@@ -6,6 +6,7 @@ HTTP, redirects, TLS handshakes and certificate hostname checks are real.
 """
 import collections
 import contextlib
+import errno
 import http.server
 import os
 from pathlib import Path
@@ -180,6 +181,22 @@ class IconNetworkTest(unittest.TestCase):
                              (b"fixture icon", "https://source.test/icon"))
             self.assertEqual(state["attempts"], [PUBLIC_V6, PUBLIC])
             self.assertEqual(state["requests"], [("source.test", "/icon")])
+            self.assertEqual(state["sni"], ["source.test"])
+
+    def test_socket_family_failure_uses_validated_fallback(self):
+        with self.transport("https", answers=lambda _host: [PUBLIC_V6, PUBLIC]) as (get, state):
+            real_socket = socket.socket
+
+            def supported_socket(family, *args, **kwargs):
+                if family == socket.AF_INET6:
+                    raise OSError(errno.EAFNOSUPPORT, "Synthetic IPv6 unavailable")
+                return real_socket(family, *args, **kwargs)
+
+            with mock.patch.object(socket, "socket", supported_socket):
+                self.assertEqual(get("https://source.test/icon"),
+                                 (b"fixture icon", "https://source.test/icon"))
+            self.assertEqual(state["attempts"], [PUBLIC])
+            self.assertEqual(dict(state["calls"]), {"source.test": 1})
             self.assertEqual(state["sni"], ["source.test"])
 
     def test_tls_rejects_wrong_hostname_before_http(self):

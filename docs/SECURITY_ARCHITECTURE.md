@@ -14,6 +14,9 @@ integration stability, as the plan requires.
    rows become generic placeholders; sender metadata, raw/derived body and links
    cannot carry alternate encodings into files. Python independently sanitises
    raw callers and old files. Images/reply handles/rich markup are not persisted.
+   Its independent detector uses bounded summary/raw-body/body content, not
+   generated metadata, with the same product/year exclusions and 24-before /
+   72-after keyword windows as the JS detector. Recognition remains heuristic.
 5. QML launches `omapager-run-*` wrappers. Bubblewrap is required; no automatic
    unsandboxed fallback exists. The probe distinguishes availability from an
    operational namespace test. It does not claim every helper operation succeeded.
@@ -34,6 +37,8 @@ integration stability, as the plan requires.
    default action unless configured; that action is available as an explicit
    "Open in app" button. Replies require unique exact app/body matching, valid
    discovered KDE paths, and a second match immediately before send.
+   The helper preserves the explicitly selected local session-bus socket; it
+   does not substitute the host session when running inside a private session.
 
 ## Deliberate URL compatibility restrictions
 
@@ -43,8 +48,8 @@ hostnames (Punycode allowed), valid decimal ports, no userinfo, backslashes,
 controls, nested percent escapes or raw quotation/angle brackets. IP literals,
 single-label hosts and raw Unicode hosts fail closed. A hostname's last label
 is rejected as numeric-looking in every form a real WHATWG parser would accept
-as "ends in a number" — plain decimal, and 0x-prefixed hex, not only the
-decimal case — so a browser-recognized alternate IPv4 spelling cannot pass this
+as "ends in a number" — plain decimal and 0x-prefixed hex, including bare `0x`
+(which the browser treats as zero) — so an alternate IPv4 spelling cannot pass this
 grammar as an ordinary hostname and later canonicalize to a private/loopback
 address. Mailto accepts one address, no query headers/attachments/percent
 escapes. External browser links may use valid nonstandard ports; automatic
@@ -61,6 +66,12 @@ pending icon/reply lookups 100; store queue 256. Oversized
 serialized entries fail closed rather than writing partial JSON. Queue overflow
 may drop persistence work; this bounds resource use, not reliable delivery under
 notification floods. The sender's underlying bus allocation is outside this cap.
+
+Replacements reuse the admitted key in all live states. Quickshell updates an
+existing notification QObject through property-change signals; those signals
+are coalesced before resnapshotting. Reservation identity guards deferred
+callbacks after cancellation, and startup restore/history replay share the cap.
+Stored IDs cannot replace a new session's live sender merely by matching its ID.
 
 History: 100 entries and 24 hours by default. `historyHours`: 0, 1, 24, 168.
 Remote icons: off (`fetchRemoteIcons`). Default card action: off

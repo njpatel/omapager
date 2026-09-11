@@ -20,6 +20,13 @@ must permit Bubblewrap; missing/blocked Bubblewrap causes helper failure.
 The KDE socket exposes the session bus; it is **not destination-filtered**.
 The compatibility demo fixture is not exposed by the production launcher.
 
+The KDE profile requires an explicit `DBUS_SESSION_BUS_ADDRESS` using a single
+`unix:path=` socket (percent-escaped paths and an optional 32-hex `guid` are
+accepted). It preserves that address and the selected `XDG_RUNTIME_DIR` rather
+than assuming `/run/user/<uid>/bus`. Missing, abstract, TCP and multi-address
+forms fail closed; no host-bus fallback is attempted. The selected path must
+be an existing absolute Unix socket.
+
 Run `bin/omapager-run-helper status` for an actual lightweight namespace check.
 `omapager probe` reports that check, required policy and absence of fallback.
 Run `python3 tests/sandbox.py` on an ordinary Linux host to prove synthetic HOME
