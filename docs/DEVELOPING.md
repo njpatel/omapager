@@ -218,3 +218,22 @@ which loses `--sensitive` and nothing else — Omarchy's clipboard history is
 and copied nothing is the outcome to rule out. KDE Connect is different: it is
 the bridge that puts phone notifications on the bus at all, so without it that
 half of the feature set has no input, not a degraded one.
+
+## Font layout regression check
+
+Run `tests/font-layout.sh` on an Omarchy installation. It renders the actual
+Toast and DeedButton components offscreen without starting a notification
+daemon. Three explicit typography profiles (12px monospace, 14px monospace and
+12px proportional) each run 77 cases, including:
+
+- Every 5% font-scale step from 75–200%, with both action alignments.
+- Opening More, checking labels and buttons against every clipping ancestor,
+  and activating Reply or a wrapped action.
+- Long labels, unbroken strings, RTL text and literal markup; changing font
+  size and replacing actions while the list is open.
+- A short title that should remain on one line, and a wrapping fixture that
+  is extended until its measured text exceeds the available width.
+
+The long-label cases reach the expanded list, not just the More-only row.
+Set `OMARCHY_SHELL_DIR` if the shell is installed somewhere other than
+`/usr/share/omarchy/shell`.

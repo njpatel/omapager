@@ -69,6 +69,8 @@ BarWidget {
     var stacking = String(setting("stacking", "source"))
     if (stacking === "all" || stacking === "source" && service.stacking !== stacking)
       service.commit(function() { service.stacking = stacking })
+    var fontScale = Number(setting("fontScale", 100))
+    service.fontScale = isFinite(fontScale) ? Math.max(75, Math.min(200, fontScale)) / 100 : 1
     var align = String(setting("actionsAlign", "right"))
     if (align === "left" || align === "right") service.actionsAlign = align
     service.hideSettingsAction = setting("hideSettingsAction", true) !== false
