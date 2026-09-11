@@ -26,6 +26,8 @@ BarWidget {
   // than breaking the bar.
   readonly property var service: bar && bar.shell ? bar.shell.serviceFor("njpatel.omapager") : null
   readonly property bool silenced: service ? service.doNotDisturb : false
+  readonly property bool screenSnoozed: service ? service.screenSnoozed : false
+  onScreenSnoozedChanged: { if (screenSnoozed) controller.hide() }
 
   // liveSnoozes() reads a plain map, which nothing re-evaluates on its own, so
   // the service bumps a revision whenever that map moves. This is what every
@@ -44,7 +46,7 @@ BarWidget {
 
   // Quiet by decision, as opposed to quiet because nothing happened.
   readonly property bool codesLetThrough: service ? service.codesBypassQuiet : true
-  readonly property bool quiet: silenced || globalSnoozed
+  readonly property bool quiet: silenced || globalSnoozed || screenSnoozed
   readonly property bool hasState: quiet || snoozed.length > 0
 
   // Shown when there is something to say, while the panel is open, and on the
@@ -175,7 +177,7 @@ BarWidget {
   // to look at something rather than change it, which is what a right-click
   // means everywhere else.
   function pressed(buttonCode) {
-    if (buttonCode === Qt.RightButton) togglePanel()
+    if (buttonCode === Qt.RightButton || screenSnoozed) togglePanel()
     else if (quiet) letEverythingThrough()
     else toggleSilence()
   }
@@ -280,9 +282,10 @@ BarWidget {
   // was say it a second time and squeeze the title down to "Notificati...".
   // A snooze has an end, and the end is the whole story, so it says so and does
   // not rotate. The phrases are for the states with nothing more useful to say.
-  readonly property bool rotatingPhrases: opened && !globalSnoozed
+  readonly property bool rotatingPhrases: opened && !globalSnoozed && !screenSnoozed
 
   readonly property string stateLine: {
+    if (screenSnoozed) return "Sharing screen - held"
     if (globalSnoozed) return wakingAt(globalUntil)
     if (rotatingPhrases) return phrases[phraseIndex % phrases.length]
     if (silenced) return "Silenced"
@@ -296,7 +299,7 @@ BarWidget {
   // something being wrong rather than as something being chosen - the red
   // crossed bell and the switch already say silenced. Otherwise the hero's own
   // dim: darker(1.4), which is PanelHero's, not the 1.55 the body uses.
-  readonly property color stateColour: globalSnoozed ? snoozedColour
+  readonly property color stateColour: globalSnoozed || screenSnoozed ? snoozedColour
                                                      : Qt.darker(panelFg, 1.4)
 
   Timer {
@@ -378,17 +381,18 @@ BarWidget {
     spacing: 0
 
     Indicator {
-      visible: pager.silenced
+      visible: pager.silenced && !pager.screenSnoozed
       text: pager.bellOff
       colour: pager.silencedColour
       tooltipText: "Notifications silenced - click to allow them, right-click for options"
     }
 
     Indicator {
-      visible: !pager.silenced && (pager.globalSnoozed || pager.snoozed.length > 0)
+      visible: pager.screenSnoozed || (!pager.silenced && (pager.globalSnoozed || pager.snoozed.length > 0))
       text: pager.bellSleep
       colour: pager.snoozedColour
-      tooltipText: pager.globalSnoozed
+      tooltipText: pager.screenSnoozed ? "Screen sharing - notifications held until capture stops"
+                   : pager.globalSnoozed
                    ? ("Everything snoozed, back " + pager.waking(pager.globalUntil)
                       + " - right-click for options")
                    : ((pager.snoozed.length === 1
@@ -533,10 +537,10 @@ BarWidget {
 
                 Text {
                   anchors.centerIn: parent
-                  text: pager.silenced ? pager.bellOff
+                  text: pager.screenSnoozed ? pager.bellSleep : pager.silenced ? pager.bellOff
                       : (pager.globalSnoozed || pager.snoozed.length > 0) ? pager.bellSleep
                       : pager.bell
-                  color: pager.silenced ? pager.silencedColour
+                  color: pager.screenSnoozed ? pager.snoozedColour : pager.silenced ? pager.silencedColour
                        : (pager.globalSnoozed || pager.snoozed.length > 0) ? pager.snoozedColour
                        : pager.panelFg
                   font.family: pager.fontFamily
@@ -564,7 +568,7 @@ BarWidget {
                 // A key on a desktop where everything is coming through anyway
                 // is a control for nothing.
                 PanelActionButton {
-                  visible: pager.hasState || pager.globalChoosing
+                  visible: !pager.screenSnoozed && (pager.hasState || pager.globalChoosing)
                   anchors.verticalCenter: parent.verticalCenter
                   iconText: pager.codesLetThrough ? pager.keyGlyph : pager.keyOff
                   tooltipText: pager.codesLetThrough
@@ -578,6 +582,7 @@ BarWidget {
                 }
 
                 PanelActionButton {
+                  enabled: !pager.screenSnoozed
                   anchors.verticalCenter: parent.verticalCenter
                   iconText: pager.globalSnoozed ? pager.bell : pager.bellSleep
                   tooltipText: pager.globalSnoozed ? "Let everything through now"
@@ -591,6 +596,7 @@ BarWidget {
                 }
 
                 ToggleSwitch {
+                  enabled: !pager.screenSnoozed
                   anchors.verticalCenter: parent.verticalCenter
                   // On means notifications are coming through, which is the
                   // way round anyone reads a switch on a thing called
@@ -878,7 +884,7 @@ BarWidget {
           }
 
           Button {
-            visible: pager.quiet || pager.snoozed.length > 1
+            visible: !pager.screenSnoozed && (pager.quiet || pager.snoozed.length > 1)
             width: parent.width
             text: "Let everything through"
             bordered: true
