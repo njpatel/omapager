@@ -69,6 +69,7 @@ Item {
   // Which end of a card its buttons sit at. Settings plumbing has not landed
   // for plugins yet, so this is a property with an IPC verb, the same as
   // stacking above.
+  property real fontScale: 1
   property string actionsAlign: "right"  // right | left
 
   // Chrome puts a "Settings" action on every web notification, which opens
@@ -1578,9 +1579,10 @@ Item {
     // asked in anger: where would a click go, did the reply channel resolve,
     // which of the sender's actions survived, how tall is each card.
     function probe(): string {
-      return JSON.stringify({toasts: toasts.count, doNotDisturb: service.doNotDisturb,
-        expanded: service.expanded, hasWlCopy: service.hasWlCopy,
-        security: service.sandboxStatus, fetchRemoteIcons: service.fetchIcons,
+      return JSON.stringify({fontScale: service.fontScale, toasts: toasts.count,
+        doNotDisturb: service.doNotDisturb, expanded: service.expanded,
+        hasWlCopy: service.hasWlCopy, security: service.sandboxStatus,
+        fetchRemoteIcons: service.fetchIcons,
         allowDefaultActionOnCardClick: service.allowDefaultActionOnCardClick})
     }
     function clear(): string { service.clearAll("cleared"); return "ok" }
@@ -2000,6 +2002,7 @@ Item {
                    || ({ y: 0, scale: 1, opacity: 0, z: 1, front: false, hidden: true })
             hovered: service.hoverKey === model.key
             actions: service.actionsOf(model.key, service.refsRevision)
+            fontScale: service.fontScale
             actionsAlign: service.actionsAlign
             replyError: service.replyingKey === model.key ? service.replyError : ""
             replying: service.replyingKey === model.key
