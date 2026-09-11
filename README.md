@@ -304,6 +304,11 @@ really came from all go with it.
 sudo pacman -S wl-clipboard kdeconnect   # kdeconnect also needs the phone app
 ```
 
+## Contributing
+
+See [how we review contributions](docs/DEVELOPING.md#how-we-review-contributions)
+and the [development guide](docs/DEVELOPING.md) for working on omapager.
+
 ## Licence
 
 Apache-2.0.
