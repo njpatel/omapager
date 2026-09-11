@@ -84,6 +84,40 @@ Item {
     doNotDisturb = on
     saveQuiet()
   }
+
+  // Hyprland 0.56 reports monitor/window/region separately. These events
+  // describe capture, not its destination: local recordings count too.
+  // Keep this separate from persisted quiet so stopping never undoes DND.
+  property int monitorCaptures: 0
+  property bool screenSnoozed: false
+  property double screenSnoozedSince: 0
+  Connections {
+    target: Hyprland
+    function onRawEvent(event) {
+      if (event.name !== "screencast") return
+      if (event.data === "1,monitor") {
+        service.monitorCaptures += 1
+        screenWake.stop()
+        if (!service.screenSnoozed) {
+          service.screenSnoozedSince = Date.now() / 1000
+          service.screenSnoozed = true
+          service.replyingKey = ""
+          service.clearAll("snoozed")
+          service.releaseHeld()
+        }
+      } else if (event.data === "0,monitor") {
+        service.monitorCaptures = Math.max(0, service.monitorCaptures - 1)
+        if (!service.monitorCaptures && service.screenSnoozed) screenWake.restart()
+      }
+    }
+  }
+  // Hyprland declares a capture stopped after 500ms without frames. Bridge
+  // short gaps rather than flashing notifications between adjacent captures.
+  Timer {
+    id: screenWake
+    interval: 1000
+    onTriggered: service.screenSnoozed = false
+  }
   readonly property int gap: Style.space(6)
 
   // ------------------------------------------------------------- bar room
@@ -318,7 +352,7 @@ Item {
     // The earliest of the reasons currently in force: if the desktop has been
     // silent for an hour and this source was snoozed ten minutes ago, the hour
     // is the honest window.
-    var starts = [mine, global, silence].filter(function(t) { return t > 0 })
+    var starts = [mine, global, silence, screenSnoozed ? screenSnoozedSince : 0].filter(function(t) { return t > 0 })
     return starts.length ? Math.min.apply(null, starts) : 0
   }
 
@@ -349,7 +383,7 @@ Item {
       rows.push({ key: snoozed[i].key, label: snoozed[i].label, until: snoozed[i].until,
                   held: heldFor(snoozed[i].key, heldPerSource) })
     }
-    if (!doNotDisturb && !globalSnoozeUntil) return rows
+    if (!doNotDisturb && !globalSnoozeUntil && !screenSnoozed) return rows
     for (i = 0; i < heldRows.length && rows.length < limit; i++) {
       key = String(heldRows[i].groupKey || "")
       if (!key || seen[key]) continue
@@ -766,11 +800,12 @@ Item {
 
     // Silenced or snoozed still means recorded: "what did I miss" is the whole
     // point of a store. It goes straight to history without being on screen.
-    // Critical is never muted - that is what critical means.
-    var muted = doNotDisturb ? "silenced"
+    // Screen capture holds codes and critical alerts too: both can expose
+    // private content. The ordinary manual-quiet exceptions remain unchanged.
+    var muted = screenSnoozed ? "snoozed" : doNotDisturb ? "silenced"
               : (globalSnoozeUntil || snoozedUntil(row.groupKey)) ? "snoozed" : ""
-    if (muted && codesBypassQuiet && String(row.code || "")) muted = ""
-    if (muted && notification.urgency !== NotificationUrgency.Critical) {
+    if (!screenSnoozed && muted && codesBypassQuiet && String(row.code || "")) muted = ""
+    if (muted && (screenSnoozed || notification.urgency !== NotificationUrgency.Critical)) {
       Store.write(storeProc, storeBin, "put", row)
       Store.write(storeProc, storeBin, "close", null, [key, muted])
       release(key)
@@ -799,6 +834,12 @@ Item {
   function showRow(row) {
     var key = String(row.key || "")
     Qt.callLater(function() {
+      // Also covers pointer-held arrivals and replay queued before capture.
+      if (service.screenSnoozed) {
+        Store.write(storeProc, storeBin, "close", null, [key, "snoozed"])
+        service.release(key)
+        return
+      }
       var at = service.rowIndexFor(key)
       var snap = service.snapshot(), deckNow = service.deckHeight
       if (at >= 0) {
@@ -1378,6 +1419,10 @@ Item {
         for (var i = 0; i < rows.length; i++) {
           var row = Store.restored(rows[i])
           if (!row) continue
+          if (service.screenSnoozed) {
+            Store.write(storeProc, storeBin, "close", null, [row.key, "snoozed"])
+            continue
+          }
           // Restored rows need an icon too. Their sender is gone and any live
           // handle it left died with the last shell, so without this every
           // card that came back wore a letter.
@@ -1470,6 +1515,8 @@ Item {
         replying: service.replyingKey !== "",
         expanded: service.expanded, pointerIn: service.pointerIn,
         doNotDisturb: service.doNotDisturb, snoozed: service.liveSnoozes(),
+        screenSnoozed: service.screenSnoozed, monitorCaptures: service.monitorCaptures,
+        globalSnoozeUntil: service.globalSnoozeUntil,
         snoozeOptions: service.snoozeOptions,
         decks: service.layout.decks.length, layoutH: service.layout.height,
         layoutRevision: service.layoutRevision, heightNotes: service.heightNotes,
@@ -1768,7 +1815,7 @@ Item {
       // notification layer holding the keyboard the rest of the time would
       // swallow every keystroke on the desktop, so this is tightly bounded:
       // Escape closes it, so does answering, and so does the timeout below.
-      WlrLayershell.keyboardFocus: service.replyingKey !== ""
+      WlrLayershell.keyboardFocus: !service.screenSnoozed && service.replyingKey !== ""
                                    ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
       exclusionMode: ExclusionMode.Ignore
 
@@ -1784,7 +1831,7 @@ Item {
       // Only the deck takes input; the rest of the surface stays
       // click-through. Tracking the item keeps the region honest as the deck
       // grows and shrinks.
-      mask: Region { item: deck }
+      mask: Region { item: service.screenSnoozed ? null : deck }
 
       // The notification area proper: it begins at the bar's lower edge and is
       // clipped there, so a card arriving from above is revealed as it comes
@@ -1793,6 +1840,7 @@ Item {
       // cut off square.
       Item {
         id: clipper
+        visible: !service.screenSnoozed
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.topMargin: service.barClearance
