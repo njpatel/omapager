@@ -41,6 +41,7 @@
       "wakeHour": 8,
       "sourceLimit": 8,
       "heldPerSource": 10,
+      "recentCount": 5,
       "alwaysShow": false,
       "codesBypassQuiet": true,
       "timeFormat": "system",
@@ -149,6 +150,16 @@
         "max": 25,
         "step": 1,
         "defaultValue": 10
+      },
+      {
+        "key": "recentCount",
+        "type": "integer",
+        "label": "Recent notifications in the panel",
+        "description": "The newest notifications received this session, even when notifications are enabled. Resets when the shell restarts.",
+        "min": 1,
+        "max": 20,
+        "step": 1,
+        "defaultValue": 5
       },
       {
         "key": "alwaysShow",

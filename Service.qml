@@ -282,6 +282,26 @@ Item {
                   codesBypassQuiet: codesBypassQuiet })
   }
 
+  // A small session-only reading stack, independent of toast lifetime and quiet.
+  // Keep text snapshots, never the live Notification objects or their actions.
+  property var recentRows: []
+  readonly property int recentLimit: 20
+
+  function rememberRecent(row) {
+    var entry = {
+      key: String(row.key),
+      source: String(row.source || row.app || "Notification").slice(0, 120),
+      summary: String(row.summary || "").slice(0, 240),
+      bodyLine: String(row.bodyLine || "").slice(0, 1000),
+      ts: Number(row.ts)
+    }
+    var rows = [entry]
+    for (var i = 0; i < recentRows.length && rows.length < recentLimit; i++) {
+      if (recentRows[i].key !== entry.key) rows.push(recentRows[i])
+    }
+    recentRows = rows
+  }
+
   // ------------------------------------------------------- what was held
   //
   // A notification that never reached the screen is the one you most want to
@@ -750,6 +770,7 @@ Item {
 
     var row = Store.snapshot(notification, key, NotificationUrgency)
     row.duration = durationFor(notification.urgency, row.expireTimeout)
+    rememberRecent(row)
 
     var previous = refs[key]
     refs[key] = notification

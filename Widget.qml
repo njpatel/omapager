@@ -59,6 +59,12 @@ BarWidget {
   readonly property bool revealed: hasState || opened || alwaysShow
     || (bar && bar.centerSectionRevealHeld === true && bar.centerHoverRevealSuppressed !== true)
 
+  readonly property int recentCount: {
+    var count = Number(setting("recentCount", 5))
+    return isFinite(count) ? Math.max(1, Math.min(20, Math.floor(count))) : 5
+  }
+  readonly property var recent: service ? service.recentRows.slice(0, recentCount) : []
+
   // ------------------------------------------------------------- settings
   //
   // The settings plumbing the daemon has been doing without. Only a bar widget
@@ -366,6 +372,7 @@ BarWidget {
       return JSON.stringify({ opened: pager.opened, panelVisible: panel.visible,
                               silenced: pager.silenced, globalSnoozed: pager.globalSnoozed,
                               sources: held, expanded: pager.expandedKey,
+                              recentCount: pager.recent.length, recentLimit: pager.recentCount,
                               cardX: panel.cardOrigin.x, cardY: panel.cardOrigin.y,
                               cw: panel.contentWidth, ch: panel.contentHeight })
     }
@@ -639,6 +646,86 @@ BarWidget {
                   fontSize: Style.font.caption
                   verticalPadding: 1
                   onClicked: pager.snoozeEverything(Number(modelData.seconds))
+                }
+              }
+            }
+          }
+
+          PanelSeparator { foreground: pager.panelFg }
+
+          PanelSectionHeader {
+            text: "RECENT · LAST " + pager.recentCount
+            foreground: pager.panelFg
+            fontFamily: pager.fontFamily
+          }
+
+          Text {
+            visible: pager.recent.length === 0
+            width: parent.width
+            text: "New notifications stay here after their toast disappears."
+            textFormat: Text.PlainText
+            color: pager.dim
+            font.family: pager.fontFamily
+            font.pixelSize: Style.font.bodySmall
+            wrapMode: Text.WordWrap
+          }
+
+          Column {
+            width: parent.width
+            spacing: Style.space(6)
+
+            Repeater {
+              model: pager.recent
+
+              Rectangle {
+                id: recentCard
+                required property var modelData
+                width: parent.width
+                height: recentText.implicitHeight + Style.space(16)
+                radius: Style.cornerRadius
+                color: Qt.rgba(pager.panelFg.r, pager.panelFg.g, pager.panelFg.b, 0.05)
+
+                Column {
+                  id: recentText
+                  x: Style.space(8)
+                  y: Style.space(8)
+                  width: parent.width - Style.space(16)
+                  spacing: Style.space(3)
+
+                  Text {
+                    width: parent.width
+                    text: recentCard.modelData.source + " · "
+                          + pager.clockTime(new Date(recentCard.modelData.ts * 1000))
+                    textFormat: Text.PlainText
+                    color: pager.dim
+                    font.family: pager.fontFamily
+                    font.pixelSize: Style.font.caption
+                    elide: Text.ElideRight
+                  }
+
+                  Text {
+                    width: parent.width
+                    text: recentCard.modelData.summary
+                    textFormat: Text.PlainText
+                    color: pager.panelFg
+                    font.family: pager.fontFamily
+                    font.pixelSize: Style.font.bodySmall
+                    font.bold: true
+                    elide: Text.ElideRight
+                  }
+
+                  Text {
+                    visible: text !== ""
+                    width: parent.width
+                    text: recentCard.modelData.bodyLine
+                    textFormat: Text.PlainText
+                    color: pager.dim
+                    font.family: pager.fontFamily
+                    font.pixelSize: Style.font.caption
+                    wrapMode: Text.WordWrap
+                    maximumLineCount: 2
+                    elide: Text.ElideRight
+                  }
                 }
               }
             }
