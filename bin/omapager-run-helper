@@ -64,6 +64,16 @@ def command(kind, args):
             raise RuntimeError('session bus unavailable')
         cmd += ['--ro-bind', str(bus), str(bus), '--setenv', 'XDG_RUNTIME_DIR', str(runtime),
                 '--setenv', 'DBUS_SESSION_BUS_ADDRESS', address]
+        # A reply demo gets only its own private fixture/result directory, never
+        # the real notification store. Normal phone operations do not mount it.
+        demo_app = 'Omapager reply demo'
+        demo_request = (len(args) == 3 and args[:2] == ['find', demo_app]) or (
+            len(args) == 5 and args[0] == 'reply'
+            and args[1].startswith('demo:') and args[3] == demo_app)
+        demo = STATE / 'reply-demo'
+        if demo_request and demo.is_dir() and not demo.is_symlink():
+            private_dir(demo)
+            cmd += ['--ro-bind' if args[0] == 'find' else '--bind', str(demo), str(demo)]
     return cmd + ['/usr/bin/python3', '/opt/omapager/bin/omapager-'+kind] + args
 
 def limits():

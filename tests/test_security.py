@@ -227,6 +227,36 @@ class Replies(unittest.TestCase):
                 self.assertEqual(run.call_args_list[0].args[0][-1],text)
                 self.assertEqual(run.call_args_list[0].args[0][2],"--")
                 self.assertNotIn('shell',run.call_args_list[0].kwargs)
+    def test_demo_cannot_impersonate_a_real_phone_app(self):
+        with tempfile.TemporaryDirectory() as temp:
+            fixture = Path(temp) / 'notification.json'
+            files.write_json(fixture, {'token': 'a' * 32, 'created': time.time(),
+                                      'appName': 'WhatsApp', 'title': 'Demo sender', 'text': 'hello'})
+            with patch.object(self.k, 'FIXTURE', fixture), patch.object(self.k, 'listing', return_value=[]):
+                self.assertIsNone(self.k.find('WhatsApp', 'Demo sender: hello'))
+                note = self.k.find('Omapager reply demo', 'Demo sender: hello')
+                self.assertIsNotNone(note)
+                self.assertEqual(note['appName'], 'Omapager reply demo')
+
+    def test_demo_rejects_replaced_and_expired_sessions(self):
+        with tempfile.TemporaryDirectory() as temp:
+            fixture = Path(temp) / 'notification.json'
+            reply = Path(temp) / 'reply.json'
+            current = {'token': 'a' * 32, 'created': time.time(), 'title': 'Demo sender', 'text': 'hello'}
+            files.write_json(fixture, current)
+            with patch.object(self.k, 'FIXTURE', fixture), patch.object(self.k, 'REPLY_LOG', reply), \
+                    patch.object(self.k, 'listing', return_value=[]):
+                original = self.k.find('Omapager reply demo', 'Demo sender: hello')
+                self.assertIsNotNone(original)
+                current['token'] = 'b' * 32
+                files.write_json(fixture, current)
+                with patch.object(sys, 'argv', ['helper', 'reply', original['path'], 'must not be sent',
+                                               'Omapager reply demo', 'Demo sender: hello']):
+                    self.assertEqual(self.k.main(), 1)
+                self.assertFalse(reply.exists())
+                current['created'] = time.time() - self.k.FIXTURE_MAX_AGE - 1
+                files.write_json(fixture, current)
+                self.assertIsNone(self.k.find('Omapager reply demo', 'Demo sender: hello'))
 
 class Icons(unittest.TestCase):
     def test_icon_hint_traversal(self):

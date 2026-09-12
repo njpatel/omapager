@@ -19,9 +19,11 @@ import argparse
 import json
 import os
 import random
+import secrets
 import subprocess
 import sys
 import time
+from omapager_files import write_json
 
 STORE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "omapager-store")
 
@@ -304,25 +306,19 @@ def routing_scene():
     return items
 
 
-# Where the helper looks for a stand-in phone.
-FAKE = os.path.join(os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state")),
-                    "omarchy", "omapager", "kdeconnect-fake.json")
-FAKE_LOG = FAKE.replace(".json", ".log")
+# Match the helper sandbox's private state root, independently of XDG overrides.
+DEMO_STATE = os.path.join(os.path.expanduser("~/.local/state"),
+                          "omarchy", "omapager", "reply-demo")
+DEMO_FIXTURE = os.path.join(DEMO_STATE, "notification.json")
+DEMO_REPLY = os.path.join(DEMO_STATE, "reply.json")
 
 
 def reply_scene():
-    """A message you can actually answer.
-
-    Inline reply needs a phone holding a conversation open, which cannot be
-    arranged on demand - so this writes a fixture the helper treats as a
-    repliable notification, and sends the matching card. Replies go to a log
-    file rather than to a person, which is what makes it safe to demo."""
-    who, message = "Seif Lotfy", "did you get the build working in the end?"
-    os.makedirs(os.path.dirname(FAKE), exist_ok=True)
-    with open(FAKE, "w") as fh:
-        json.dump([dict(appName="WhatsApp", title=who, text=message,
-                        isConversation=True)], fh)
-    return [dict(app="KDE Connect", summary="WhatsApp",
+    """Create an explicit, short-lived demo session with no real phone target."""
+    who, message = "Demo sender", "did you get the build working in the end?"
+    write_json(DEMO_FIXTURE, dict(token=secrets.token_hex(16), created=time.time(),
+                                 title=who, text=message))
+    return [dict(app="KDE Connect", summary="Omapager reply demo",
                  body="%s: %s" % (who, message))]
 
 
@@ -375,7 +371,7 @@ def main():
         scenes.append("reply")
         print("hover the card, press Reply, type something and hit Enter.",
               file=sys.stderr)
-        print("it goes to %s - not to anyone." % FAKE_LOG, file=sys.stderr)
+        print("the latest reply is saved to %s - not sent to anyone." % DEMO_REPLY, file=sys.stderr)
 
     if args.scene and "routing" in args.scene:
         scenes = [n for n in scenes if n != "routing"]

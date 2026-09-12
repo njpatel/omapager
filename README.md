@@ -344,15 +344,22 @@ omarchy-shell omapager.panel openSettings  display, edge-spacing and sharing-off
 bin/omapager-demo                       # the everyday scenes
 bin/omapager-demo --scene interactive   # codes, links, and the sender's buttons
 bin/omapager-demo --scene routing       # where a click sends you, per source
-bin/omapager-demo --scene reply         # inline reply, against a stand-in phone
+bin/omapager-demo --scene reply --keep --timeout 30000  # local inline-reply demo
 bin/omapager-demo --replay 40           # your own notifications, re-sent
 bin/omapager-demo --list
 ```
 
 `--scene routing` reads your open windows and prints what each card *should*
 do before it sends anything, so you can check it against what happens.
-`--scene reply` writes a fixture the daemon treats as a repliable notification
-and logs the reply to a file rather than sending it to a person.
+`--scene reply` creates an **Omapager reply demo** notification. Hover it, choose
+**Reply**, type and press Enter. No phone or special shell environment is needed;
+the reply is saved locally, never sent to a person.
+
+The synthetic session and latest reply are stored as `notification.json` and
+`reply.json` under `~/.local/state/omarchy/omapager/reply-demo/`. Only demo requests
+expose that directory to the helper sandbox; real notification state stays hidden.
+Each run replaces the session, and sessions expire after 30 minutes. Demo fixtures
+cannot stand in for another app, and an older session cannot accept a new reply.
 
 ## Requirements
 

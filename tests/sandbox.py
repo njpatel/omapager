@@ -41,6 +41,10 @@ assert s.connect_ex(('1.1.1.1',443)) != 0
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as fixture:
         fixture.bind(str(bus))
         address = 'unix:path=' + quote(str(bus), safe='/') + ',guid=' + 'a' * 32
+        demo = r.STATE / 'reply-demo'
+        demo.mkdir(mode=0o700)
+        demo_note = demo / 'notification.json'
+        demo_note.write_text('{"synthetic":true}')
         with patch.dict(os.environ, {'DBUS_SESSION_BUS_ADDRESS': address,
                                      'XDG_RUNTIME_DIR': str(runtime)}):
             cmd = r.command('kdeconnect', [])
@@ -54,6 +58,27 @@ assert not Path('/run/user/{os.getuid()}/bus').exists()
 '''
         subprocess.run(cmd[:cut] + ['/usr/bin/python3', '-c', code],
                        check=True, timeout=10)
+        for args, readable, writable in [
+            (['find', 'Chat', 'hello'], False, False),
+            (['find', 'Omapager reply demo', 'hello'], True, False),
+            (['reply', 'demo:' + 'a' * 32, 'reply', 'Omapager reply demo', 'hello'], True, True),
+        ]:
+            with patch.dict(os.environ, {'DBUS_SESSION_BUS_ADDRESS': address,
+                                         'XDG_RUNTIME_DIR': str(runtime)}):
+                cmd = r.command('kdeconnect', args)
+            cut = cmd.index('/usr/bin/python3')
+            code = f'''from pathlib import Path
+assert not Path({str(secret)!r}).exists()
+assert not Path({str(r.STATE / 'live/n1.json')!r}).exists()
+assert Path({str(demo_note)!r}).exists() == {readable!r}
+try:
+    Path({str(demo / 'reply.json')!r}).write_text('synthetic reply')
+except OSError:
+    assert not {writable!r}
+else:
+    assert {writable!r}
+'''
+            subprocess.run(cmd[:cut] + ['/usr/bin/python3', '-c', code], check=True, timeout=10)
         for invalid in ('', 'tcp:host=localhost,port=1', 'unix:abstract=fixture',
                         'unix:path=relative', address + ';unix:path=/other',
                         'unix:path=' + str(bus) + ',path=/other'):
@@ -65,4 +90,4 @@ assert not Path('/run/user/{os.getuid()}/bus').exists()
                     pass
                 else:
                     raise AssertionError('accepted unsupported bus address')
-print('sandbox: HOME/network denied, scoped writes, OTP redaction and selected private bus passed')
+print('sandbox: HOME/network denied, scoped writes, OTP redaction, private bus and reply-demo isolation passed')
