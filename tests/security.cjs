@@ -16,6 +16,15 @@ for(const payload of ['<img src="file:///etc/passwd">','<svg><image href="https:
  assert.ok(!/<(?:img|svg|script|iframe|object|embed|style)\b/i.test(rendered),rendered);
  assert.ok(!/<a[^>]+onmouseover=/i.test(rendered),rendered);
 }
+{ // Escaped sender markup must not leak into collapsed or restored previews.
+ const body='Thread in #support: &lt;b&gt;Sam&lt;/b&gt;&lt;br/&gt;the preview is readable &amp; compact';
+ const expected='Thread in #support: Sam the preview is readable & compact';
+ const row=Store.snapshot({appName:'Slack',summary:'Slack',body},'markup',{Normal:1});
+ assert.equal(row.bodyLine,expected);
+ const nested=body.replace(/&/g,'&amp;');
+ assert.equal(Store.restored({key:'markup',body:nested,bodyLine:'stale preview'}).bodyLine,expected);
+ assert.equal(M.oneLine('  <b>Sam</b><br/>plain &amp; simple\n&lt;3  '),'Sam plain & simple <3');
+}
 for (const body of ['Your verification code is 938271','Your code is 938 271','Your code is 938-271','Your code is &#57;38271','Your code is A9F3K2']) {
  const row=Store.snapshot({appName:'Test',summary:'Verification',body},'test', {Normal:1});
  const saved=Store.sanitiseForPersistence(row);

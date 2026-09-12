@@ -128,8 +128,9 @@ function render(body) {
 }
 
 // Flatten to one line, for a card that is not the one being read.
+// Decode before stripping, as in render(): escaped sender tags are markup too.
 function oneLine(body) {
-  return decodeEntities(Security.bounded(body, Security.MAX_BODY).replace(/<[^>]+>/g, " "))
+  return decodeEntities(body).replace(/<[^>]+>/g, " ")
     .replace(/\s+/g, " ")
     .trim()
 }
