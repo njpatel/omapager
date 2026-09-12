@@ -297,27 +297,44 @@ Item {
                   codesBypassQuiet: codesBypassQuiet })
   }
 
-  // A small session-only reading stack, independent of toast lifetime and quiet.
+  // A small session-only reading stack for notifications that were not quietened.
   // Keep text snapshots, never the live Notification objects or their actions.
   property var recentRows: []
   readonly property int recentLimit: 20
 
   function rememberRecent(row) {
-    // Recent text outlives its toast too: use the existing history redaction
-    // policy rather than keeping a copied verification code around all session.
-    row = Store.sanitiseForPersistence(row)
-    var entry = {
-      key: String(row.key),
-      source: String(row.source || row.app || "Notification").slice(0, 120),
-      summary: String(row.summary || "").slice(0, 240),
-      bodyLine: String(row.bodyLine || "").slice(0, 1000),
-      ts: Number(row.ts)
+    var key = String(row.key), rows = []
+    if (!doNotDisturb && !globalSnoozeUntil && !snoozedUntil(row.groupKey)) {
+      // Keep source matching separate from the redacted display text. A digest
+      // avoids retaining a sender-supplied code in a raw source/group label.
+      var sourceKey = Qt.md5(String(row.groupKey || ""))
+      row = Store.sanitiseForPersistence(row)
+      rows.push({
+        key: key, sourceKey: sourceKey,
+        source: String(row.source || row.app || "Notification").slice(0, 120),
+        summary: String(row.summary || "").slice(0, 240),
+        bodyLine: String(row.bodyLine || "").slice(0, 1000),
+        ts: Number(row.ts)
+      })
     }
-    var rows = [entry]
+    // A replacement may change to a snoozed source: remove its old entry even
+    // when the new version belongs only in Held Back.
     for (var i = 0; i < recentRows.length && rows.length < recentLimit; i++) {
-      if (recentRows[i].key !== entry.key) rows.push(recentRows[i])
+      if (recentRows[i].key !== key) rows.push(recentRows[i])
     }
     recentRows = rows
+  }
+
+  function recentForPanel(limit) {
+    snoozeRevision
+    if (doNotDisturb || globalSnoozeUntil) return []
+    var excluded = Object.create(null), snoozed = liveSnoozes()
+    for (var i = 0; i < snoozed.length; i++) excluded[Qt.md5(snoozed[i].key)] = true
+    var rows = []
+    for (var j = 0; j < recentRows.length && rows.length < limit; j++) {
+      if (!excluded[recentRows[j].sourceKey]) rows.push(recentRows[j])
+    }
+    return rows
   }
 
   // ------------------------------------------------------- what was held

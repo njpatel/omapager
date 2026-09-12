@@ -189,17 +189,22 @@ code-bearing notifications. Do not remove either boundary.
 
 The panel's Recent stack is session-only, not another persistence path.
 `Service.rememberRecent()` keeps at most 20 bounded text snapshots after
-notification admission and uses `Store.sanitiseForPersistence()` so verification
-codes do not outlive their toast here either. Never retain Notification objects,
-images or actions in this stack. Replacements update by the existing live key;
-expiry and dismissal leave the snapshot readable. The widget's `recentCount`
-setting only selects 1–20 of those snapshots, and shell restart clears them.
+notification admission, excluding arrivals during global quiet or a source
+snooze. It uses `Store.sanitiseForPersistence()` so verification codes do not
+outlive their toast here either. Never retain Notification objects, images or
+actions in this stack. A source digest supports snooze matching without keeping
+its unredacted label. Replacements update by the existing live key; expiry and
+dismissal leave the snapshot readable. `recentForPanel()` filters currently
+snoozed sources before the widget's 1–20 card limit; global quiet hides the whole
+Recent block. Snooze revisions refresh that filter on snooze, wake and expiry.
+Shell restart clears the stack.
 
-`node tests/security.cjs` covers recent ordering/eviction, expiry, replacement
-and redaction through the production notification lifecycle. For visual proof,
-use a private omalab bus: send seven short-lived synthetic notifications, wait
-for `omapager count` to return zero, then open `omapager.panel`. After the panel
-animation settles, verify the newest five remain with notifications enabled.
+`node tests/security.cjs` covers recent ordering/eviction, expiry, replacement,
+redaction and snooze filtering through the production notification lifecycle.
+For visual proof, use a private omalab bus: send short-lived notifications from
+two sources, snooze one and verify only the other remains in Recent. Snooze
+everything and verify the whole Recent block disappears. Wake the sources and
+verify held arrivals did not enter Recent while earlier entries become eligible.
 
 - **`bin/omapager-icon` fetches, through `bin/omapager_http.py`.** This is the
   single network-security implementation for icon fetching; there is no second,

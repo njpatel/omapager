@@ -63,7 +63,10 @@ BarWidget {
     var count = Number(setting("recentCount", 5))
     return isFinite(count) ? Math.max(1, Math.min(20, Math.floor(count))) : 5
   }
-  readonly property var recent: service ? service.recentRows.slice(0, recentCount) : []
+  readonly property var recent: {
+    snoozeRevision
+    return service ? service.recentForPanel(recentCount) : []
+  }
 
   // ------------------------------------------------------------- settings
   //
@@ -661,16 +664,17 @@ BarWidget {
             }
           }
 
-          PanelSeparator { foreground: pager.panelFg }
+          PanelSeparator { visible: !pager.quiet; foreground: pager.panelFg }
 
           PanelSectionHeader {
+            visible: !pager.quiet
             text: "RECENT · LAST " + pager.recentCount
             foreground: pager.panelFg
             fontFamily: pager.fontFamily
           }
 
           Text {
-            visible: pager.recent.length === 0
+            visible: !pager.quiet && pager.recent.length === 0
             width: parent.width
             text: "New notifications stay here after their toast disappears."
             textFormat: Text.PlainText
@@ -681,6 +685,7 @@ BarWidget {
           }
 
           Column {
+            visible: !pager.quiet
             width: parent.width
             spacing: Style.space(6)
 

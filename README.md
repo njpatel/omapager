@@ -109,6 +109,12 @@ notification updates its entry rather than duplicating it. Restarting the shell
 clears Recent; it does not load or alter the existing disk history. Verification
 notifications use the same redacted placeholder as history, not the code.
 
+Recent is hidden while everything is snoozed or silenced. Snoozed sources are
+excluded before applying the card limit, so other sources can still fill it.
+Notifications received during a snooze or silence belong only in Held Back;
+they do not populate Recent when quiet ends. A source's earlier recent entries
+are hidden while it is snoozed and become eligible again when it wakes.
+
 <img src="assets/quiet.png" width="404" alt="The bar indicator and the panel behind it">
 
 **Resolves real icons.** Your own icon themes win; web notifications fall back
