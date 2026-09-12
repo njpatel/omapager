@@ -1,0 +1,93 @@
+#!/usr/bin/python3
+"""Fail-closed helper namespaces. No unsandboxed compatibility fallback."""
+import json
+import os
+from pathlib import Path
+import resource
+import shutil
+import subprocess
+import sys
+from urllib.parse import unquote
+from omapager_files import private_dir
+
+BASE = Path(__file__).resolve().parent.parent
+HOME_DIR = Path.home()
+STATE = HOME_DIR / '.local/state/omarchy/omapager'
+
+def command(kind, args):
+    bwrap = shutil.which('bwrap')
+    if not bwrap:
+        raise RuntimeError('Bubblewrap is required')
+    if kind not in ('store', 'icon', 'kdeconnect', 'check'):
+        raise ValueError('unknown helper')
+    cmd = [bwrap, '--die-with-parent', '--new-session', '--unshare-all',
+           '--cap-drop', 'ALL', '--ro-bind', '/usr', '/usr', '--proc', '/proc',
+           '--dev', '/dev', '--tmpfs', '/tmp', '--tmpfs', '/home',
+           '--dir', str(HOME_DIR), '--clearenv', '--setenv', 'HOME', str(HOME_DIR),
+           '--setenv', 'PATH', '/usr/bin', '--setenv', 'LANG', 'C.UTF-8',
+           '--setenv', 'PYTHONDONTWRITEBYTECODE', '1', '--chdir', '/tmp']
+    for name in ('lib', 'lib64', 'bin', 'sbin'):
+        if Path('/'+name).exists():
+            cmd += ['--symlink', 'usr/'+name, '/'+name]
+    for name in ('/etc/ld.so.cache', '/etc/nsswitch.conf'):
+        if Path(name).exists(): cmd += ['--ro-bind', name, name]
+    cmd += ['--ro-bind', str(BASE), '/opt/omapager']
+    if kind == 'check':
+        return cmd + ['/usr/bin/true']
+    private_dir(STATE)
+    if kind == 'store':
+        cmd += ['--bind', str(STATE), str(STATE)]
+    elif kind == 'icon':
+        icons = private_dir(STATE / 'icons')
+        cmd += ['--bind', str(icons), str(icons)]
+        for part in ('.local/share/icons', '.local/share/applications', '.config/omarchy/omapager/icons'):
+            path = HOME_DIR / part
+            if path.is_dir() and not path.is_symlink():
+                cmd += ['--ro-bind', str(path), str(path)]
+        if '--fetch' in args:
+            cmd += ['--share-net']
+            for name in ('/etc/resolv.conf', '/etc/ssl/certs', '/etc/ca-certificates'):
+                if Path(name).exists(): cmd += ['--ro-bind', name, name]
+    elif kind == 'kdeconnect':
+        # This exposes the session bus, not all runtime files. Bus mediation is
+        # a documented residual capability; no claim of destination filtering.
+        address = os.environ.get('DBUS_SESSION_BUS_ADDRESS', '')
+        if not address.startswith('unix:path=') or ';' in address:
+            raise RuntimeError('unsupported session bus address')
+        encoded_path, _, guid = address[len('unix:path='):].partition(',')
+        if guid and (not guid.startswith('guid=') or len(guid[5:]) != 32
+                     or any(c not in '0123456789abcdefABCDEF' for c in guid[5:])):
+            raise RuntimeError('unsupported session bus address')
+        bus = Path(unquote(encoded_path, errors='strict'))
+        runtime = Path(os.environ.get('XDG_RUNTIME_DIR', str(bus.parent)))
+        if not bus.is_absolute() or not runtime.is_absolute() or not bus.is_socket():
+            raise RuntimeError('session bus unavailable')
+        cmd += ['--ro-bind', str(bus), str(bus), '--setenv', 'XDG_RUNTIME_DIR', str(runtime),
+                '--setenv', 'DBUS_SESSION_BUS_ADDRESS', address]
+    return cmd + ['/usr/bin/python3', '/opt/omapager/bin/omapager-'+kind] + args
+
+def limits():
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+    resource.setrlimit(resource.RLIMIT_CPU, (30, 30))
+    resource.setrlimit(resource.RLIMIT_AS, (512*1024*1024, 512*1024*1024))
+    resource.setrlimit(resource.RLIMIT_FSIZE, (2*1024*1024, 2*1024*1024))
+
+if __name__ == '__main__':
+    try:
+        kind = Path(sys.argv[0]).name.removeprefix('omapager-run-')
+        args = sys.argv[1:]
+        if kind == 'helper':
+            kind, args = args[0], args[1:]
+        if kind == 'status':
+            available = shutil.which('bwrap') is not None
+            active = available and subprocess.run(command('check', []), stdout=subprocess.DEVNULL,
+                                                   stderr=subprocess.DEVNULL, timeout=5).returncode == 0
+            print(json.dumps({'bubblewrapAvailable': available, 'sandboxOperational': bool(active),
+                              'required': True, 'unsandboxedFallback': False}))
+            sys.exit(0)
+        if kind == 'capabilities':
+            sys.exit(0 if shutil.which('wl-copy') and shutil.which('wl-paste') else 1)
+        sys.exit(subprocess.run(command(kind, args), timeout=45, preexec_fn=limits).returncode)
+    except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired):
+        sys.stderr.write('omapager: helper unavailable; sandbox required or input rejected\n')
+        sys.exit(1)
