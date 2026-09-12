@@ -76,6 +76,29 @@ BarWidget {
       if (screens[i] && String(screens[i].name || "") === configuredDisplayName) return true
     return false
   }
+  readonly property string displayChoice: configuredDisplayMode === "specific"
+    ? "output:" + configuredDisplayName : configuredDisplayMode
+  readonly property var displayOptions: {
+    var options = [
+      { value: "active", label: "Active display" },
+      { value: "all", label: "All displays" }
+    ]
+    for (var i = 0; i < availableScreens.length; i++) {
+      var name = String(availableScreens[i].name || "")
+      if (name) options.push({ value: "output:" + name, label: "Only " + name })
+    }
+    if (configuredDisplayMode === "specific" && !configuredDisplayPresent)
+      options.push({ value: displayChoice, label: configuredDisplayName
+        ? "Only " + configuredDisplayName + " (disconnected)" : "Choose a display" })
+    return options
+  }
+  readonly property string displayExplanation: configuredDisplayMode === "all"
+    ? "The same notifications appear on every display."
+    : configuredDisplayMode === "specific" && configuredDisplayPresent
+      ? "Notifications stay on " + configuredDisplayName + "."
+      : configuredDisplayMode === "specific"
+        ? "Using the active display until your selected monitor is available."
+        : "New notifications follow your focus.\nVisible cards stay where they are."
   readonly property string sharingDetectionStatus: service && service.sharingDetectionStatus
     ? String(service.sharingDetectionStatus) : "Watching for Hyprland portal screen, window or area sharing"
 
@@ -91,17 +114,17 @@ BarWidget {
       pager.bar.shell.updateEntryInline(pager.moduleName, entry)
   }
 
-  function setDisplayMode(mode) {
-    var next = String(mode || "")
-    if (next !== "active" && next !== "specific" && next !== "all") return
-    if (next !== configuredDisplayMode) persistSettings({ displayMode: next })
-  }
-
-  function chooseDisplay(name) {
-    var next = String(name || "")
-    if (next === "") return
-    if (configuredDisplayMode !== "specific" || configuredDisplayName !== next)
-      persistSettings({ displayMode: "specific", displayName: next })
+  function selectDisplay(value) {
+    if (value === "active" || value === "all") {
+      persistSettings({ displayMode: value })
+      return
+    }
+    for (var i = 0; i < displayOptions.length; i++) {
+      if (displayOptions[i].value !== value || value.indexOf("output:") !== 0) continue
+      var name = value.slice(7)
+      if (name) persistSettings({ displayMode: "specific", displayName: name })
+      return
+    }
   }
 
   function toggleSharingOfferSetting() {
@@ -209,6 +232,7 @@ BarWidget {
   PanelController { id: controller }
   readonly property bool opened: controller.open
   property bool settingsView: false
+  onSettingsViewChanged: { if (!settingsView) displayDropdown.close() }
 
   // KeyboardPanel dismisses itself by calling close() on its owner, and falls
   // back to writing its own `open` property when the owner has no such
@@ -451,6 +475,7 @@ BarWidget {
                                           displayName: pager.configuredDisplayName,
                                           offerSnoozeWhenSharing: pager.configuredOfferSnoozeWhenSharing },
                               displayPresent: pager.configuredDisplayPresent,
+                              displayMenuOpen: displayDropdown.popupOpen,
                               sources: held, expanded: pager.expandedKey,
                               cardX: panel.cardOrigin.x, cardY: panel.cardOrigin.y,
                               cw: panel.contentWidth, ch: panel.contentHeight })
@@ -563,7 +588,7 @@ BarWidget {
     owner: pager
     bar: pager.bar
     open: pager.opened
-    focusTarget: keys
+    focusTarget: pager.settingsView ? settingsPage : keys
     // 380 is what every core Omarchy panel is, bar the two that need to be
     // wider (the clock's calendar, the weather's forecast). A panel that is
     // its own width is the thing you notice about it.
@@ -573,6 +598,7 @@ BarWidget {
     PanelKeyCatcher {
       id: keys
       anchors.fill: parent
+      blocked: pager.settingsView
       onCloseRequested: controller.hide()
       onMoveRequested: function(dx, dy) {
         if (pager.settingsView || dy === 0 || pager.sources.length === 0) return
@@ -615,192 +641,115 @@ BarWidget {
             id: settingsPage
             visible: pager.settingsView
             width: parent.width
-            spacing: Style.space(10)
+            spacing: Style.spacing.huge
+            Keys.onEscapePressed: controller.hide()
 
-            Row {
+            PanelHero {
               width: parent.width
-              spacing: Style.space(10)
+              title: "Notifications"
+              meta: "Preferences"
+              foreground: pager.panelFg
+              fontFamily: pager.fontFamily
+              trailingControl: Component {
+                PanelActionButton {
+                  iconText: "\u{f00d}"
+                  tooltipText: "Close preferences"
+                  foreground: pager.panelFg
+                  fontFamily: pager.fontFamily
+                  focusable: true
+                  onClicked: controller.hide()
+                }
+              }
+            }
 
-              PanelActionButton {
-                anchors.verticalCenter: parent.verticalCenter
-                iconText: "\u{f0141}"                 // nf-md-chevron-left
-                tooltipText: "Back to notifications"
+            Column {
+              width: parent.width
+              spacing: Style.spacing.lg
+
+              Dropdown {
+                id: displayDropdown
+                width: parent.width
+                label: "Show notifications on"
+                value: pager.displayChoice
+                options: pager.displayOptions
                 foreground: pager.panelFg
                 fontFamily: pager.fontFamily
-                focusable: true
-                onClicked: pager.settingsView = false
+                onChanged: function(value) {
+                  pager.selectDisplay(value)
+                  // Dropdown assigns its own value when choosing. Restore the
+                  // binding so config edits and hotplug still update the label.
+                  displayDropdown.value = Qt.binding(function() { return pager.displayChoice })
+                }
               }
 
-              Column {
-                width: parent.width - Style.space(32)
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: Style.space(2)
-
-                Text {
-                  width: parent.width
-                  textFormat: Text.PlainText
-                  text: "Notification settings"
-                  color: pager.panelFg
-                  font.family: pager.fontFamily
-                  font.pixelSize: Style.font.title
-                  font.bold: true
-                  elide: Text.ElideRight
-                }
-
-                Text {
-                  width: parent.width
-                  textFormat: Text.PlainText
-                  text: "Where alerts appear and sharing offers"
-                  color: pager.dim
-                  font.family: pager.fontFamily
-                  font.pixelSize: Style.font.caption
-                  elide: Text.ElideRight
-                }
+              Text {
+                width: parent.width
+                text: pager.displayExplanation
+                textFormat: Text.PlainText
+                color: Qt.darker(pager.panelFg, 1.4)
+                font.family: pager.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                wrapMode: Text.WordWrap
               }
             }
 
             PanelSeparator { foreground: pager.panelFg }
 
-            PanelSectionHeader {
-              text: "DISPLAY"
-              foreground: pager.panelFg
-              fontFamily: pager.fontFamily
-            }
-
-            SettingsChoice {
-              labelText: "Automatic"
-              detailText: "Hyprland focused monitor"
-              selected: pager.configuredDisplayMode === "active"
-              onActivated: pager.setDisplayMode("active")
-            }
-
-            SettingsChoice {
-              labelText: "Specific monitor"
-              detailText: pager.configuredDisplayName === "" ? "Choose an output below"
-                          : pager.configuredDisplayName
-              selected: pager.configuredDisplayMode === "specific"
-              onActivated: pager.setDisplayMode("specific")
-            }
-
             Column {
-              visible: pager.configuredDisplayMode === "specific"
-              width: parent.width - Style.space(14)
-              x: Style.space(14)
-              spacing: Style.space(4)
+              width: parent.width
+              spacing: Style.spacing.lg
 
-              Repeater {
-                model: pager.availableScreens
+              Row {
+                width: parent.width
+                spacing: Style.spacing.controlGap
 
-                SettingsChoice {
-                  required property var modelData
-                  readonly property string screenName: modelData ? String(modelData.name || "") : ""
-                  visible: screenName !== ""
-                  width: parent ? parent.width : 0
-                  labelText: screenName
-                  detailText: selected ? "Selected output" : ""
-                  selected: pager.configuredDisplayName === screenName
-                  onActivated: pager.chooseDisplay(screenName)
+                Text {
+                  width: parent.width - sharingOfferSwitch.width - parent.spacing
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: "Suggest a snooze when sharing"
+                  textFormat: Text.PlainText
+                  color: pager.panelFg
+                  font.family: pager.fontFamily
+                  font.pixelSize: Style.font.body
+                  wrapMode: Text.WordWrap
+                }
+
+                ToggleSwitch {
+                  id: sharingOfferSwitch
+                  anchors.verticalCenter: parent.verticalCenter
+                  checked: pager.configuredOfferSnoozeWhenSharing
+                  foreground: pager.panelFg
+                  onToggled: pager.toggleSharingOfferSetting()
                 }
               }
 
               Text {
-                visible: pager.configuredDisplayName !== "" && !pager.configuredDisplayPresent
                 width: parent.width
+                text: "A quiet offer in the bar.\nNothing is muted unless you choose."
                 textFormat: Text.PlainText
-                text: "Saved output " + pager.configuredDisplayName + " is unavailable."
-                color: pager.panelFg
+                color: Qt.darker(pager.panelFg, 1.4)
                 font.family: pager.fontFamily
                 font.pixelSize: Style.font.bodySmall
                 wrapMode: Text.WordWrap
               }
 
               Text {
-                visible: pager.configuredDisplayName === "" || !pager.configuredDisplayPresent
+                visible: pager.sharingDetectionStatus.indexOf("Sharing detection unavailable:") === 0
                 width: parent.width
+                text: pager.sharingDetectionStatus
                 textFormat: Text.PlainText
-                text: pager.configuredDisplayName === ""
-                      ? "Choose a monitor. Until then, notifications use the focused monitor."
-                      : "Notifications use the focused monitor until the saved output returns."
-                color: pager.dim
+                color: pager.panelFg
                 font.family: pager.fontFamily
-                font.pixelSize: Style.font.caption
+                font.pixelSize: Style.font.bodySmall
                 wrapMode: Text.WordWrap
-              }
-            }
-
-            SettingsChoice {
-              labelText: "All monitors"
-              detailText: "Show each notification on every output"
-              selected: pager.configuredDisplayMode === "all"
-              onActivated: pager.setDisplayMode("all")
-            }
-
-            PanelSeparator { foreground: pager.panelFg }
-
-            BorderSurface {
-              id: sharingOfferRow
-              width: parent.width
-              implicitHeight: Math.max(sharingOfferLabels.implicitHeight + Style.space(12), sharingOfferSwitch.implicitHeight)
-              color: sharingOfferMouse.containsMouse
-                ? Style.hoverFillFor(pager.panelFg, Color.accent) : "transparent"
-              borderSpec: Border.controlSpec("normal", pager.panelFg, Color.accent)
-              radius: Style.cornerRadius
-
-              Column {
-                id: sharingOfferLabels
-                anchors.left: parent.left
-                anchors.leftMargin: Style.space(8)
-                anchors.right: sharingOfferSwitch.left
-                anchors.rightMargin: Style.space(8)
-                anchors.verticalCenter: parent.verticalCenter
-                spacing: Style.space(2)
-
-                Text {
-                  width: parent.width
-                  textFormat: Text.PlainText
-                  text: "Offer to snooze when sharing starts"
-                  color: pager.panelFg
-                  font.family: pager.fontFamily
-                  font.pixelSize: Style.font.bodySmall
-                  font.bold: true
-                  wrapMode: Text.WordWrap
-                }
-
-                Text {
-                  width: parent.width
-                  textFormat: Text.PlainText
-                  text: pager.sharingDetectionStatus
-                  color: pager.dim
-                  font.family: pager.fontFamily
-                  font.pixelSize: Style.font.caption
-                  wrapMode: Text.WordWrap
-                }
-              }
-
-              ToggleSwitch {
-                id: sharingOfferSwitch
-                anchors.right: parent.right
-                anchors.rightMargin: Style.space(3)
-                anchors.verticalCenter: parent.verticalCenter
-                checked: pager.configuredOfferSnoozeWhenSharing
-                interactive: false
-                foreground: pager.panelFg
-              }
-
-              MouseArea {
-                id: sharingOfferMouse
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: pager.toggleSharingOfferSetting()
               }
             }
 
             Text {
               width: parent.width
+              text: "Saved automatically · shell.json"
               textFormat: Text.PlainText
-              text: "Detects screen, window, and area portal sessions. Notification delivery is not automatically muted."
-              color: pager.dim
+              color: Qt.darker(pager.panelFg, 1.4)
               font.family: pager.fontFamily
               font.pixelSize: Style.font.caption
               wrapMode: Text.WordWrap
@@ -1281,84 +1230,6 @@ BarWidget {
     }
   }
 
-  component SettingsChoice: BorderSurface {
-    id: choice
-
-    property string labelText: ""
-    property string detailText: ""
-    property bool selected: false
-    signal activated()
-
-    width: parent ? parent.width : implicitWidth
-    implicitHeight: Math.max(Style.space(42), choiceLabels.implicitHeight + Style.space(12))
-    activeFocusOnTab: true
-    radius: Style.cornerRadius
-    color: selected
-      ? Style.selectedFillFor(pager.panelFg, Color.accent)
-      : (choiceMouse.containsMouse || activeFocus
-          ? Style.hoverFillFor(pager.panelFg, Color.accent) : "transparent")
-    borderSpec: Border.controlSpec(selected ? "selected" : activeFocus ? "focus" : "normal",
-                                   pager.panelFg, Color.accent)
-
-    Keys.onReturnPressed: choice.activated()
-    Keys.onEnterPressed: choice.activated()
-    Keys.onSpacePressed: choice.activated()
-
-    Text {
-      id: choiceMark
-      anchors.left: parent.left
-      anchors.leftMargin: Style.space(8)
-      anchors.verticalCenter: parent.verticalCenter
-      textFormat: Text.PlainText
-      text: choice.selected ? "●" : "○"
-      color: pager.panelFg
-      font.family: pager.fontFamily
-      font.pixelSize: Style.font.body
-    }
-
-    Column {
-      id: choiceLabels
-      anchors.left: choiceMark.right
-      anchors.leftMargin: Style.space(8)
-      anchors.right: parent.right
-      anchors.rightMargin: Style.space(8)
-      anchors.verticalCenter: parent.verticalCenter
-      spacing: Style.space(1)
-
-      Text {
-        width: parent.width
-        textFormat: Text.PlainText
-        text: choice.labelText
-        color: pager.panelFg
-        font.family: pager.fontFamily
-        font.pixelSize: Style.font.bodySmall
-        font.bold: choice.selected
-        elide: Text.ElideRight
-      }
-
-      Text {
-        visible: choice.detailText !== ""
-        width: parent.width
-        textFormat: Text.PlainText
-        text: choice.detailText
-        color: pager.dim
-        font.family: pager.fontFamily
-        font.pixelSize: Style.font.caption
-        elide: Text.ElideRight
-      }
-    }
-
-    MouseArea {
-      id: choiceMouse
-      anchors.fill: parent
-      hoverEnabled: true
-      cursorShape: Qt.PointingHandCursor
-      onClicked: {
-        choice.forceActiveFocus()
-        choice.activated()
-      }
-    }
-  }
 
   // PanelHero with one thing added: the line under the title can be coloured.
   //

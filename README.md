@@ -128,15 +128,19 @@ icons for good.
 
 ## Settings
 
-Open the notification panel and click the cog for display settings. **Automatic**
-places a fresh notification deck on Hyprland's focused monitor. A visible deck
-stays on that display when focus moves, so a card does not move while you are
-reading it. **Specific monitor** pins notifications to an output name; if that
-output disappears, a connected display is used until it returns. **All monitors**
-shows the same deck on every display. Dismissal and snoozing remain shared.
+Open the notification panel and click the cog for preferences. In the native
+**Show notifications on** dropdown, **Active display** places a fresh deck on
+Hyprland's focused monitor. A visible deck stays put when focus moves.
+**Only DP-1**, for example, pins notifications to that output; disconnected selections are
+retained, with a connected-display fallback until the output returns.
+**All displays** shows the same deck everywhere. Dismissal and snoozing remain shared.
 
-The settings view and configuration use the same bar-widget entry; changes made
-in the view persist across shell restarts.
+The dropdown, switch, header and separator reuse Omarchy's UI components. Font,
+spacing, borders and switch rounding follow the theme. Use arrows or `j`/`k` in
+the dropdown, Enter to choose and Escape to close the menu.
+
+The preferences and configuration use the same bar-widget entry; changes made
+in the view persist across shell restarts. No separate settings file is created.
 
 | key | default | what it does |
 | --- | --- | --- |
