@@ -102,6 +102,9 @@ newest notifications even while notifications are enabled, after their toasts
 expire or are dismissed. Right-click the bar indicator to read them; hover the
 centre of the bar to reveal it when nothing is held back. Cards show the source,
 arrival time, title and a two-line text preview, with no actions or replay.
+Recent starts collapsed, showing only its count. Click the heading or chevron to
+reveal the cards; closing and reopening the panel collapses it again. New
+notifications update the count without opening the list.
 
 `recentCount` chooses how many cards to show: **1–20, default 5**. The latest 20
 text snapshots stay in memory for this shell session only, and replacing a live

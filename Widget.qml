@@ -384,6 +384,7 @@ BarWidget {
                               silenced: pager.silenced, globalSnoozed: pager.globalSnoozed,
                               sources: held, expanded: pager.expandedKey,
                               recentCount: pager.recent.length, recentLimit: pager.recentCount,
+                              recentExpanded: pager.recentExpanded,
                               cardX: panel.cardOrigin.x, cardY: panel.cardOrigin.y,
                               cw: panel.contentWidth, ch: panel.contentHeight })
     }
@@ -460,11 +461,14 @@ BarWidget {
   }
 
   property string expandedKey: ""
+  property bool recentExpanded: false
+  onQuietChanged: if (quiet) recentExpanded = false
   property int cursorAt: 0
   property bool cursorLive: false
   property bool globalChoosing: false
   onOpenedChanged: {
     cursorAt = 0; cursorLive = false; expandedKey = ""; globalChoosing = false
+    recentExpanded = false
     phraseSwap.stop()          // never reopen onto a half-faded line
     // What has been held back, as of now - read on opening rather than kept
     // up to date, because the panel is the only thing that ever asks.
@@ -523,7 +527,7 @@ BarWidget {
         boundsBehavior: Flickable.StopAtBounds
         flickableDirection: Flickable.VerticalFlick
         interactive: contentHeight > height
-        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+        ScrollBar.vertical: ScrollBar { id: panelScrollBar; policy: ScrollBar.AsNeeded }
 
         Column {
           id: column
@@ -666,15 +670,47 @@ BarWidget {
 
           PanelSeparator { visible: !pager.quiet; foreground: pager.panelFg }
 
-          PanelSectionHeader {
+          Item {
             visible: !pager.quiet
-            text: "RECENT · LAST " + pager.recentCount
-            foreground: pager.panelFg
-            fontFamily: pager.fontFamily
+            width: parent.width
+            height: Math.max(recentHeading.implicitHeight, recentToggle.implicitHeight)
+
+            PanelSectionHeader {
+              id: recentHeading
+              anchors.left: parent.left
+              anchors.right: recentToggle.left
+              anchors.verticalCenter: parent.verticalCenter
+              text: "RECENT · " + pager.recent.length
+              foreground: pager.panelFg
+              fontFamily: pager.fontFamily
+            }
+
+            MouseArea {
+              anchors.left: parent.left
+              anchors.right: recentToggle.left
+              anchors.top: parent.top
+              anchors.bottom: parent.bottom
+              cursorShape: Qt.PointingHandCursor
+              onClicked: pager.recentExpanded = !pager.recentExpanded
+            }
+
+            PanelActionButton {
+              id: recentToggle
+              anchors.right: parent.right
+              // The scrollbar owns the right-edge hit area even over this row.
+              anchors.rightMargin: panelScrollBar.width
+              anchors.verticalCenter: parent.verticalCenter
+              iconText: pager.recentExpanded ? "\u{f0143}" : "\u{f0140}"
+              tooltipText: pager.recentExpanded ? "Hide recent notifications" : "Show recent notifications"
+              foreground: pager.panelFg
+              fontFamily: pager.fontFamily
+              focusable: true
+              onClicked: pager.recentExpanded = !pager.recentExpanded
+            }
           }
 
           Text {
-            visible: !pager.quiet && pager.recent.length === 0
+            visible: !pager.quiet && pager.recentExpanded && pager.recent.length === 0
             width: parent.width
             text: "New notifications stay here after their toast disappears."
             textFormat: Text.PlainText
@@ -685,12 +721,12 @@ BarWidget {
           }
 
           Column {
-            visible: !pager.quiet
+            visible: !pager.quiet && pager.recentExpanded
             width: parent.width
             spacing: Style.space(6)
 
             Repeater {
-              model: pager.recent
+              model: !pager.quiet && pager.recentExpanded ? pager.recent : []
 
               Rectangle {
                 id: recentCard

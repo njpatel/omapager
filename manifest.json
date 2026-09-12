@@ -170,7 +170,7 @@
         "key": "recentCount",
         "type": "integer",
         "label": "Recent notifications in the panel",
-        "description": "The newest notifications from sources that are not snoozed. Hidden while everything is snoozed or silenced; held arrivals are excluded. Verification codes are redacted. Resets when the shell restarts.",
+        "description": "The newest notifications from sources that are not snoozed. Click the collapsed Recent heading to show them. Hidden during full quiet; held arrivals are excluded. Verification codes are redacted. Resets when the shell restarts.",
         "min": 1,
         "max": 20,
         "step": 1,
