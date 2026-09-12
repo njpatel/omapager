@@ -19,7 +19,9 @@
 # lot, and the daemon can be killed at any point without needing a save step.
 import json
 import os
-import shutil
+import re
+import html
+from omapager_files import private_dir, write_json, read_json, input_json
 import sys
 import time
 
@@ -34,8 +36,8 @@ SNOOZES = os.path.join(ROOT, "snoozes.json")     # what quiet.json used to be
 # fortnight of it - and every entry is the text of a message somebody sent you,
 # so keeping it past its usefulness is a cost with nothing on the other side.
 # Whichever of the two limits bites first wins.
-HISTORY_MAX = 200
-HISTORY_DAYS = 7
+HISTORY_MAX = 100
+HISTORY_HOURS = 24
 
 # Resolved icons are keyed by source and cost a lookup - sometimes a web
 # request - to rebuild, so they outlive the notifications that prompted them,
@@ -45,36 +47,117 @@ ICON_DAYS = 60
 
 
 def ensure():
-    for d in (LIVE, HISTORY, ICONS):
-        os.makedirs(d, exist_ok=True)
+    for d in (ROOT, LIVE, HISTORY, ICONS):
+        private_dir(d)
+    for d in (LIVE, HISTORY):
+        for name in os.listdir(d):
+            path = os.path.join(d, name)
+            if os.path.islink(path): continue
+            if name.endswith(".part"):
+                os.unlink(path)
+                continue
+            if not name.endswith(".json"): continue
+            entry = read_json(path)
+            if isinstance(entry, dict):
+                clean = sanitise(entry)
+                if clean != entry or (os.stat(path, follow_symlinks=False).st_mode & 0o777) != 0o600:
+                    write_json(path, clean)
+            else:
+                # Oversized/corrupt legacy state must not retain unredacted data.
+                os.unlink(path)
 
 
 def safe(name):
-    """A key is ours, not the sender's, but never trust it with a path."""
-    return "".join(c for c in str(name) if c.isalnum() or c in "-_.")[:120]
+    value = str(name or "")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,120}", value):
+        raise ValueError("invalid key")
+    return value
 
 
-def write_json(path, value):
-    tmp = path + ".part"
-    with open(tmp, "w") as f:
-        json.dump(value, f, separators=(",", ":"))
-    os.replace(tmp, path)          # a reader never sees a half-written file
+# Keep the raw-helper/legacy check independent of caller-supplied code flags,
+# but use Detect.js's vocabulary, windows and shapes. Product names and years
+# are ordinary notification text; migrating them must not destroy history.
+CODE_KEYWORD = re.compile(
+    r"\b(code|otp|one[\s-]?time|verification|verify|passcode|pin|2fa|"
+    r"two[\s-]factor|security key|confirm(?:ation)?)\b", re.IGNORECASE | re.ASCII)
+CODE_SHAPE = re.compile(
+    r"(?:^|[^A-Za-z0-9_-])((?:[A-Za-z]-)?[0-9]{2,4}[\s-][0-9]{2,5}|"
+    r"(?:[A-Za-z]-)?[0-9]{4,8})(?![A-Za-z0-9_-])")
+CODE_ALNUM = re.compile(r"(?:^|[^A-Za-z0-9_-])([A-Z0-9]{5,8})(?![A-Za-z0-9_-])")
+CODE_BEFORE = 24
+CODE_AFTER = 72
+MAX_CODES = 8
+MAX_BODY = 32768
+MAX_SUMMARY = 2048
 
 
-def read_json(path):
-    try:
-        with open(path) as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return None
+def looks_like_a_code(text):
+    text = text[:MAX_BODY]
+    windows = 0
+    for keyword in CODE_KEYWORD.finditer(text):
+        word = keyword.group()
+        if word.lower() == "code" and word[0].isupper():
+            before = re.search(r"([A-Za-z][A-Za-z0-9_.]*)\s+$",
+                               text[max(0, keyword.start() - 20):keyword.start()])
+            if (before and re.fullmatch(r"[A-Z][a-z]+|[A-Z]{2,}", before[1])
+                    and not CODE_KEYWORD.search(before[1])):
+                continue
+        chunk = text[max(0, keyword.start() - CODE_BEFORE):keyword.end() + CODE_AFTER]
+        for shape in CODE_SHAPE.finditer(chunk):
+            value = re.sub(r"^[A-Za-z]-", "", shape[1])
+            value = re.sub(r"[\s-]", "", value)
+            if 4 <= len(value) <= 8 and not re.fullmatch(r"(?:19|20)[0-9]{2}", value):
+                return True
+        for shape in CODE_ALNUM.finditer(chunk):
+            if re.search(r"[0-9]", shape[1]) and re.search(r"[A-Z]", shape[1]):
+                return True
+        windows += 1
+        if windows == MAX_CODES:
+            break
+    return False
+
+
+def sanitise(entry):
+    # Independently defend raw helper callers and legacy state migrations.
+    allowed = {"key", "originalId", "senderPid", "app", "appIcon", "summary",
+               "body", "rawBody", "bodyLine", "source", "groupKey", "urgency",
+               "expireTimeout", "duration", "ts", "closed_ts", "closed_reason"}
+    # Match Store.sanitiseForPersistence's bounded summary/rawBody/body view,
+    # not metadata: keys/groupKey and app names can contain unrelated numbers
+    # or product keywords. Strip tags to spaces before decoding, as oneLine
+    # does, so formatting and split digit groups keep their word boundaries.
+    text = " ".join(entry.get(k, "")[:limit] if isinstance(entry.get(k), str) else ""
+                    for k, limit in (("summary", MAX_SUMMARY), ("rawBody", MAX_BODY),
+                                     ("body", MAX_BODY)))[:MAX_BODY]
+    text = re.sub(r"<[^>]+>", " ", text)
+    for _ in range(3):
+        text = html.unescape(text)
+    text = re.sub(r"\s+", " ", text).strip()
+    secret = bool(entry.get("code") or entry.get("codes")) or looks_like_a_code(text)
+    out = {k: v for k, v in entry.items() if k in allowed and isinstance(v, (str, int, float, bool))}
+    if secret:
+        out = {k: v for k, v in out.items() if not isinstance(v, str) or k == "key"}
+        out.update(summary="Verification notification", body="[redacted]", rawBody="[redacted]", bodyLine="[redacted]")
+    # Rich text, actions, image paths and reply handles are reconstructed or dropped.
+    return out
+
+
+def retention():
+    settings = read_json(os.path.join(ROOT, "policy.json")) or {}
+    hours = settings.get("historyHours", 24)
+    return hours if hours in (0, 1, 24, 168) else 24
 
 
 def cmd_put():
-    entry = json.load(sys.stdin)
+    entry = sanitise(input_json(sys.stdin))
     key = safe(entry.get("key"))
     if not key:
         return 1
     write_json(os.path.join(LIVE, key + ".json"), entry)
+    # Floods and interrupted close queues cannot grow the live directory forever.
+    names = sorted(n for n in os.listdir(LIVE) if n.endswith(".json"))
+    for name in names[:-100]:
+        os.unlink(os.path.join(LIVE, name))
     return 0
 
 
@@ -88,7 +171,8 @@ def cmd_close(key, why):
     entry["closed_reason"] = why
     # Named for when it closed, so the directory sorts into reading order.
     stamp = "%013d" % int(entry["closed_ts"] * 1000)
-    write_json(os.path.join(HISTORY, "%s-%s.json" % (stamp, key)), entry)
+    if retention():
+        write_json(os.path.join(HISTORY, "%s-%s.json" % (stamp, key)), sanitise(entry))
     try:
         os.remove(src)
     except OSError:
@@ -109,7 +193,7 @@ def trim_history():
     """Names start with the closing timestamp, so sorting is chronological and
     the age test never has to open a file."""
     files = sorted(f for f in os.listdir(HISTORY) if f.endswith(".json"))
-    cutoff = (time.time() - HISTORY_DAYS * 86400) * 1000
+    cutoff = (time.time() - retention() * 3600) * 1000
     doomed = set(files[:-HISTORY_MAX]) if len(files) > HISTORY_MAX else set()
     for name in files:
         try:
@@ -149,8 +233,7 @@ def listing(directory, limit=None, newest_first=False):
     files = sorted(f for f in os.listdir(directory) if f.endswith(".json"))
     if newest_first:
         files.reverse()
-    if limit:
-        files = files[:limit]
+    files = files[:max(0, min(100, limit if limit is not None else 100))]
     out = []
     for name in files:
         entry = read_json(os.path.join(directory, name))
@@ -193,7 +276,7 @@ def cmd_quiet_save():
     snoozed and until when, and whether the desktop is silenced. A handful of
     entries that change only when someone asks for quiet, so there is nothing
     to gain from tracking them separately."""
-    value = json.load(sys.stdin)
+    value = input_json(sys.stdin)
     if not isinstance(value, dict):
         return 1
     write_json(QUIET, value)
@@ -211,10 +294,19 @@ def read_quiet():
 
 def main():
     ensure()
+    trim_history()
     args = sys.argv[1:]
     if not args:
         return 2
     verb = args[0]
+    if verb == "policy":
+        value = input_json(sys.stdin)
+        hours = value.get("historyHours", 24)
+        if hours not in (0, 1, 24, 168):
+            return 2
+        write_json(os.path.join(ROOT, "policy.json"), {"historyHours": hours})
+        trim_history()
+        return 0
     if verb == "put":
         return cmd_put()
     if verb == "close":
@@ -248,3 +340,6 @@ if __name__ == "__main__":
         sys.exit(main())
     except BrokenPipeError:
         pass
+    except (OSError, ValueError, TypeError, IndexError, RecursionError):
+        sys.stderr.write("omapager-store: invalid input or unavailable private state\n")
+        sys.exit(1)

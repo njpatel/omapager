@@ -1,3 +1,15 @@
+> **Unreleased hardening branch:** based on upstream commit
+> `29548e5761f1b9f419afe988d77f67e3dd3e81cb`. See
+> [upstream handoff](docs/UPSTREAM_HANDOFF.md) for the implementation and review
+> notes. Bubblewrap is required for helpers; remote icons and implicit sender
+> default actions are off by default. History defaults to 24 hours/100 entries,
+> and detected-code notifications are stored as redacted placeholders.
+> This branch is a draft review proposal and has not passed live integration testing.
+> The original feature documentation below describes the upstream UX; the
+> [security architecture](docs/SECURITY_ARCHITECTURE.md) overrides conflicting
+> security/default-behavior statements. Use reviewed commits for installation,
+> and complete disposable-session integration checks before enabling this branch.
+
 <img src="assets/title.png" width="1266" alt="Omapager">
 
 <!--
@@ -131,6 +143,7 @@ icons for good.
 | key | default | what it does |
 | --- | --- | --- |
 | `stacking` | `source` | `source` gives each sender its own deck; `all` puts everything in one |
+| `fontScale` | `100` | notification font size as a percentage of the theme (75–200); scales card text, actions and inline replies, leaving the bar and panel unchanged |
 | `actionsAlign` | `right` | which end of a card its buttons sit at |
 | `hideSettingsAction` | `true` | drop the browser's "Settings" button, which is on every web notification and is never the one you wanted |
 | `snoozeDurations` | `30, 60, 240, tomorrow` | what the snooze menus offer — minutes, or `tomorrow` |
@@ -141,6 +154,23 @@ icons for good.
 | `timeFormat` | `system` | `system` follows `LC_TIME`; `24h` and `12h` pin it |
 | `sourceLimit` | `8` | how many quietened sources the panel lists |
 | `heldPerSource` | `10` | how many held notifications it shows per source |
+
+Notification text at 100% and 150% of the theme size:
+
+| 100% (default) | 150% |
+| --- | --- |
+| ![Sample notification at 100%](assets/font-scale-100.png) | ![Sample notification at 150%](assets/font-scale-150.png) |
+
+Long titles wrap, and actions that do not fit move behind **More**. At 200%:
+
+| Action row | More expanded |
+| --- | --- |
+| ![Actions at 200%](assets/font-scale-200.png) | ![All actions at 200%](assets/font-scale-200-more.png) |
+
+Long action labels wrap inside the expanded list, with the button growing to
+fit the full text:
+
+![Wrapped action label at 200%](assets/font-scale-200-long.png)
 
 Every history entry is the text of a message somebody sent you, so it is
 trimmed by age as well as count: **7 days or 200 entries**, whichever comes
@@ -273,6 +303,11 @@ really came from all go with it.
 ```bash
 sudo pacman -S wl-clipboard kdeconnect   # kdeconnect also needs the phone app
 ```
+
+## Contributing
+
+See [how we review contributions](docs/DEVELOPING.md#how-we-review-contributions)
+and the [development guide](docs/DEVELOPING.md) for working on omapager.
 
 ## Licence
 

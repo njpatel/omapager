@@ -16,6 +16,8 @@ import os
 import subprocess
 import sys
 import time
+import re
+import selectors
 
 BUS = "org.kde.kdeconnect"
 IFACE = "org.kde.kdeconnect.device.notifications.notification"
@@ -38,11 +40,12 @@ FIXTURE_MAX_AGE = 30 * 60
 
 
 def fixture():
+    if os.environ.get("OMAPAGER_DEMO") != "1": return []
     try:
         if time.time() - os.path.getmtime(FIXTURE) > FIXTURE_MAX_AGE:
             return []
         with open(FIXTURE) as fh:
-            rows = json.load(fh)
+            rows = json.loads(fh.read(65536))
     except Exception:
         return []
     out = []
@@ -56,21 +59,40 @@ def fixture():
 
 
 def run(args):
-    return subprocess.run(args, capture_output=True, text=True, check=False).stdout
+    # Bound output while receiving it, rather than after communicate allocated it.
+    with subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as proc:
+        data = bytearray()
+        deadline = time.monotonic() + 5
+        with selectors.DefaultSelector() as selector:
+            selector.register(proc.stdout, selectors.EVENT_READ)
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or not selector.select(remaining):
+                    proc.kill(); proc.wait(); return ""
+                block = os.read(proc.stdout.fileno(), min(4096, 65537-len(data)))
+                if not block: break
+                data.extend(block)
+                if len(data) > 65536:
+                    proc.kill(); proc.wait(); return ""
+        try:
+            proc.wait(timeout=max(.01, deadline-time.monotonic()))
+        except subprocess.TimeoutExpired:
+            proc.kill(); proc.wait(); return ""
+        return data.decode("utf-8", "replace") if proc.returncode == 0 else ""
 
 
 def paths():
-    tree = run(["busctl", "--user", "tree", BUS])
+    tree = run(["busctl", "--user", "--", "tree", BUS])
     out = []
     for line in tree.splitlines():
         for token in line.split():
-            if "/notifications/" in token and token.rsplit("/", 1)[-1].isdigit():
+            if valid_path(token):
                 out.append(token)
-    return out
+    return out[:100]
 
 
 def properties(path):
-    raw = run(["busctl", "--user", "--json=short", "call", BUS, path,
+    raw = run(["busctl", "--user", "--json=short", "--", "call", BUS, path,
                "org.freedesktop.DBus.Properties", "GetAll", "s", IFACE])
     try:
         data = json.loads(raw)["data"][0]
@@ -103,23 +125,21 @@ def normalise(text):
     return " ".join(out.split()).lower()
 
 
-def find(app, body):
-    """The object behind a desktop notification we were handed.
+def valid_path(path):
+    return isinstance(path, str) and len(path) <= 512 and bool(re.fullmatch(
+        r"/modules/kdeconnect/devices/[A-Za-z0-9_]+/notifications/[0-9]+", path))
 
-    Matched on the app the phone named and the text it sent. Body first: two
-    notifications from the same app are common, two with the same text is not."""
+
+def find(app, body):
+    """No app-only guesses or ambiguous matches. Exact app and body required."""
     want_app, want_body = normalise(app), normalise(body)
-    best = None
-    for note in listing():
-        if not note.get("replyId"):
-            continue                       # not something you can answer
-        ticker, text = normalise(note.get("ticker")), normalise(note.get("text"))
-        if want_body and (want_body in ticker or ticker in want_body
-                          or want_body in text or text in want_body):
-            return note
-        if want_app and normalise(note.get("appName")) == want_app and best is None:
-            best = note                    # right app, text did not line up
-    return best
+    if not want_app or not want_body or len(want_body) > 32768 or len(want_app) > 256:
+        return None
+    matches = [n for n in listing() if n.get("replyId")
+               and normalise(n.get("appName")) == want_app
+               and want_body in (normalise(n.get("ticker")), normalise(n.get("text"))) ]
+    return matches[0] if len(matches) == 1 else None
+
 
 
 def main():
@@ -143,27 +163,31 @@ def main():
 
     if verb == "reply":
         path, text = sys.argv[2], sys.argv[3]
-        if not text.strip():
+        if not text.strip() or len(text) > 4096 or "\x00" in text:
             return 1
-        if path.startswith("fake:"):
+        if path.startswith("fake:") and os.environ.get("OMAPAGER_DEMO") == "1":
             os.makedirs(STATE, exist_ok=True)
             with open(REPLY_LOG, "a") as fh:
                 fh.write("%s\t%s\t%s\n" % (time.strftime("%FT%T"), path, text))
             sys.stdout.write("sent to the demo log")
             return 0
-        result = subprocess.run(["busctl", "--user", "call", BUS, path, IFACE,
+        if len(sys.argv) != 6 or not valid_path(path): return 1
+        # Re-discover and re-match at send time, so stale handles cannot redirect replies.
+        match = find(sys.argv[4], sys.argv[5])
+        if not match or match.get("path") != path: return 1
+        result = subprocess.run(["busctl", "--user", "--", "call", BUS, path, IFACE,
                                  "sendReply", "s", text],
-                                capture_output=True, text=True, check=False)
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False, timeout=5)
         if result.returncode != 0:
-            sys.stdout.write(result.stderr.strip())
+            sys.stdout.write("reply failed")
             return result.returncode
         # Answered means dealt with, on the phone as well. Without this the
         # notification is still live over there, KDE Connect forwards it again,
         # and the card you just replied to reappears a moment later.
         # Best effort: a reply that went through is a success even if the
         # dismissal does not, and some senders do not offer one.
-        subprocess.run(["busctl", "--user", "call", BUS, path, IFACE, "dismiss"],
-                       capture_output=True, text=True, check=False)
+        subprocess.run(["busctl", "--user", "--", "call", BUS, path, IFACE, "dismiss"],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False, timeout=5)
         sys.stdout.write("sent")
         return 0
 
@@ -171,4 +195,8 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except (OSError, ValueError, IndexError, subprocess.TimeoutExpired):
+        sys.stderr.write("omapager-kdeconnect: request rejected or service unavailable\n")
+        sys.exit(1)

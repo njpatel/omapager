@@ -45,7 +45,12 @@
       "alwaysShow": false,
       "codesBypassQuiet": true,
       "timeFormat": "system",
-      "smartRaise": true
+      "smartRaise": true,
+      "fetchRemoteIcons": false,
+      "allowDefaultActionOnCardClick": false,
+      "historyHours": 24,
+      "clipboardTimeout": 60,
+      "fontScale": 100
     },
     "schema": [
       {
@@ -69,6 +74,16 @@
         ],
         "defaultValue": "right",
         "description": "Which end of a card its action buttons sit at."
+      },
+      {
+        "key": "fontScale",
+        "type": "integer",
+        "label": "Notification font size (%)",
+        "description": "Scale notification text, action buttons and inline replies relative to the theme. 100 follows the theme; the bar and panel keep their usual sizes.",
+        "min": 75,
+        "max": 200,
+        "step": 5,
+        "defaultValue": 100
       },
       {
         "key": "hideSettingsAction",
@@ -193,6 +208,45 @@
         "label": "Raise the window a site is open in",
         "description": "Match a notification's site against browser window titles, so a Slack notification lands in the browser already showing Slack rather than opening a new tab. Off, only a window whose class carries the site is raised.",
         "defaultValue": true
+      },
+      {
+        "key": "fetchRemoteIcons",
+        "type": "boolean",
+        "label": "Fetch website icons",
+        "description": "Contacts the source website and reveals your IP and approximate notification time. Requires Bubblewrap and Pillow.",
+        "defaultValue": false
+      },
+      {
+        "key": "allowDefaultActionOnCardClick",
+        "type": "boolean",
+        "label": "Invoke app action on card click",
+        "description": "Compatibility option. Strict mode focuses a known window or opens a validated source URL; app actions have explicit buttons.",
+        "defaultValue": false
+      },
+      {
+        "key": "historyHours",
+        "type": "enum",
+        "label": "History retention",
+        "description": "0 disables history; otherwise 1, 24 or 168 hours. Maximum 100 entries.",
+        "defaultValue": 24,
+        "options": [
+          0,
+          1,
+          24,
+          168
+        ]
+      },
+      {
+        "key": "clipboardTimeout",
+        "type": "enum",
+        "label": "Clear copied codes after",
+        "description": "Seconds, only when the clipboard still contains the copied code.",
+        "defaultValue": 60,
+        "options": [
+          30,
+          60,
+          90
+        ]
       }
     ]
   }
