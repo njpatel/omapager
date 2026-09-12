@@ -143,6 +143,7 @@ in the view persist across shell restarts.
 | `stacking` | `source` | `source` gives each sender its own deck; `all` puts everything in one |
 | `displayMode` | `active` | `active` follows focus for each fresh deck; `specific` uses `displayName`; `all` mirrors notifications |
 | `displayName` | empty | output name for `specific`, such as `DP-1`; retained while disconnected |
+| `offerSnoozeWhenSharing` | `true` | offer a timed snooze when a Hyprland portal sharing session is detected; never mute automatically |
 | `actionsAlign` | `right` | which end of a card its buttons sit at |
 | `hideSettingsAction` | `true` | drop the browser's "Settings" button, which is on every web notification and is never the one you wanted |
 | `snoozeDurations` | `30, 60, 240, tomorrow` | what the snooze menus offer — minutes, or `tomorrow` |
@@ -166,17 +167,40 @@ next to `id`:
 { "id": "njpatel.omapager", "snoozeDurations": ["60", "480"], "wakeHour": 9 }
 ```
 
+### Sharing offers
+
+When the Hyprland screen-sharing portal creates a screen, window or area stream,
+the bar shows a sharing indicator. Click it to choose **30 minutes**, **1 hour**,
+**4 hours**, or **Not now**. No notification toast or panel opens automatically,
+and notifications continue until you choose a snooze. The ordinary snooze rules
+still apply, including critical alerts and the configured verification-code exception.
+
+An offer is handled once until all detected streams end. Additional simultaneous
+streams do not repeat it. If DND or a global snooze is already active, no offer is
+shown for that sharing period. A chosen snooze keeps its timer regardless of when
+sharing ends: it can outlast a short share or expire during a long one.
+
+Detection reads current PipeWire video-node metadata, including streams already
+present at shell startup. It recognises the Hyprland portal's `xdph-streaming-`
+media names, not arbitrary video sources or compositor capture events. Direct
+VNC captures, screenshots and applications that bypass that portal do not trigger
+it; portal-based recording can. This is a convenience, not a privacy guarantee.
+Only 64 video-source nodes are tracked. Dismissal is in memory, so restarting the
+shell during a share can offer again. Disable the offer in settings or set
+`offerSnoozeWhenSharing` to `false` in the same widget config entry.
+
 ## The bar
 
-omapager takes a slot in the bar only while it is keeping something from you,
-and nothing at all the rest of the time. Hovering the centre of the bar reveals
-it, the way Omarchy reveals its own inactive indicators — that is the way back
-into silence when nothing is showing.
+omapager takes a slot in the bar while notifications are held back or a sharing
+offer is waiting. Hovering the centre of the bar reveals it otherwise, the way
+Omarchy reveals its own inactive indicators — that is the way back into silence
+when nothing is showing.
 
 | | |
 | --- | --- |
 | crossed-out bell, in the theme's urgent colour | silenced |
 | bell with a `z` in it, in amber | snoozed — everything, or a source |
+| monitor-share icon, in amber | sharing detected; click for a snooze offer, without toggling DND |
 | crossed-out bell, dimmed | nothing held back |
 
 Same crossed-out bell as Omarchy's own indicator, so a silenced desktop looks
@@ -247,6 +271,7 @@ omarchy-shell omapager probe            what the daemon believes, as JSON
 
 omarchy-shell omapager.panel toggle     the panel
 omarchy-shell omapager.panel expand x   open a source's held list, as clicking it would
+omarchy-shell omapager.panel openSettings  display and sharing-offer settings
 ```
 
 ## Seeing it work

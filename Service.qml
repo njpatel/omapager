@@ -14,6 +14,7 @@ import Quickshell.Io
 import Quickshell.Wayland
 import Quickshell.Hyprland
 import Quickshell.Services.Notifications
+import Quickshell.Services.Pipewire
 import qs.Commons
 
 import "Store.js" as Store
@@ -112,43 +113,47 @@ Item {
     saveQuiet()
   }
 
-  // Hyprland 0.56 reports monitor/window/region separately. These events
-  // describe capture, not its destination: local recordings count too.
-  // Keep this separate from persisted quiet so stopping never undoes DND.
-  property bool pauseWhileScreenSharing: true
-  property int monitorCaptures: 0
-  property bool capturePause: false
-  readonly property bool screenSnoozed: pauseWhileScreenSharing && capturePause
-  readonly property string sharingDetectionStatus: !pauseWhileScreenSharing ? "Automatic pause is off"
-    : "Experimental capture detection; misses existing shares after restart and also reacts to screenshots"
-  property double screenSnoozedSince: 0
-  onScreenSnoozedChanged: {
-    if (!screenSnoozed) return
-    screenSnoozedSince = Date.now() / 1000
-    replyingKey = ""
-    clearAll("snoozed")
-    releaseHeld()
+  // The Hyprland portal names all its PipeWire video streams alike: monitor,
+  // window and region. Observe their lifetime, not compositor frame activity,
+  // which also includes screenshots and VNC and has no startup snapshot.
+  property bool offerSnoozeWhenSharing: true
+  readonly property var sharingCandidates: {
+    var nodes = Pipewire.nodes.values, out = []
+    for (var i = 0; i < nodes.length && out.length < 64; i++)
+      if (nodes[i].type === PwNodeType.VideoSource) out.push(nodes[i])
+    return out
   }
-  Connections {
-    target: Hyprland
-    function onRawEvent(event) {
-      if (event.name !== "screencast") return
-      if (event.data === "1,monitor") {
-        service.monitorCaptures += 1
-        screenWake.stop()
-        service.capturePause = true
-      } else if (event.data === "0,monitor") {
-        service.monitorCaptures = Math.max(0, service.monitorCaptures - 1)
-        if (!service.monitorCaptures && service.capturePause) screenWake.restart()
-      }
+  PwObjectTracker { objects: service.sharingCandidates }
+  readonly property int sharingStreams: {
+    if (!Pipewire.ready) return 0
+    var count = 0
+    for (var i = 0; i < sharingCandidates.length; i++) {
+      var node = sharingCandidates[i]
+      if (!node.ready) continue
+      var props = node.properties
+      if (props["media.class"] === "Video/Source"
+          && String(props["media.name"] || "").indexOf("xdph-streaming-") === 0) count++
     }
+    return count
   }
-  // Hyprland declares a capture stopped after 500ms without frames. Bridge
-  // short gaps rather than flashing notifications between adjacent captures.
-  Timer {
-    id: screenWake
-    interval: 1000
-    onTriggered: service.capturePause = false
+  readonly property bool sharingActive: sharingStreams > 0
+  property bool sharingOfferHandled: false
+  readonly property bool sharingOfferPending: offerSnoozeWhenSharing && sharingActive
+    && !sharingOfferHandled && !doNotDisturb && !globalSnoozeUntil
+  readonly property string sharingDetectionStatus: !offerSnoozeWhenSharing ? "Sharing offers are off"
+    : !Pipewire.ready ? "Sharing detection unavailable: PipeWire disconnected"
+    : sharingActive ? "Portal sharing detected; notifications stay on until you snooze"
+    : "Watching for Hyprland portal screen, window or area sharing"
+  onSharingActiveChanged: {
+    sharingOfferHandled = sharingActive && (doNotDisturb || globalSnoozeUntil > 0)
+  }
+  onDoNotDisturbChanged: { if (doNotDisturb && sharingActive) sharingOfferHandled = true }
+  onGlobalSnoozeUntilChanged: { if (globalSnoozeUntil > 0 && sharingActive) sharingOfferHandled = true }
+  function dismissSharingOffer() { if (sharingActive) sharingOfferHandled = true }
+  function snoozeSharingOffer(seconds) {
+    if (!sharingOfferPending || [1800, 3600, 14400].indexOf(seconds) < 0) return
+    sharingOfferHandled = true
+    snoozeSource(globalKey, "Everything", seconds, true)
   }
   readonly property int gap: Style.space(6)
 
@@ -384,7 +389,7 @@ Item {
     // The earliest of the reasons currently in force: if the desktop has been
     // silent for an hour and this source was snoozed ten minutes ago, the hour
     // is the honest window.
-    var starts = [mine, global, silence, screenSnoozed ? screenSnoozedSince : 0].filter(function(t) { return t > 0 })
+    var starts = [mine, global, silence].filter(function(t) { return t > 0 })
     return starts.length ? Math.min.apply(null, starts) : 0
   }
 
@@ -415,7 +420,7 @@ Item {
       rows.push({ key: snoozed[i].key, label: snoozed[i].label, until: snoozed[i].until,
                   held: heldFor(snoozed[i].key, heldPerSource) })
     }
-    if (!doNotDisturb && !globalSnoozeUntil && !screenSnoozed) return rows
+    if (!doNotDisturb && !globalSnoozeUntil) return rows
     for (i = 0; i < heldRows.length && rows.length < limit; i++) {
       key = String(heldRows[i].groupKey || "")
       if (!key || seen[key]) continue
@@ -835,12 +840,11 @@ Item {
 
     // Silenced or snoozed still means recorded: "what did I miss" is the whole
     // point of a store. It goes straight to history without being on screen.
-    // Screen capture holds codes and critical alerts too: both can expose
-    // private content. The ordinary manual-quiet exceptions remain unchanged.
-    var muted = screenSnoozed ? "snoozed" : doNotDisturb ? "silenced"
+    // A sharing offer never changes delivery; only an explicit snooze does.
+    var muted = doNotDisturb ? "silenced"
               : (globalSnoozeUntil || snoozedUntil(row.groupKey)) ? "snoozed" : ""
-    if (!screenSnoozed && muted && codesBypassQuiet && String(row.code || "")) muted = ""
-    if (muted && (screenSnoozed || notification.urgency !== NotificationUrgency.Critical)) {
+    if (muted && codesBypassQuiet && String(row.code || "")) muted = ""
+    if (muted && notification.urgency !== NotificationUrgency.Critical) {
       Store.write(storeProc, storeBin, "put", row)
       Store.write(storeProc, storeBin, "close", null, [key, muted])
       release(key)
@@ -869,12 +873,6 @@ Item {
   function showRow(row) {
     var key = String(row.key || "")
     Qt.callLater(function() {
-      // Also covers pointer-held arrivals and replay queued before capture.
-      if (service.screenSnoozed) {
-        Store.write(storeProc, storeBin, "close", null, [key, "snoozed"])
-        service.release(key)
-        return
-      }
       var at = service.rowIndexFor(key)
       var snap = service.snapshot(), deckNow = service.deckHeight
       if (at >= 0) {
@@ -1455,10 +1453,6 @@ Item {
         for (var i = 0; i < rows.length; i++) {
           var row = Store.restored(rows[i])
           if (!row) continue
-          if (service.screenSnoozed) {
-            Store.write(storeProc, storeBin, "close", null, [row.key, "snoozed"])
-            continue
-          }
           // Restored rows need an icon too. Their sender is gone and any live
           // handle it left died with the last shell, so without this every
           // card that came back wore a letter.
@@ -1552,13 +1546,13 @@ Item {
         replying: service.replyingKey !== "",
         expanded: service.expanded, pointerIn: service.pointerIn,
         doNotDisturb: service.doNotDisturb, snoozed: service.liveSnoozes(),
-        screenSnoozed: service.screenSnoozed, monitorCaptures: service.monitorCaptures,
+        sharingActive: service.sharingActive, sharingStreams: service.sharingStreams,
+        sharingOfferPending: service.sharingOfferPending, offerSnoozeWhenSharing: service.offerSnoozeWhenSharing,
         globalSnoozeUntil: service.globalSnoozeUntil,
         displayMode: service.displayMode, displayName: service.displayName,
         displays: service.displayNames, focusedDisplay: service.focusedDisplayName,
         targetDisplay: service.targetDisplayName,
-        notificationDisplays: service.screenSnoozed ? []
-          : service.displayMode === "all" ? service.displayNames : [service.targetDisplayName],
+        notificationDisplays: service.displayMode === "all" ? service.displayNames : [service.targetDisplayName],
         snoozeOptions: service.snoozeOptions,
         decks: service.layout.decks.length, layoutH: service.layout.height,
         layoutRevision: service.layoutRevision, heightNotes: service.heightNotes,
@@ -1816,8 +1810,7 @@ Item {
       id: surface
       required property var modelData
       screen: modelData
-      readonly property bool selected: service.displayMode === "all" || modelData.name === service.targetDisplayName
-      readonly property bool showingNotifications: selected && !service.screenSnoozed
+      readonly property bool showingNotifications: service.displayMode === "all" || modelData.name === service.targetDisplayName
       // Always mapped, even with nothing to draw. It used to appear with the
       // first notification and vanish with the last, and a layer surface
       // coming and going makes the compositor re-evaluate focus each time -
