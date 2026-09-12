@@ -16,10 +16,36 @@ for(const payload of ['<img src="file:///etc/passwd">','<svg><image href="https:
  assert.ok(!/<(?:img|svg|script|iframe|object|embed|style)\b/i.test(rendered),rendered);
  assert.ok(!/<a[^>]+onmouseover=/i.test(rendered),rendered);
 }
+{ // Escaped sender markup must not leak into collapsed or restored previews.
+ const body='Thread in #support: &lt;b&gt;Sam&lt;/b&gt;&lt;br/&gt;the preview is readable &amp; compact';
+ const expected='Thread in #support: Sam the preview is readable & compact';
+ const row=Store.snapshot({appName:'Slack',summary:'Slack',body},'markup',{Normal:1});
+ assert.equal(row.bodyLine,expected);
+ const nested=body.replace(/&/g,'&amp;');
+ assert.equal(Store.restored({key:'markup',body:nested,bodyLine:'stale preview'}).bodyLine,expected);
+ const literals='List&lt;String&gt;: Sam &lt;sam@example.com&gt; asks if 3 &lt; 5\n&amp; 5 &gt; 2; &lt;3';
+ const literalLine='List<String>: Sam <sam@example.com> asks if 3 < 5 & 5 > 2; <3';
+ assert.equal(Store.snapshot({body:literals},'literal',{Normal:1}).bodyLine,literalLine);
+ assert.equal(Store.restored({key:'literal',body:literals,bodyLine:'stale preview'}).bodyLine,literalLine);
+ assert.equal(M.oneLine('<b>Sam</b><br/><a href="https://example.com">read &lt;details&gt;</a>'),
+              'Sam read <details>');
+ assert.equal(M.oneLine('&lt;img src="file:///etc/passwd"&gt; &lt;b class="literal"&gt;'),
+              '<img src="file:///etc/passwd"> <b class="literal">');
+ // Reverse only our own escaping; do not add a fourth sender-decoding pass.
+ assert.equal(M.oneLine('&amp;amp;amp;lt;b&amp;amp;amp;gt;'), '&lt;b&gt;');
+}
 for (const body of ['Your verification code is 938271','Your code is 938 271','Your code is 938-271','Your code is &#57;38271','Your code is A9F3K2']) {
  const row=Store.snapshot({appName:'Test',summary:'Verification',body},'test', {Normal:1});
  const saved=Store.sanitiseForPersistence(row);
  for(const secret of ['938271','938 271','938-271','A9F3K2']) assert.ok(!JSON.stringify(saved).includes(secret));
+}
+{ // Literal attributes must not move legacy/raw-only codes outside the scan window.
+ const body='Your code is <span title="'+'x'.repeat(100)+'">938271</span>';
+ for (const entry of [{body}, {rawBody:body.replace(/</g,'&lt;').replace(/>/g,'&gt;')}]) {
+  const saved=Store.sanitiseForPersistence(entry);
+  assert.equal(saved.body,'[redacted]');
+  assert.ok(!JSON.stringify(saved).includes('938271'));
+ }
 }
 assert.equal(Store.snapshot({body:'x'.repeat(100000),summary:'y'.repeat(3000)},'test',{Normal:1}).body.length,32768);
 assert.equal(Store.normalise({image:'file:///etc/passwd',stored_image:'/etc/passwd'}).image,'');

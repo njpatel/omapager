@@ -128,8 +128,11 @@ function render(body) {
 }
 
 // Flatten to one line, for a card that is not the one being read.
+// Strip only what the rich renderer recognises as markup; <String> and <3
+// remain literal. Undo our escaping once, without decoding the sender again.
 function oneLine(body) {
-  return decodeEntities(Security.bounded(body, Security.MAX_BODY).replace(/<[^>]+>/g, " "))
+  var text = unescapeAllowed(escapeAll(decodeEntities(body)))
+  return decodeOnce(text.replace(/<[^>]+>/g, " "))
     .replace(/\s+/g, " ")
     .trim()
 }
