@@ -18,6 +18,7 @@ Item {
   id: card
 
   property real fontScale: 1
+  property bool showCountdown: false
   property var row: ({})
   property var place: ({ y: 0, scale: 1, opacity: 1, z: 1, front: true, hidden: false })
   // The scene that owns the clock. Everything below degrades to a still card
@@ -879,12 +880,11 @@ Item {
       }
     }
 
-    // The native notification accent carries urgency without replacing the
-    // theme-owned card border. Critical cards also keep an urgent headline
-    // because their non-expiring lifetime gives them no countdown to colour.
+    // Optional visual countdown. The expiry clock keeps running when this is
+    // disabled, so hiding the animation never makes a notification permanent.
     BorderSurface {
-      visible: card.row.duration > 0 && card.place.front && card.remaining > 0
-               && !card.expanded
+      visible: card.showCountdown && card.row.duration > 0 && card.place.front
+               && card.remaining > 0 && !card.expanded
       anchors { left: parent.left; bottom: parent.bottom
                 leftMargin: plate.contentLeftInset + Style.space(7)
                 bottomMargin: plate.contentBottomInset }
@@ -892,9 +892,9 @@ Item {
       radius: Style.cornerRadius
       color: card.accentColor
       borderSpec: Border.none()
-      width: Math.max(0, (body.width - plate.contentLeftInset
-                          - plate.contentRightInset - Style.space(14))
-                         * (card.remaining / Math.max(1, card.row.duration)))
+      width: visible ? Math.max(0, (body.width - plate.contentLeftInset
+                                    - plate.contentRightInset - Style.space(14))
+                                   * (card.remaining / Math.max(1, card.row.duration))) : 0
     }
 
     // Clicks on the card. Underneath the card's own content: this covers the

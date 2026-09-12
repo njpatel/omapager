@@ -68,6 +68,11 @@ BarWidget {
   }
   readonly property string configuredDisplayName: String(setting("displayName", "") || "")
   readonly property bool configuredOfferSnoozeWhenSharing: setting("offerSnoozeWhenSharing", true) !== false
+  readonly property bool configuredShowCountdown: setting("showCountdown", false) === true
+  readonly property int configuredEdgeSpacing: {
+    var spacing = Number(setting("edgeSpacing", 12))
+    return isFinite(spacing) ? Math.max(0, Math.min(64, Math.round(spacing))) : 12
+  }
   readonly property var availableScreens: Quickshell.screens || []
   readonly property bool configuredDisplayPresent: {
     if (configuredDisplayName === "") return false
@@ -152,6 +157,8 @@ BarWidget {
       service.commit(function() { service.stacking = stacking })
     var fontScale = Number(setting("fontScale", 100))
     service.fontScale = isFinite(fontScale) ? Math.max(75, Math.min(200, fontScale)) / 100 : 1
+    service.edgeSpacing = configuredEdgeSpacing
+    service.showCountdown = configuredShowCountdown
     var align = String(setting("actionsAlign", "right"))
     if (align === "left" || align === "right") service.actionsAlign = align
     service.fetchIcons = setting("fetchRemoteIcons", false) === true
@@ -589,6 +596,8 @@ BarWidget {
     anchorItem: glyphs
     owner: pager
     bar: pager.bar
+    gap: pager.configuredEdgeSpacing
+    margin: pager.configuredEdgeSpacing
     open: pager.opened
     focusTarget: pager.settingsView ? settingsPage : keys
     // 380 is what every core Omarchy panel is, bar the two that need to be
@@ -701,6 +710,75 @@ BarWidget {
               width: parent.width
               spacing: Style.spacing.lg
 
+              NumberField {
+                width: parent.width
+                label: "Edge spacing (px)"
+                from: 0
+                to: 64
+                value: pager.configuredEdgeSpacing
+                foreground: pager.panelFg
+                fontFamily: pager.fontFamily
+                onModified: function(value) { pager.persistSettings({ edgeSpacing: value }) }
+              }
+
+              Text {
+                width: parent.width
+                text: "Space from the bar and screen edges.\nApplies to notifications and this panel."
+                textFormat: Text.PlainText
+                color: Qt.darker(pager.panelFg, 1.4)
+                font.family: pager.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                wrapMode: Text.WordWrap
+              }
+            }
+
+            PanelSeparator { foreground: pager.panelFg }
+
+            Column {
+              width: parent.width
+              spacing: Style.spacing.lg
+
+              Row {
+                width: parent.width
+                spacing: Style.spacing.controlGap
+
+                Text {
+                  width: parent.width - countdownSwitch.width - parent.spacing
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: "Show countdown animation"
+                  textFormat: Text.PlainText
+                  color: pager.panelFg
+                  font.family: pager.fontFamily
+                  font.pixelSize: Style.font.body
+                  wrapMode: Text.WordWrap
+                }
+
+                ToggleSwitch {
+                  id: countdownSwitch
+                  anchors.verticalCenter: parent.verticalCenter
+                  checked: pager.configuredShowCountdown
+                  foreground: pager.panelFg
+                  onToggled: pager.persistSettings({ showCountdown: !pager.configuredShowCountdown })
+                }
+              }
+
+              Text {
+                width: parent.width
+                text: "Animate the time remaining.\nNotifications still expire when this is off."
+                textFormat: Text.PlainText
+                color: Qt.darker(pager.panelFg, 1.4)
+                font.family: pager.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                wrapMode: Text.WordWrap
+              }
+            }
+
+            PanelSeparator { foreground: pager.panelFg }
+
+            Column {
+              width: parent.width
+              spacing: Style.spacing.lg
+
               Row {
                 width: parent.width
                 spacing: Style.spacing.controlGap
@@ -745,16 +823,6 @@ BarWidget {
                 font.pixelSize: Style.font.bodySmall
                 wrapMode: Text.WordWrap
               }
-            }
-
-            Text {
-              width: parent.width
-              text: "Saved automatically · shell.json"
-              textFormat: Text.PlainText
-              color: Qt.darker(pager.panelFg, 1.4)
-              font.family: pager.fontFamily
-              font.pixelSize: Style.font.caption
-              wrapMode: Text.WordWrap
             }
           }
 

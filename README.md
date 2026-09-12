@@ -177,9 +177,19 @@ Hyprland's focused monitor. A visible deck stays put when focus moves.
 retained, with a connected-display fallback until the output returns.
 **All displays** shows the same deck everywhere. Dismissal and snoozing remain shared.
 
-The dropdown, switch, header and separator reuse Omarchy's UI components. Font,
-spacing, borders and switch rounding follow the theme. Use arrows or `j`/`k` in
-the dropdown, Enter to choose and Escape to close the menu.
+The dropdown, number field, switch, header and separator reuse Omarchy's UI
+components. Fonts, internal spacing, borders and switch rounding follow the theme.
+Use arrows or `j`/`k` in the dropdown, Enter to choose and Escape to close the menu.
+
+**Edge spacing (px)** sets the distance from the bar and screen edges for both
+notification cards and the settings/history panel. It defaults to **12 logical
+pixels**, accepts 0–64, and applies immediately. Notifications remain top-right,
+clearing the bar only when it occupies the top or right edge. Internal padding
+and the spacing between cards are unchanged.
+
+**Show countdown animation** is off by default. Enable it to show a shrinking
+time-remaining line along the bottom of notifications. This changes only the
+visual timer; notifications still expire normally when it is disabled.
 
 The preferences and configuration use the same bar-widget entry; changes made
 in the view persist across shell restarts. No separate settings file is created.
@@ -189,6 +199,8 @@ in the view persist across shell restarts. No separate settings file is created.
 | `stacking` | `source` | `source` gives each sender its own deck; `all` puts everything in one |
 | `displayMode` | `active` | `active` follows focus for each fresh deck; `specific` uses `displayName`; `all` mirrors notifications |
 | `displayName` | empty | output name for `specific`, such as `DP-1`; retained while disconnected |
+| `edgeSpacing` | `12` | distance from the bar and screen edges in logical pixels (0–64), for notification cards and the panel |
+| `showCountdown` | `false` | opt in to the animated time-remaining line; does not change notification expiry |
 | `offerSnoozeWhenSharing` | `true` | offer a timed snooze when a Hyprland portal sharing session is detected; never mute automatically |
 | `fontScale` | `100` | notification font size as a percentage of the theme (75–200); scales card text, actions and inline replies, leaving the bar and panel unchanged |
 | `actionsAlign` | `right` | which end of a card its buttons sit at |
@@ -323,7 +335,7 @@ omarchy-shell omapager probe            what the daemon believes, as JSON
 
 omarchy-shell omapager.panel toggle     the panel
 omarchy-shell omapager.panel expand x   open a source's held list, as clicking it would
-omarchy-shell omapager.panel openSettings  display and sharing-offer settings
+omarchy-shell omapager.panel openSettings  display, edge-spacing and sharing-offer settings
 ```
 
 ## Seeing it work

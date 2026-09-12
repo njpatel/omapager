@@ -48,6 +48,8 @@
       "smartRaise": true,
       "displayMode": "active",
       "displayName": "",
+      "edgeSpacing": 12,
+      "showCountdown": false,
       "offerSnoozeWhenSharing": true,
       "fetchRemoteIcons": false,
       "allowDefaultActionOnCardClick": false,
@@ -77,6 +79,23 @@
         ],
         "defaultValue": "right",
         "description": "Which end of a card its action buttons sit at."
+      },
+      {
+        "key": "edgeSpacing",
+        "type": "integer",
+        "label": "Edge spacing (px)",
+        "description": "Distance from the bar and screen edges for notifications and the notification panel, in logical pixels.",
+        "min": 0,
+        "max": 64,
+        "step": 1,
+        "defaultValue": 12
+      },
+      {
+        "key": "showCountdown",
+        "type": "boolean",
+        "label": "Show countdown animation",
+        "description": "Animate the time remaining along the bottom of notifications. Notifications still expire normally when this is off.",
+        "defaultValue": false
       },
       {
         "key": "fontScale",

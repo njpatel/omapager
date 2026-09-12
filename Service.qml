@@ -190,11 +190,13 @@ Item {
     return barVertical ? Style.bar.sizeVertical : Style.bar.sizeHorizontal
   }
   readonly property int notificationWidth: Style.space(380)
+  property int edgeSpacing: 12
+  property bool showCountdown: false
 
-  // Match the stock notification placement: the theme's outer gap, plus bar
-  // clearance only on the edge occupied by the bar.
-  readonly property int barClearance: (barPosition === "top" ? barThickness : 0) + Style.gapsOut
-  readonly property int edgeClearance: (barPosition === "right" ? barThickness : 0) + Style.gapsOut
+  // Clear the bar only on the edge it occupies; keep the configured gap on
+  // both edges of the top-right notification deck.
+  readonly property int barClearance: (barPosition === "top" ? barThickness : 0) + edgeSpacing
+  readonly property int edgeClearance: (barPosition === "right" ? barThickness : 0) + edgeSpacing
 
   readonly property int lowDuration: 5000
   readonly property int normalDuration: 8000
@@ -2093,6 +2095,7 @@ Item {
             hovered: service.hoverKey === model.key
             actions: service.actionsOf(model.key, service.refsRevision)
             fontScale: service.fontScale
+            showCountdown: service.showCountdown
             actionsAlign: service.actionsAlign
             replyError: service.replyingKey === model.key ? service.replyError : ""
             replying: service.replyingKey === model.key
