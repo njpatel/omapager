@@ -39,6 +39,14 @@ for (const body of ['Your verification code is 938271','Your code is 938 271','Y
  const saved=Store.sanitiseForPersistence(row);
  for(const secret of ['938271','938 271','938-271','A9F3K2']) assert.ok(!JSON.stringify(saved).includes(secret));
 }
+{ // Literal attributes must not move legacy/raw-only codes outside the scan window.
+ const body='Your code is <span title="'+'x'.repeat(100)+'">938271</span>';
+ for (const entry of [{body}, {rawBody:body.replace(/</g,'&lt;').replace(/>/g,'&gt;')}]) {
+  const saved=Store.sanitiseForPersistence(entry);
+  assert.equal(saved.body,'[redacted]');
+  assert.ok(!JSON.stringify(saved).includes('938271'));
+ }
+}
 assert.equal(Store.snapshot({body:'x'.repeat(100000),summary:'y'.repeat(3000)},'test',{Normal:1}).body.length,32768);
 assert.equal(Store.normalise({image:'file:///etc/passwd',stored_image:'/etc/passwd'}).image,'');
 assert.equal(Store.normalise({body:'hello',bodyRich:'<img src="x">'}).bodyRich,'hello');
