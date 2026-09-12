@@ -44,7 +44,10 @@
       "alwaysShow": false,
       "codesBypassQuiet": true,
       "timeFormat": "system",
-      "smartRaise": true
+      "smartRaise": true,
+      "displayMode": "active",
+      "displayName": "",
+      "pauseWhileScreenSharing": true
     },
     "schema": [
       {
@@ -182,6 +185,32 @@
         "label": "Raise the window a site is open in",
         "description": "Match a notification's site against browser window titles, so a Slack notification lands in the browser already showing Slack rather than opening a new tab. Off, only a window whose class carries the site is raised.",
         "defaultValue": true
+      },
+      {
+        "key": "displayMode",
+        "type": "enum",
+        "label": "Notification display",
+        "options": [
+          "active",
+          "specific",
+          "all"
+        ],
+        "defaultValue": "active",
+        "description": "active = the Hyprland focused monitor; specific = the output named below, falling back to the focused monitor while it is absent; all = every monitor."
+      },
+      {
+        "key": "displayName",
+        "type": "string",
+        "label": "Specific monitor output name",
+        "defaultValue": "",
+        "description": "Stable output name used by specific display mode. The in-panel picker fills this from Quickshell's current screens and keeps the name if that output is disconnected."
+      },
+      {
+        "key": "pauseWhileScreenSharing",
+        "type": "boolean",
+        "label": "Pause notifications while sharing a screen",
+        "defaultValue": true,
+        "description": "Automatically hold notifications while the sharing detector reports an active capture. This remains separate from snooze and Do Not Disturb."
       }
     ]
   }

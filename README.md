@@ -128,9 +128,21 @@ icons for good.
 
 ## Settings
 
+Open the notification panel and click the cog for display settings. **Automatic**
+places a fresh notification deck on Hyprland's focused monitor. A visible deck
+stays on that display when focus moves, so a card does not move while you are
+reading it. **Specific monitor** pins notifications to an output name; if that
+output disappears, a connected display is used until it returns. **All monitors**
+shows the same deck on every display. Dismissal and snoozing remain shared.
+
+The settings view and configuration use the same bar-widget entry; changes made
+in the view persist across shell restarts.
+
 | key | default | what it does |
 | --- | --- | --- |
 | `stacking` | `source` | `source` gives each sender its own deck; `all` puts everything in one |
+| `displayMode` | `active` | `active` follows focus for each fresh deck; `specific` uses `displayName`; `all` mirrors notifications |
+| `displayName` | empty | output name for `specific`, such as `DP-1`; retained while disconnected |
 | `actionsAlign` | `right` | which end of a card its buttons sit at |
 | `hideSettingsAction` | `true` | drop the browser's "Settings" button, which is on every web notification and is never the one you wanted |
 | `snoozeDurations` | `30, 60, 240, tomorrow` | what the snooze menus offer — minutes, or `tomorrow` |

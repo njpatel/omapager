@@ -63,6 +63,33 @@ Item {
   // is dropped by default and can be put back.
   property bool hideSettingsAction: true
 
+  property string displayMode: "active"
+  property string displayName: ""
+  property string deckDisplayName: ""
+  readonly property var displayNames: Quickshell.screens.map(function(screen) { return screen.name })
+  readonly property string focusedDisplayName: {
+    var name = Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : ""
+    return displayNames.indexOf(name) >= 0 ? name : (displayNames[0] || "")
+  }
+  readonly property string configuredDisplayName: displayMode === "specific" && displayNames.indexOf(displayName) >= 0
+    ? displayName : focusedDisplayName
+  readonly property string targetDisplayName: {
+    if (displayMode === "specific" && displayNames.indexOf(displayName) >= 0) return configuredDisplayName
+    if (displayNames.indexOf(deckDisplayName) >= 0) return deckDisplayName
+    return focusedDisplayName
+  }
+  // A live deck stays put while focus moves. Losing that display moves it to
+  // a usable one; a configured specific display remains selected for replug.
+  onDisplayNamesChanged: {
+    if (deckDisplayName && displayNames.indexOf(deckDisplayName) < 0)
+      deckDisplayName = configuredDisplayName
+  }
+  onDisplayModeChanged: { if (toasts.count > 0) deckDisplayName = configuredDisplayName }
+  onDisplayNameChanged: { if (displayMode === "specific" && toasts.count > 0) deckDisplayName = configuredDisplayName }
+  function pinDeckDisplay() {
+    if (toasts.count === 0) deckDisplayName = configuredDisplayName
+  }
+
   // A verification code is the one thing quiet cannot afford to swallow: you
   // asked for it thirty seconds ago, it expires in five minutes, and no amount
   // of "I'll look later" applies. Codes are only ever detected from a keyword
@@ -88,9 +115,20 @@ Item {
   // Hyprland 0.56 reports monitor/window/region separately. These events
   // describe capture, not its destination: local recordings count too.
   // Keep this separate from persisted quiet so stopping never undoes DND.
+  property bool pauseWhileScreenSharing: true
   property int monitorCaptures: 0
-  property bool screenSnoozed: false
+  property bool capturePause: false
+  readonly property bool screenSnoozed: pauseWhileScreenSharing && capturePause
+  readonly property string sharingDetectionStatus: !pauseWhileScreenSharing ? "Automatic pause is off"
+    : "Experimental capture detection; misses existing shares after restart and also reacts to screenshots"
   property double screenSnoozedSince: 0
+  onScreenSnoozedChanged: {
+    if (!screenSnoozed) return
+    screenSnoozedSince = Date.now() / 1000
+    replyingKey = ""
+    clearAll("snoozed")
+    releaseHeld()
+  }
   Connections {
     target: Hyprland
     function onRawEvent(event) {
@@ -98,16 +136,10 @@ Item {
       if (event.data === "1,monitor") {
         service.monitorCaptures += 1
         screenWake.stop()
-        if (!service.screenSnoozed) {
-          service.screenSnoozedSince = Date.now() / 1000
-          service.screenSnoozed = true
-          service.replyingKey = ""
-          service.clearAll("snoozed")
-          service.releaseHeld()
-        }
+        service.capturePause = true
       } else if (event.data === "0,monitor") {
         service.monitorCaptures = Math.max(0, service.monitorCaptures - 1)
-        if (!service.monitorCaptures && service.screenSnoozed) screenWake.restart()
+        if (!service.monitorCaptures && service.capturePause) screenWake.restart()
       }
     }
   }
@@ -116,7 +148,7 @@ Item {
   Timer {
     id: screenWake
     interval: 1000
-    onTriggered: service.screenSnoozed = false
+    onTriggered: service.capturePause = false
   }
   readonly property int gap: Style.space(6)
 
@@ -428,7 +460,10 @@ Item {
   property var refs: ({})
   property int keySeed: 0
 
-  ListModel { id: toasts }
+  ListModel {
+    id: toasts
+    onCountChanged: { if (count === 0) service.deckDisplayName = "" }
+  }
 
   // ------------------------------------------------------------- icons
   //
@@ -846,6 +881,7 @@ Item {
         Store.applyTo(toasts, at, row)      // an update, in place
         service.retarget(undefined, undefined, snap, deckNow)
       } else {
+        service.pinDeckDisplay()
         toasts.insert(0, row)
         // Where it comes from: under the bar, transparent. The layout has
         // already made room for it, so this is the only thing the arrival
@@ -1427,6 +1463,7 @@ Item {
           // handle it left died with the last shell, so without this every
           // card that came back wore a letter.
           service.wantIcon(row)
+          service.pinDeckDisplay()
           toasts.insert(0, row)
         }
       }
@@ -1517,6 +1554,11 @@ Item {
         doNotDisturb: service.doNotDisturb, snoozed: service.liveSnoozes(),
         screenSnoozed: service.screenSnoozed, monitorCaptures: service.monitorCaptures,
         globalSnoozeUntil: service.globalSnoozeUntil,
+        displayMode: service.displayMode, displayName: service.displayName,
+        displays: service.displayNames, focusedDisplay: service.focusedDisplayName,
+        targetDisplay: service.targetDisplayName,
+        notificationDisplays: service.screenSnoozed ? []
+          : service.displayMode === "all" ? service.displayNames : [service.targetDisplayName],
         snoozeOptions: service.snoozeOptions,
         decks: service.layout.decks.length, layoutH: service.layout.height,
         layoutRevision: service.layoutRevision, heightNotes: service.heightNotes,
@@ -1774,6 +1816,8 @@ Item {
       id: surface
       required property var modelData
       screen: modelData
+      readonly property bool selected: service.displayMode === "all" || modelData.name === service.targetDisplayName
+      readonly property bool showingNotifications: selected && !service.screenSnoozed
       // Always mapped, even with nothing to draw. It used to appear with the
       // first notification and vanish with the last, and a layer surface
       // coming and going makes the compositor re-evaluate focus each time -
@@ -1815,7 +1859,7 @@ Item {
       // notification layer holding the keyboard the rest of the time would
       // swallow every keystroke on the desktop, so this is tightly bounded:
       // Escape closes it, so does answering, and so does the timeout below.
-      WlrLayershell.keyboardFocus: !service.screenSnoozed && service.replyingKey !== ""
+      WlrLayershell.keyboardFocus: surface.showingNotifications && service.replyingKey !== ""
                                    ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
       exclusionMode: ExclusionMode.Ignore
 
@@ -1831,7 +1875,7 @@ Item {
       // Only the deck takes input; the rest of the surface stays
       // click-through. Tracking the item keeps the region honest as the deck
       // grows and shrinks.
-      mask: Region { item: service.screenSnoozed ? null : deck }
+      mask: Region { item: surface.showingNotifications ? deck : null }
 
       // The notification area proper: it begins at the bar's lower edge and is
       // clipped there, so a card arriving from above is revealed as it comes
@@ -1840,7 +1884,7 @@ Item {
       // cut off square.
       Item {
         id: clipper
-        visible: !service.screenSnoozed
+        visible: surface.showingNotifications
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.topMargin: service.barClearance
