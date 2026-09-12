@@ -189,18 +189,12 @@ Item {
     if (size > 0) return size
     return barVertical ? Style.bar.sizeVertical : Style.bar.sizeHorizontal
   }
-  // How far the deck sits from the edges it hangs off. One number for both,
-  // because two of them is what you see: the cards were 6 under the bar and 14
-  // in from the screen edge, which reads as a mistake even when you cannot say
-  // which side is wrong.
-  readonly property int deckInset: Style.space(14)
+  readonly property int notificationWidth: Style.space(380)
 
-  // Where the surface is clipped, which is the bar's own edge - a card
-  // arriving is revealed as it comes out from under the bar rather than seen
-  // sliding across it. The inset is applied to the deck inside the clip, not
-  // here, or cards would pop into existence in the middle of the gap.
+  // Match the stock notification placement: the theme's outer gap, plus bar
+  // clearance only on the edge occupied by the bar.
   readonly property int barClearance: (barPosition === "top" ? barThickness : 0) + Style.gapsOut
-  readonly property int edgeClearance: (barPosition === "right" ? barThickness : 0) + deckInset
+  readonly property int edgeClearance: (barPosition === "right" ? barThickness : 0) + Style.gapsOut
 
   readonly property int lowDuration: 5000
   readonly property int normalDuration: 8000
@@ -1930,10 +1924,9 @@ Item {
 
   // ------------------------------------------------------------- surface
   //
-  // One full-screen layer per output. Full-screen and fixed: a surface that
-  // resizes as cards come and go lets the compositor scale a stale buffer,
-  // which is visible as the cards briefly stretching. The mask keeps every
-  // pixel outside the deck click-through.
+  // One fixed-width layer per output. Keeping the surface height fixed avoids
+  // compositor rescaling while cards enter or leave; the mask keeps everything
+  // outside the deck click-through.
   Variants {
     model: Quickshell.screens
 
@@ -1952,24 +1945,6 @@ Item {
       //
       // Input is unaffected: the mask follows the deck, and an empty deck is a
       // zero-area mask, which is click-through everywhere.
-      // Always mapped, even with nothing to draw. It used to appear with the
-      // first notification and vanish with the last, and a layer surface
-      // coming and going makes the compositor re-evaluate its layer set each
-      // time - which on a scrolling layout drags the viewport somewhere else
-      // the moment you dismiss the last card. The surface is the canvas; the
-      // deck is what gets painted on it.
-      //
-      // Input is unaffected: the mask follows the deck, and an empty deck is a
-      // zero-area mask, which is click-through everywhere.
-      // Always mapped, even with nothing to draw. It used to appear with the
-      // first notification and vanish with the last, and a layer surface
-      // coming and going makes the compositor re-evaluate its layer set each
-      // time - which on a scrolling layout drags the viewport somewhere else
-      // the moment you dismiss the last card. The surface is the canvas; the
-      // deck is what gets painted on it.
-      //
-      // Input is unaffected: the mask follows the deck, so an empty deck is a
-      // zero-area mask and the whole surface is click-through.
       visible: true
       color: "transparent"
 
@@ -1990,7 +1965,7 @@ Item {
       // As wide as the deck needs and no wider. Full-screen was the obvious
       // shape - the deck can sit anywhere in it - but it meant Qt re-rendering
       // a 5120x2880 surface for every frame of every arrival, for a stack
-      // 340pt across. The width is a constant, so the buffer is allocated once
+      // 380px across. The width is a constant, so the buffer is allocated once
       // and never resized under an animation; the height stays full so the
       // deck can grow downwards without the window changing size either.
       anchors { top: true; bottom: true; right: true }
@@ -2001,11 +1976,9 @@ Item {
       // grows and shrinks.
       mask: Region { item: surface.showingNotifications ? deck : null }
 
-      // The notification area proper: it begins at the bar's lower edge and is
-      // clipped there, so a card arriving from above is revealed as it comes
-      // down rather than being seen sliding across the panel. The extra height
-      // is room for the bottom card's shadow, which clipping would otherwise
-      // cut off square.
+      // Cards enter from behind the bar. Reserve only enough side/bottom room
+      // for their scale animation; native notification surfaces have no custom
+      // drop shadows to accommodate.
       Item {
         id: clipper
         visible: surface.showingNotifications
@@ -2013,26 +1986,18 @@ Item {
         anchors.top: parent.top
         anchors.topMargin: service.barClearance
         anchors.rightMargin: 0
-        // Room for the shadow on both sides. The clip is here to hide a card
-        // dropping in from behind the bar, which is a vertical concern only -
-        // but an item that clips and is exactly as wide as the card cuts the
-        // shadow off flat down both edges. So the clipper is wider than the
-        // card and the deck sits inset within it: left by a comfortable
-        // margin, right by however much room there is between the card and the
-        // screen edge, which is all a shadow can have there anyway.
-        readonly property int shadowRoom: Style.space(30)
+        readonly property int motionInset: Style.spacing.sm
         // In from the screen's right edge - plus the bar's width, if the bar
         // is the thing occupying that edge.
         readonly property int edgeGap: service.edgeClearance
-        width: Style.space(340) + shadowRoom + edgeGap
-        height: deck.y + deck.height + Style.space(30)
+        width: service.notificationWidth + motionInset + edgeGap
+        height: deck.y + deck.height + motionInset
         clip: true
 
         Item {
           id: deck
-          y: service.deckInset
-        x: clipper.shadowRoom
-        width: Style.space(340)
+        x: clipper.motionInset
+        width: service.notificationWidth
         // From the same clock as everything on it, so the clip and its
         // contents can never disagree mid-move.
         height: service.deckHeight
@@ -2158,8 +2123,10 @@ Item {
             // The target height, not the drawn one: a step function of the
             // card's state, so the layout moves on events rather than frames.
             drawnHeight: service.at(model.key, "height")
-            onTargetHeightChanged: service.noteHeight(model.key, targetHeight)
-            Component.onCompleted: service.noteHeight(model.key, targetHeight)
+            // Hidden outputs collapse effective child visibility. Their text
+            // measurements must not overwrite the visible deck's height.
+            onTargetHeightChanged: if (surface.showingNotifications) service.noteHeight(model.key, targetHeight)
+            Component.onCompleted: if (surface.showingNotifications) service.noteHeight(model.key, targetHeight)
 
             onExpired: service.closeToast(model.key, "expired")
             onActivated: service.activate(model.key)

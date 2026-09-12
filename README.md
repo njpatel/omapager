@@ -28,13 +28,22 @@ built-in notification service with a stacking deck that groups by source,
 reads what a notification is actually offering you, and lets you act on it
 without leaving the card.
 
-<img src="assets/deck.gif" width="440" alt="Notifications landing and stacking in the corner of the screen">
+<img src="assets/native-card-2x.png" width="410" alt="Notification card using Omarchy's native typography, borders and spacing">
 
 ## What it does
 
 **Stacks and groups.** Notifications from the same source collect into one
 deck. Hovering expands it. Nothing is hidden behind a "3 more" summary —
 every notification is a real card you can act on.
+
+**Uses the shell's visual language.** Cards use Omarchy's notification palette,
+380px width, outer gaps, border specs and theme-controlled corners, without
+additional drop shadows. Message text follows the stock card's Liberation Sans
+typography; controls and metadata use the system font. Shared buttons, fields,
+panel headers and cursor surfaces honour the theme's control tokens, including
+gradient and per-side borders. Grouping, the sender fallback mark, action offers
+and inline replies remain omapager features rather than copies of the simpler
+stock card.
 
 A body is held to two lines while you are scanning a deck, and opens to its
 full length — up to eight lines — once the deck is expanded, or on hover when
@@ -48,7 +57,6 @@ on the headline tells you a card is
 carrying something before you hover, because the useful part of a message is
 usually past the ellipsis.
 
-<img src="assets/actions.png" width="369" alt="A card showing a Copy code button">
 
 A message carrying two codes gets a button each, labelled with the digits,
 because "Copy code" twice is a coin toss. Detection is deliberately
@@ -59,13 +67,14 @@ conservative: `412 passed, 0 failed` is not a code, and neither is
 all along; most desktops draw none of them. Reply, Mark as read, whatever the
 app offered, appear as buttons on hover.
 
+<img src="assets/native-actions-2x.png" width="410" alt="Native action buttons with a wrapped overflow action">
+
 **Replies to your phone.** Phone notifications reach the desktop through KDE
 Connect, and the ones carrying a reply channel grow a text field on the card.
 The answer goes back to the conversation, and the notification is dismissed on
 the phone too. Nothing new lands and nothing expires while you are typing, so
 the field cannot move out from under you mid-sentence.
 
-<img src="assets/reply.png" width="369" alt="Typing a reply into a notification">
 
 **Sends you back where it came from.** Clicking a card focuses the window that
 source is already showing in — a Slack notification lands in the Chrome you
@@ -118,7 +127,7 @@ Notifications received during a snooze or silence belong only in Held Back;
 they do not populate Recent when quiet ends. A source's earlier recent entries
 are hidden while it is snoozed and become eligible again when it wakes.
 
-<img src="assets/quiet.png" width="404" alt="The bar indicator and the panel behind it">
+<img src="assets/native-panel-2x.png" width="420" alt="Native notification panel with recent messages">
 
 **Resolves real icons.** Your own icon themes win; web notifications fall back
 to the site's own icon, in dark and light variants to suit the theme.
@@ -194,22 +203,10 @@ in the view persist across shell restarts. No separate settings file is created.
 | `heldPerSource` | `10` | how many held notifications it shows per source |
 | `recentCount` | `5` | recent notifications shown in the panel (1–20), including when notifications are enabled; resets on shell restart |
 
-Notification text at 100% and 150% of the theme size:
-
-| 100% (default) | 150% |
-| --- | --- |
-| ![Sample notification at 100%](assets/font-scale-100.png) | ![Sample notification at 150%](assets/font-scale-150.png) |
-
-Long titles wrap, and actions that do not fit move behind **More**. At 200%:
-
-| Action row | More expanded |
-| --- | --- |
-| ![Actions at 200%](assets/font-scale-200.png) | ![All actions at 200%](assets/font-scale-200-more.png) |
-
-Long action labels wrap inside the expanded list, with the button growing to
-fit the full text:
-
-![Wrapped action label at 200%](assets/font-scale-200-long.png)
+`fontScale` adjusts notification content, actions and inline replies from
+75–200% while the bar and panel keep their usual size. Long titles wrap;
+actions that do not fit move behind **More**, where long labels wrap in
+full-width buttons rather than being clipped.
 
 Every history entry is the text of a message somebody sent you, so it is
 trimmed by age as well as count: **7 days or 200 entries**, whichever comes
@@ -255,13 +252,12 @@ when nothing is showing.
 | | |
 | --- | --- |
 | crossed-out bell, in the theme's urgent colour | silenced |
-| bell with a `z` in it, in amber | snoozed — everything, or a source |
-| monitor-share icon, in amber | sharing detected; click for a snooze offer, without toggling DND |
+| bell with a `z` in it, in the theme's accent colour | snoozed — everything, or a source |
+| monitor-share icon, in the theme's accent colour | sharing detected; click for a snooze offer, without toggling DND |
 | crossed-out bell, dimmed | nothing held back |
 
-Same crossed-out bell as Omarchy's own indicator, so a silenced desktop looks
-the same whichever service is running. Amber rather than red for a snooze,
-because a snooze ends by itself.
+The icon shapes distinguish quiet states without inventing another palette:
+urgent for silencing, accent for snoozes and sharing offers. The theme owns both.
 
 **Left-click** silences and unsilences. **Right-click** opens the panel: the
 switch, a button beside it that snoozes everything for a while, the Recent

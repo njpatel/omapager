@@ -15,6 +15,7 @@ Window {
   property var cases: []
   property int index: -1
   property string phase: "start"
+  property real visibleCardHeight: 0
   readonly property string profile: Quickshell.env("OMAPAGER_TEST_PROFILE") || "default"
 
   Plugin.Toast {
@@ -31,9 +32,6 @@ Window {
   TextMetrics {
     id: titleMeasure
     text: String(toast.row.summary || "")
-    font.family: Style.font.family
-    font.pixelSize: Style.font.body * toast.fontScale
-    font.weight: Font.DemiBold
   }
 
   function check(ok, message) {
@@ -81,6 +79,8 @@ Window {
     toast.fontScale=c.scale; toast.actionsAlign=c.align || "right"
     toast.actions=[]
     var row=baseRow()
+    if (c.kind === "visibility")
+      row.body = "This notification wraps onto several lines so hiding an inactive output must not collapse the content measurement used by the visible card."
     if (c.kind === "three") {
       row.code="123456"; row.codes="123456"; row.link="https://example.com"; row.replyPath="fake:0"
     } else if (c.kind === "long") {
@@ -104,7 +104,7 @@ Window {
     Style.fontFamily=profile === "proportional" ? "sans-serif" : "monospace"
     Style.fontOverrides={}; Style.spacingOverrides={}; Style.styleOverrides={}
     Style.spacingScale=1; Style.spacingScaleWithFont=true
-    var out=[]
+    var out=[{kind:"visibility",scale:1}]
     for (var percent=75; percent<=200; percent+=5)
       for (var align of ["left","right"])
         out.push({kind:"three",scale:percent/100,align:align})
@@ -128,7 +128,24 @@ Window {
         var c=test.cases[test.index], bs=test.checkGeometry()
         var title=test.nodes(toast).find(n=>n.text===toast.row.summary && n.lineCount !== undefined)
         test.check(title && !title.truncated,"title unexpectedly truncated")
+        if (c.kind === "visibility") {
+          if (test.phase === "row") {
+            test.visibleCardHeight = toast.targetHeight
+            toast.visible = false
+            test.phase = "hidden"
+            return
+          }
+          test.check(Math.abs(toast.targetHeight - test.visibleCardHeight) < 0.5,
+                     "hiding an output changed the card's measured height")
+          if (test.phase === "hidden") {
+            toast.visible = true
+            test.phase = "visible"
+            return
+          }
+          test.next(); return
+        }
         if (c.kind === "title") {
+          titleMeasure.font = title.font
           // Build a genuinely overflowing fixture under the current font metrics.
           // A naturally fitting summary must remain a valid single-line title.
           if (c.wrap && titleMeasure.advanceWidth <= title.width) {
