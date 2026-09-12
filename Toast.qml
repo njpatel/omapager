@@ -12,10 +12,12 @@ import qs.Commons
 import qs.Ui
 
 import "Markup.js" as Markup
+import "Security.js" as Security
 
 Item {
   id: card
 
+  property real fontScale: 1
   property var row: ({})
   property var place: ({ y: 0, scale: 1, opacity: 1, z: 1, front: true, hidden: false })
   // The scene that owns the clock. Everything below degrades to a still card
@@ -127,14 +129,51 @@ Item {
     return out
   }
 
-  // Three buttons is what fits across a card without the labels shrinking.
-  // Past that the last slot becomes "More", which opens the lot as a list
-  // rather than a floating menu: this surface is clipped, and a popup that can
-  // be cut off is worse than one more row.
-  readonly property int fits: 3
+  // Measure the actual themed buttons: a fixed count overflows with larger
+  // fonts or longer action labels. Reserve More before admitting each action.
+  readonly property var actionWidths: {
+    var widths = []
+    for (var i = 0; i < deedMeasures.count; i++) {
+      var button = deedMeasures.itemAt(i)
+      if (button) widths.push(button.implicitWidth)
+    }
+    return widths
+  }
+  readonly property int fits: {
+    var widths = actionWidths, gap = deedRow.spacing, available = deedArea.width
+    if (widths.length !== allDeeds.length) return 0
+    var total = 0
+    for (var i = 0; i < widths.length; i++) total += widths[i] + (i ? gap : 0)
+    if (total <= available) return widths.length
+    var used = moreMeasure.implicitWidth, count = 0
+    for (var j = 0; j < widths.length; j++) {
+      if (used + gap + widths[j] > available) break
+      used += gap + widths[j]
+      count++
+    }
+    return count
+  }
   readonly property bool overflows: allDeeds.length > fits
-  readonly property var deeds: allDeeds.slice(0, overflows ? fits - 1 : fits)
-  readonly property var spare: overflows ? allDeeds.slice(fits - 1) : []
+  readonly property var deeds: allDeeds.slice(0, fits)
+  readonly property var spare: allDeeds.slice(fits)
+
+  Item {
+    visible: false
+    Repeater {
+      id: deedMeasures
+      model: card.allDeeds
+      DeedButton {
+        required property var modelData
+        deed: modelData
+        toast: card
+      }
+    }
+    DeedButton {
+      id: moreMeasure
+      deed: ({ kind: "more", label: "More", value: "" })
+      toast: card
+    }
+  }
   property bool deedsOpen: false
   property bool menuOpen: false
   property string actionsAlign: "right"      // right | left
@@ -180,6 +219,7 @@ Item {
   // put them on the wire. A restored card has none, because the sender that
   // would have to carry them out is gone.
   property var actions: []
+  property string replyError: ""
   signal actionInvoked(string identifier)
 
   // Replying to a message forwarded from the phone.
@@ -421,12 +461,13 @@ Item {
                          Color.notifications.text.b, 0.10)
 
           Text {
+            textFormat: Text.PlainText
             anchors.centerIn: parent
             text: String(card.row.source || card.row.app || "?").substring(0, 1).toUpperCase()
             color: Color.notifications.text
             opacity: 0.55
             font.family: Style.font.family
-            font.pixelSize: Style.font.body
+            font.pixelSize: Style.font.body * card.fontScale
             font.weight: Font.DemiBold
           }
         }
@@ -481,18 +522,22 @@ Item {
           Behavior on opacity { NumberAnimation { duration: card.fade } }
 
           Text {
+            textFormat: Text.PlainText
             id: title
             anchors.left: parent.left
-            width: parent.width - rightSide.width
+            width: Math.max(1, parent.width - rightSide.width
                    - (badge.visible ? badge.width + Style.space(6) : 0)
                    - (titleMarks.visible ? titleMarks.width + Style.space(7) : 0)
-                   - Style.space(8)
+                   - Style.space(8))
             text: String(card.row.summary || "")
             color: Color.notifications.text
             font.family: Style.font.family
-            font.pixelSize: Style.font.body
+            font.pixelSize: Style.font.body * card.fontScale
             font.weight: Font.DemiBold
-            maximumLineCount: 1
+            // Larger fonts should wrap the summary, not hide it after a few words.
+            // Bound unusually long titles just as we bound the message body.
+            wrapMode: Text.Wrap
+            maximumLineCount: card.bodyOpen ? 8 : 3
             elide: Text.ElideRight
           }
 
@@ -512,12 +557,13 @@ Item {
             Repeater {
               model: card.marks
               Text {
+            textFormat: Text.PlainText
                 required property var modelData
                 text: modelData
                 color: Color.notifications.text
                 opacity: 0.9
                 font.family: Style.font.family
-                font.pixelSize: Style.font.body
+                font.pixelSize: Style.font.body * card.fontScale
               }
             }
           }
@@ -537,13 +583,14 @@ Item {
                            Color.notifications.text.b, 0.16)
 
             Text {
+            textFormat: Text.PlainText
               id: badgeText
               anchors.centerIn: parent
               text: String(card.stands)
               color: Color.notifications.text
               opacity: 0.85
               font.family: Style.font.family
-              font.pixelSize: Style.font.caption
+              font.pixelSize: Style.font.caption * card.fontScale
             }
 
           }
@@ -568,11 +615,12 @@ Item {
             // thing changing into another reads as a single control, and
             // nothing has to move to make room.
             Item {
-              width: Math.max(stamp.implicitWidth, Style.space(18))
-              height: Style.space(18)
+              width: Math.max(stamp.implicitWidth, shut.width)
+              height: Math.max(Style.space(18), stamp.implicitHeight)
               anchors.verticalCenter: parent.verticalCenter
 
               Text {
+            textFormat: Text.PlainText
                 id: stamp
                 anchors.centerIn: parent
                 text: card.ago()
@@ -580,14 +628,14 @@ Item {
                 opacity: card.hovered ? 0 : 0.6
                 visible: opacity > 0.01
                 font.family: Style.font.family
-                font.pixelSize: Style.font.bodySmall
+                font.pixelSize: Style.font.bodySmall * card.fontScale
                 Behavior on opacity { NumberAnimation { duration: card.fade } }
               }
 
               Rectangle {
                 id: shut
                 anchors.centerIn: parent
-                width: Style.space(18)
+                width: Style.space(18) * Math.max(1, card.fontScale)
                 height: width
                 radius: Math.max(2, Style.cornerRadius - 1)
                 color: Qt.rgba(Color.notifications.text.r, Color.notifications.text.g,
@@ -598,12 +646,13 @@ Item {
                 Behavior on color { ColorAnimation { duration: card.fade } }
 
                 Text {
+            textFormat: Text.PlainText
                   anchors.centerIn: parent
                   text: "\u2715"
                   color: Color.notifications.text
                   opacity: shutHit.containsMouse ? 1.0 : 0.75
                   font.family: Style.font.family
-                  font.pixelSize: Style.font.caption
+                  font.pixelSize: Style.font.caption * card.fontScale
                 }
 
                 MouseArea {
@@ -627,7 +676,7 @@ Item {
         FontMetrics {
           id: metrics
           font.family: Style.font.family
-          font.pixelSize: Style.font.bodySmall
+          font.pixelSize: Style.font.bodySmall * card.fontScale
         }
 
         // Two lines of a notification body are one sentence that happened to
@@ -686,18 +735,19 @@ Item {
             lineHeight: bodyBox.parent.bodyLeading
             lineHeightMode: Text.ProportionalHeight
             font.family: Style.font.family
-            font.pixelSize: Style.font.bodySmall
+            font.pixelSize: Style.font.bodySmall * card.fontScale
             wrapMode: Text.Wrap
             // Second gate on the same rule. Markup drops an anchor it will
             // not vouch for, so nothing unsafe should arrive here - but this
             // is one regex away from being wrong, and the cost of the check
             // is a function call.
             onLinkActivated: function(url) {
-              if (Markup.linkable(url)) Qt.openUrlExternally(url)
+              Security.openExternalUrl(url)
             }
           }
 
           Text {
+            textFormat: Text.PlainText
             id: plain
             width: parent.width
             visible: bodyBox.overflow
@@ -706,7 +756,7 @@ Item {
             lineHeight: bodyBox.parent.bodyLeading
             lineHeightMode: Text.ProportionalHeight
             font.family: Style.font.family
-            font.pixelSize: Style.font.bodySmall
+            font.pixelSize: Style.font.bodySmall * card.fontScale
             wrapMode: Text.Wrap
             maximumLineCount: card.bodyLines
             elide: Text.ElideRight
@@ -738,7 +788,7 @@ Item {
                                        : card.menuOpen ? "menu"
                                        : card.deedsOpen ? "list"
                                        : (card.hovered && card.expanded
-                                          && card.deeds.length > 0) ? "row" : ""
+                                          && card.allDeeds.length > 0) ? "row" : ""
 
           readonly property real contentHeight: mode === "reply" ? replyBox.height
                                               : mode === "menu" ? menuColumn.implicitHeight
@@ -790,7 +840,7 @@ Item {
             // A step, not an animation. This height is part of what the
             // layout reads, and anything the layout reads must not move
             // between frames - the scene animates the slack around it.
-            height: card.replying ? Style.space(24) : 0
+            height: card.replying ? Math.max(Style.space(24), replyInput.implicitHeight + Style.space(3)) : 0
             visible: height > 0
             anchors.bottom: parent.bottom
             clip: true
@@ -805,9 +855,9 @@ Item {
               foreground: Color.notifications.text
               accent: Color.notifications.border
               font.family: Style.font.family
-              font.pixelSize: Style.font.caption
+              font.pixelSize: Style.font.caption * card.fontScale
               verticalPadding: 2
-              placeholderText: "Reply to " + String(card.row.replyTo || card.row.summary || "")
+              placeholderText: card.replyError || ("Reply to " + String(card.row.replyTo || card.row.summary || ""))
               onAccepted: { card.replySent(text); text = "" }
               Keys.onEscapePressed: { text = ""; card.replyCancelled() }
 
@@ -825,7 +875,7 @@ Item {
                 foreground: Color.notifications.text
                 accent: Color.notifications.border
                 fontFamily: Style.font.family
-                fontSize: Style.font.caption
+                fontSize: Style.font.caption * card.fontScale
                 verticalPadding: 1
                 onClicked: { card.replySent(replyInput.text); replyInput.text = "" }
 

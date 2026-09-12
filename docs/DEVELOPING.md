@@ -11,6 +11,16 @@ A notification daemon for Omarchy (Quickshell/QML + Hyprland). It replaces
 `omarchy.notifications`, so that plugin must be in `disabledPlugins` or the two
 fight over the `org.freedesktop.Notifications` bus name.
 
+## How we review contributions
+
+We review the idea first: does it fit the project, and does it solve a useful problem?
+
+If it does, we prefer helping it land over sending you through repeated rounds of small adjustments. We’ll offer directly applicable suggestions where useful. For remaining maintainer preferences, we may prepare and verify a follow-up fix, merge your contribution, then land our adjustments immediately afterwards. Your contribution keeps its GitHub authorship and credit; our follow-up changes are ours.
+
+Further review rounds are appropriate when the idea fits but the implementation still has substantial correctness, security or design problems. We may also offer to finish the agreed changes on your PR branch, with your consent and without rewriting your commits.
+
+We won’t knowingly merge a broken or unsafe intermediate version. Required checks and release or verification gates still apply. If a contribution doesn’t fit the project, we’ll explain that and close it rather than leave it waiting indefinitely.
+
 ## Layout
 
 | | |
@@ -168,19 +178,62 @@ every close. Icons are pruned at 60 days by `tidy`, which the daemon runs at
 startup. Nothing is written to the journal: no `console.log` anywhere, and the
 Python helpers speak on stdout, which is the IPC channel.
 
-## The parts an attacker writes
+## Security boundaries in this branch
 
-An app name, a summary, a body, an action label and a source are all written by
-whoever sent the notification, and anything derived from them is too. Two places
-turn that text into something with consequences, and both are guarded:
+Read SECURITY.md and docs/SECURITY_ARCHITECTURE.md before editing capability
+paths. Security.js is the only URL-opening broker. Never add direct desktop
+opens elsewhere, raw helper launches, command shells, or automatic URL/action
+side effects. Notification labels are plain text; only sanitized body markup is
+RichText. Store.sanitiseForPersistence and the Python store independently redact
+code-bearing notifications. Do not remove either boundary.
 
-- **`bin/omapager-icon` fetches.** `reachable()` allows `http(s)` only and
-  refuses any host that resolves to a non-global address, and `GuardedRedirect`
-  re-tests every hop, because the next URL is chosen by the page (its
-  `<link rel=icon>`) or by a redirect. Without it a site you allowed
-  notifications from could read `file:///etc/passwd` or aim a GET at
-  `127.0.0.1`. `host_names()` gates the first hop the same way: a source is a
-  plain dotted hostname or it is nothing, so no ports, userinfo or paths.
+The panel's Recent stack is session-only, not another persistence path.
+`Service.rememberRecent()` keeps at most 20 bounded text snapshots after
+notification admission, excluding arrivals during global quiet or a source
+snooze. It uses `Store.sanitiseForPersistence()` so verification codes do not
+outlive their toast here either. Never retain Notification objects, images or
+actions in this stack. A source digest supports snooze matching without keeping
+its unredacted label. Replacements update by the existing live key; expiry and
+dismissal leave the snapshot readable. `recentForPanel()` filters currently
+snoozed sources before the widget's 1–20 card limit; global quiet hides the whole
+Recent block. Snooze revisions refresh that filter on snooze, wake and expiry.
+Shell restart clears the stack.
+The widget's `recentExpanded` state resets whenever the panel opens or closes,
+and when global quiet starts. The heading shows the filtered card count; its
+heading/chevron clicks reveal the cards. Collapsed lists instantiate no card
+delegates. Keep the disclosure button out of the Flickable scrollbar's hit area.
+
+`node tests/security.cjs` covers recent ordering/eviction, expiry, replacement,
+redaction and snooze filtering through the production notification lifecycle.
+For visual proof, use a private omalab bus: send short-lived notifications from
+two sources, expand Recent, snooze one and verify only the other remains. Snooze
+everything and verify the whole Recent block disappears. Wake the sources and
+verify held arrivals did not enter Recent while earlier entries become eligible.
+Also verify heading/chevron clicks toggle the list, reopening starts collapsed,
+and arrivals while collapsed do not reveal it.
+
+- **`bin/omapager-icon` fetches, through `bin/omapager_http.py`.** This is the
+  single network-security implementation for icon fetching; there is no second,
+  competing HTTP client. `parse_url()` requires `http(s)`, a public-looking
+  hostname, no userinfo and the scheme's default port only, and rejects control
+  characters and percent-encoded control bytes that could confuse the request
+  line or inject headers. `resolve_public_host()` resolves once and rejects the
+  whole DNS answer if any address is non-global, reserved, multicast, or an
+  IPv6-mapped IPv4 address (a documented `ipaddress.is_global` gap upstream's
+  own transport does not check). `PinnedHTTPConnection.connect()` then connects
+  directly to that checked sockaddr — never re-resolving — while still using
+  the URL hostname for the HTTP `Host` header, TLS SNI, and normal certificate
+  hostname verification. `fetch()` re-validates every redirect target the same
+  way, caps hops at `MAX_REDIRECTS`, and rejects control characters in the
+  `Location` header. `fetch_once()` enforces a byte limit (`Content-Length`
+  pre-check plus an incremental read that never exceeds it), a response
+  deadline, and `identity`-only `Content-Encoding`. `http.client` is used
+  directly rather than `urllib.request`, so there is no opener to route through
+  an environment proxy in the first place. Without these checks a site you
+  allowed notifications from could read `file:///etc/passwd`, aim a GET at
+  `127.0.0.1`, or hold the connection open past a reasonable budget.
+  `host_names()` gates the first hop the same way: a source is a plain dotted
+  hostname or it is nothing, so no ports, userinfo or paths.
 - **`Markup.js` renders.** Everything is escaped, then a fixed tag list is put
   back — no `img`, so a body cannot pull a remote image. An anchor survives only
   if `linkable()` vouches for its scheme; `Toast.onLinkActivated` asks again
@@ -190,12 +243,29 @@ turn that text into something with consequences, and both are guarded:
 Adding anything that fetches, opens, or writes a path from notification text
 means extending one of these, not working around it.
 
+Use the `bin/omapager-run-*` wrappers: Bubblewrap is required, with no
+unsandboxed fallback. Remote icons are off by default, use the pinned
+transport above, and require sandboxed Pillow raster decoding. Tests use
+synthetic data only. Run `node tests/baseline.cjs`, `node tests/security.cjs`,
+Python unittest discovery, Qt policy tests and `security/check_invariants.py`
+after changes. See `docs/VALIDATION.md` for exact commands and integration
+limits.
+
+The transport regression uses synthetic DNS and a test-owned loopback server
+for real HTTP, redirects and TLS; it never contacts an external or existing
+local service. It needs Python 3 and `openssl` (test certificate generation):
+
+```sh
+python3 -B -m unittest discover -s tests -p test_icon_network.py -v
+```
+
 ## Conventions
 
 Comments say **why**, and especially why not the obvious thing — most of them
 are a bug that took a while to find. Keep them when you move code; delete them
-when they stop being true. No new runtime dependencies: Quickshell, Hyprland,
-Python 3.
+when they stop being true. Runtime dependencies: Quickshell, Hyprland, Python 3 and Bubblewrap.
+Pillow is optional for local icons and required for opted-in remote icons.
+Additional dependencies require an explicit security/compatibility review.
 
 `wl-clipboard` is **not** an Omarchy dependency and may simply be absent, so
 nothing may assume `wl-copy`. The copy buttons probe once at startup
@@ -205,3 +275,22 @@ which loses `--sensitive` and nothing else — Omarchy's clipboard history is
 and copied nothing is the outcome to rule out. KDE Connect is different: it is
 the bridge that puts phone notifications on the bus at all, so without it that
 half of the feature set has no input, not a degraded one.
+
+## Font layout regression check
+
+Run `tests/font-layout.sh` on an Omarchy installation. It renders the actual
+Toast and DeedButton components offscreen without starting a notification
+daemon. Three explicit typography profiles (12px monospace, 14px monospace and
+12px proportional) each run 77 cases, including:
+
+- Every 5% font-scale step from 75–200%, with both action alignments.
+- Opening More, checking labels and buttons against every clipping ancestor,
+  and activating Reply or a wrapped action.
+- Long labels, unbroken strings, RTL text and literal markup; changing font
+  size and replacing actions while the list is open.
+- A short title that should remain on one line, and a wrapping fixture that
+  is extended until its measured text exceeds the available width.
+
+The long-label cases reach the expanded list, not just the More-only row.
+Set `OMARCHY_SHELL_DIR` if the shell is installed somewhere other than
+`/usr/share/omarchy/shell`.

@@ -6,6 +6,7 @@
 // you actually care about. So this does two jobs: work out where a
 // notification really came from, and render only what is safe to render.
 .pragma library
+.import "Security.js" as Security
 
 var ALLOWED = ["b", "i", "u", "s", "em", "strong"]
 
@@ -22,7 +23,7 @@ function decodeEntities(text) {
   // &amp;quot;. One pass turns that into &quot; and the card shows the entity
   // rather than the quote mark. Bounded, and it stops as soon as a pass
   // changes nothing.
-  var out = String(text || "")
+  var out = Security.bounded(text, Security.MAX_BODY)
   for (var i = 0; i < 3; i++) {
     var once = decodeOnce(out)
     if (once === out) break
@@ -70,7 +71,7 @@ function unescapeAllowed(text) {
   // the scheme is one worth handing to the desktop - see linkable().
   out = out.replace(/&lt;a\s+href=(?:&quot;|")([^"&]+)(?:&quot;|")[^&]*&gt;([\s\S]*?)&lt;\/a&gt;/gi,
                     function (whole, href, label) {
-                      return linkable(href) ? '<a href="' + href + '">' + label + '</a>'
+                      return linkable(href) ? '<a href="' + Security.safeExternalUrl(href) + '">' + label + '</a>'
                                             : label
                     })
   return out
@@ -83,49 +84,14 @@ function unescapeAllowed(text) {
 // is the sender's too, so it is free to read like a link to somewhere ordinary.
 // Three schemes are worth that trust. Anything else keeps its text and loses
 // its click: still readable, no longer a button to somewhere else.
-var LINKABLE = /^(?:https?|mailto):/i
-
-function linkable(url) {
-  var value = String(url || "")
-  if (!LINKABLE.test(value)) return false
-  // Userinfo before the host is how a link is made to read as somewhere it is
-  // not: https://paypal.com@evil.example goes to evil.example. Nothing a
-  // notification legitimately links to needs it. (mailto: has no // and so
-  // never matches this.)
-  if (/^[a-z]+:\/\/[^\/\?#]*@/i.test(value)) return false
-  return true
-}
-
-// A hostname and nothing else: no port, no userinfo, no path, no IP literal.
-// bin/omapager-icon applies the same test before it will fetch anything, and
-// for the same reason - "https://" + something-shaped-like-a-host is a URL
-// pointing wherever that something says, and a notification is what writes it.
-// The two sides have to agree on what a hostname is.
-var HOSTNAME = /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/
-
-function hostname(value) {
-  var h = String(value || "").trim().toLowerCase().replace(/\.+$/, "")
-  if (!HOSTNAME.test(h)) return ""
-  if (/^\d+$/.test(h.split(".").pop())) return ""   // a dotted quad in a hostname's shape
-  return h
-}
-
-function hostOf(url) {
-  var m = String(url || "").match(/^[a-z]+:\/\/([^\/\?#]+)/i)
-  if (!m) return ""
-  var authority = m[1]
-  // Userinfo is not the host, and this is the whole trick:
-  // https://paypal.com@evil.example goes to evil.example, while a card built
-  // from the text before the @ reads as PayPal. Take what a browser would.
-  var at = authority.lastIndexOf("@")
-  if (at >= 0) authority = authority.slice(at + 1)
-  return hostname(authority.replace(/:\d*$/, "").replace(/^www\./i, ""))
-}
+function linkable(url) { return !!Security.safeExternalUrl(url) }
+function hostname(value) { return Security.canonicalHostname(value) }
+function hostOf(url) { return Security.hostOf(url) }
 
 // A body that opens with a link to the sender's own origin is not a message
 // with a link in it - it is the sender labelling itself. Lift it out.
 function liftSource(body) {
-  var text = String(body || "")
+  var text = Security.bounded(body, Security.MAX_BODY)
   var m = text.match(/^\s*<a\s+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>\s*/i)
   if (!m) return { source: "", body: text }
   var label = String(m[2]).trim()
@@ -144,7 +110,8 @@ function liftSource(body) {
 
 function linkify(escaped) {
   return escaped.replace(/(https?:\/\/[^\s<]+)/g, function(url) {
-    return '<a href="' + url + '">' + url + '</a>'
+    var safe = Security.safeHttpUrl(decodeEntities(url))
+    return safe ? '<a href="' + safe.replace(/&/g, '&amp;') + '">' + url + '</a>' : url
   })
 }
 
@@ -162,7 +129,7 @@ function render(body) {
 
 // Flatten to one line, for a card that is not the one being read.
 function oneLine(body) {
-  return decodeEntities(String(body || "").replace(/<[^>]+>/g, " "))
+  return decodeEntities(Security.bounded(body, Security.MAX_BODY).replace(/<[^>]+>/g, " "))
     .replace(/\s+/g, " ")
     .trim()
 }

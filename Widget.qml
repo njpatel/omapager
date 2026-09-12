@@ -131,6 +131,15 @@ BarWidget {
     persistSettings({ offerSnoozeWhenSharing: !configuredOfferSnoozeWhenSharing })
   }
 
+  readonly property int recentCount: {
+    var count = Number(setting("recentCount", 5))
+    return isFinite(count) ? Math.max(1, Math.min(20, Math.floor(count))) : 5
+  }
+  readonly property var recent: {
+    snoozeRevision
+    return service ? service.recentForPanel(recentCount) : []
+  }
+
   // ------------------------------------------------------------- settings
   //
   // The settings plumbing the daemon has been doing without. Only a bar widget
@@ -141,8 +150,16 @@ BarWidget {
     var stacking = String(setting("stacking", "source"))
     if (stacking === "all" || stacking === "source" && service.stacking !== stacking)
       service.commit(function() { service.stacking = stacking })
+    var fontScale = Number(setting("fontScale", 100))
+    service.fontScale = isFinite(fontScale) ? Math.max(75, Math.min(200, fontScale)) / 100 : 1
     var align = String(setting("actionsAlign", "right"))
     if (align === "left" || align === "right") service.actionsAlign = align
+    service.fetchIcons = setting("fetchRemoteIcons", false) === true
+    service.allowDefaultActionOnCardClick = setting("allowDefaultActionOnCardClick", false) === true
+    var lifetime = Number(setting("clipboardTimeout", 60))
+    service.clipboardTimeout = [30, 60, 90].indexOf(lifetime) >= 0 ? lifetime : 60
+    var hours = Number(setting("historyHours", 24))
+    service.setHistoryHours([0, 1, 24, 168].indexOf(hours) >= 0 ? hours : 24)
     service.hideSettingsAction = setting("hideSettingsAction", true) !== false
     // Only when it has actually been configured. An explicit setting is an
     // instruction; the default is not one - and the panel's own key toggle is
@@ -477,6 +494,8 @@ BarWidget {
                               displayPresent: pager.configuredDisplayPresent,
                               displayMenuOpen: displayDropdown.popupOpen,
                               sources: held, expanded: pager.expandedKey,
+                              recentCount: pager.recent.length, recentLimit: pager.recentCount,
+                              recentExpanded: pager.recentExpanded,
                               cardX: panel.cardOrigin.x, cardY: panel.cardOrigin.y,
                               cw: panel.contentWidth, ch: panel.contentHeight })
     }
@@ -565,11 +584,14 @@ BarWidget {
   }
 
   property string expandedKey: ""
+  property bool recentExpanded: false
+  onQuietChanged: if (quiet) recentExpanded = false
   property int cursorAt: 0
   property bool cursorLive: false
   property bool globalChoosing: false
   onOpenedChanged: {
     cursorAt = 0; cursorLive = false; expandedKey = ""; globalChoosing = false
+    recentExpanded = false
     phraseSwap.stop()          // never reopen onto a half-faded line
     if (!opened) settingsView = false
     // What has been held back, as of now - read on opening rather than kept
@@ -630,7 +652,7 @@ BarWidget {
         boundsBehavior: Flickable.StopAtBounds
         flickableDirection: Flickable.VerticalFlick
         interactive: contentHeight > height
-        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+        ScrollBar.vertical: ScrollBar { id: panelScrollBar; policy: ScrollBar.AsNeeded }
 
         Column {
           id: column
@@ -777,6 +799,7 @@ BarWidget {
                 implicitHeight: hero.iconSize
 
                 Text {
+            textFormat: Text.PlainText
                   anchors.centerIn: parent
                   text: pager.silenced ? pager.bellOff
                       : (pager.globalSnoozed || pager.snoozed.length > 0) ? pager.bellSleep
@@ -946,6 +969,7 @@ BarWidget {
             visible: !pager.settingsView && pager.globalChoosing && !pager.globalSnoozed
 
             Text {
+            textFormat: Text.PlainText
               visible: pager.codesLetThrough
               width: parent.width
               text: "Verification codes still come through."
@@ -977,6 +1001,120 @@ BarWidget {
             }
           }
 
+          PanelSeparator { visible: !pager.settingsView && !pager.quiet; foreground: pager.panelFg }
+
+          Item {
+            visible: !pager.settingsView && !pager.quiet
+            width: parent.width
+            height: Math.max(recentHeading.implicitHeight, recentToggle.implicitHeight)
+
+            PanelSectionHeader {
+              id: recentHeading
+              anchors.left: parent.left
+              anchors.right: recentToggle.left
+              anchors.verticalCenter: parent.verticalCenter
+              text: "RECENT · " + pager.recent.length
+              foreground: pager.panelFg
+              fontFamily: pager.fontFamily
+            }
+
+            MouseArea {
+              anchors.left: parent.left
+              anchors.right: recentToggle.left
+              anchors.top: parent.top
+              anchors.bottom: parent.bottom
+              cursorShape: Qt.PointingHandCursor
+              onClicked: pager.recentExpanded = !pager.recentExpanded
+            }
+
+            PanelActionButton {
+              id: recentToggle
+              anchors.right: parent.right
+              // The scrollbar owns the right-edge hit area even over this row.
+              anchors.rightMargin: panelScrollBar.width
+              anchors.verticalCenter: parent.verticalCenter
+              iconText: pager.recentExpanded ? "\u{f0143}" : "\u{f0140}"
+              tooltipText: pager.recentExpanded ? "Hide recent notifications" : "Show recent notifications"
+              foreground: pager.panelFg
+              fontFamily: pager.fontFamily
+              focusable: true
+              onClicked: pager.recentExpanded = !pager.recentExpanded
+            }
+          }
+
+          Text {
+            visible: !pager.settingsView && !pager.quiet && pager.recentExpanded && pager.recent.length === 0
+            width: parent.width
+            text: "New notifications stay here after their toast disappears."
+            textFormat: Text.PlainText
+            color: pager.dim
+            font.family: pager.fontFamily
+            font.pixelSize: Style.font.bodySmall
+            wrapMode: Text.WordWrap
+          }
+
+          Column {
+            visible: !pager.settingsView && !pager.quiet && pager.recentExpanded
+            width: parent.width
+            spacing: Style.space(6)
+
+            Repeater {
+              model: !pager.settingsView && !pager.quiet && pager.recentExpanded ? pager.recent : []
+
+              Rectangle {
+                id: recentCard
+                required property var modelData
+                width: parent.width
+                height: recentText.implicitHeight + Style.space(16)
+                radius: Style.cornerRadius
+                color: Qt.rgba(pager.panelFg.r, pager.panelFg.g, pager.panelFg.b, 0.05)
+
+                Column {
+                  id: recentText
+                  x: Style.space(8)
+                  y: Style.space(8)
+                  width: parent.width - Style.space(16)
+                  spacing: Style.space(3)
+
+                  Text {
+                    width: parent.width
+                    text: recentCard.modelData.source + " · "
+                          + pager.clockTime(new Date(recentCard.modelData.ts * 1000))
+                    textFormat: Text.PlainText
+                    color: pager.dim
+                    font.family: pager.fontFamily
+                    font.pixelSize: Style.font.caption
+                    elide: Text.ElideRight
+                  }
+
+                  Text {
+                    width: parent.width
+                    text: recentCard.modelData.summary
+                    textFormat: Text.PlainText
+                    color: pager.panelFg
+                    font.family: pager.fontFamily
+                    font.pixelSize: Style.font.bodySmall
+                    font.bold: true
+                    elide: Text.ElideRight
+                  }
+
+                  Text {
+                    visible: text !== ""
+                    width: parent.width
+                    text: recentCard.modelData.bodyLine
+                    textFormat: Text.PlainText
+                    color: pager.dim
+                    font.family: pager.fontFamily
+                    font.pixelSize: Style.font.caption
+                    wrapMode: Text.WordWrap
+                    maximumLineCount: 2
+                    elide: Text.ElideRight
+                  }
+                }
+              }
+            }
+          }
+
           PanelSeparator { visible: !pager.settingsView; foreground: pager.panelFg }
 
           PanelSectionHeader {
@@ -987,6 +1125,7 @@ BarWidget {
           }
 
           Text {
+            textFormat: Text.PlainText
             visible: !pager.settingsView && pager.sources.length === 0
             width: parent.width
             text: pager.quiet
@@ -1035,6 +1174,7 @@ BarWidget {
                     width: parent.width - controls.width - Style.space(10)
 
                     Text {
+            textFormat: Text.PlainText
                       width: parent.width
                       text: line.modelData.label
                       color: pager.panelFg
@@ -1062,6 +1202,7 @@ BarWidget {
                         height: waitFor.implicitHeight
 
                         Text {
+            textFormat: Text.PlainText
                           id: sand
                           anchors.centerIn: parent
                           text: pager.hourglass
@@ -1072,6 +1213,7 @@ BarWidget {
                       }
 
                       Text {
+            textFormat: Text.PlainText
                         id: waitFor
                         visible: line.snoozedByName
                         text: pager.waitingFor(line.modelData.until)
@@ -1081,6 +1223,7 @@ BarWidget {
                       }
 
                       Text {
+            textFormat: Text.PlainText
                         readonly property int count: line.modelData.held.length
                         visible: count > 0
                         width: Math.min(implicitWidth, Math.max(0, parent.width - x))
@@ -1191,6 +1334,7 @@ BarWidget {
                       // that person's name and nothing else, so the headline
                       // alone is not enough to tell them apart.
                       Text {
+            textFormat: Text.PlainText
                         required property var modelData
                         width: parent.width
                         text: {
@@ -1285,6 +1429,7 @@ BarWidget {
         width: parent.width
 
         Text {
+            textFormat: Text.PlainText
           id: titleText
           visible: heroRoot.title !== ""
           text: heroRoot.title
@@ -1314,6 +1459,7 @@ BarWidget {
           radius: Style.cornerRadius
 
           Text {
+            textFormat: Text.PlainText
             id: detailText
             anchors.centerIn: parent
             text: heroRoot.detail
@@ -1326,6 +1472,7 @@ BarWidget {
       }
 
       Text {
+            textFormat: Text.PlainText
         id: metaText
         width: parent.width
         text: heroRoot.meta.toUpperCase()
