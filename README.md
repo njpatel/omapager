@@ -28,13 +28,22 @@ built-in notification service with a stacking deck that groups by source,
 reads what a notification is actually offering you, and lets you act on it
 without leaving the card.
 
-<img src="assets/deck.gif" width="440" alt="Notifications landing and stacking in the corner of the screen">
+<img src="assets/native-card-2x.png" width="410" alt="Notification card using Omarchy's native typography, borders and spacing">
 
 ## What it does
 
 **Stacks and groups.** Notifications from the same source collect into one
 deck. Hovering expands it. Nothing is hidden behind a "3 more" summary —
 every notification is a real card you can act on.
+
+**Uses the shell's visual language.** Cards use Omarchy's notification palette,
+380px width, outer gaps, border specs and theme-controlled corners, without
+additional drop shadows. Message text follows the stock card's Liberation Sans
+typography; controls and metadata use the system font. Shared buttons, fields,
+panel headers and cursor surfaces honour the theme's control tokens, including
+gradient and per-side borders. Grouping, the sender fallback mark, action offers
+and inline replies remain omapager features rather than copies of the simpler
+stock card.
 
 A body is held to two lines while you are scanning a deck, and opens to its
 full length — up to eight lines — once the deck is expanded, or on hover when
@@ -48,7 +57,6 @@ on the headline tells you a card is
 carrying something before you hover, because the useful part of a message is
 usually past the ellipsis.
 
-<img src="assets/actions.png" width="369" alt="A card showing a Copy code button">
 
 A message carrying two codes gets a button each, labelled with the digits,
 because "Copy code" twice is a coin toss. Detection is deliberately
@@ -59,13 +67,14 @@ conservative: `412 passed, 0 failed` is not a code, and neither is
 all along; most desktops draw none of them. Reply, Mark as read, whatever the
 app offered, appear as buttons on hover.
 
+<img src="assets/native-actions-2x.png" width="410" alt="Native action buttons with a wrapped overflow action">
+
 **Replies to your phone.** Phone notifications reach the desktop through KDE
 Connect, and the ones carrying a reply channel grow a text field on the card.
 The answer goes back to the conversation, and the notification is dismissed on
 the phone too. Nothing new lands and nothing expires while you are typing, so
 the field cannot move out from under you mid-sentence.
 
-<img src="assets/reply.png" width="369" alt="Typing a reply into a notification">
 
 **Sends you back where it came from.** Clicking a card focuses the window that
 source is already showing in — a Slack notification lands in the Chrome you
@@ -118,7 +127,7 @@ Notifications received during a snooze or silence belong only in Held Back;
 they do not populate Recent when quiet ends. A source's earlier recent entries
 are hidden while it is snoozed and become eligible again when it wakes.
 
-<img src="assets/quiet.png" width="404" alt="The bar indicator and the panel behind it">
+<img src="assets/native-panel-2x.png" width="420" alt="Native notification panel with recent messages">
 
 **Resolves real icons.** Your own icon themes win; web notifications fall back
 to the site's own icon, in dark and light variants to suit the theme.
@@ -161,67 +170,168 @@ icons for good.
 
 ## Settings
 
+Omapager's behavior options live in its bar-widget entry in
+`~/.config/omarchy/shell.json`. Appearance also comes from Omarchy's shared theme
+and desktop settings; those are described separately under
+[Appearance inherited from Omarchy](#appearance-inherited-from-omarchy).
+
+### Omapager options
+
+Open the notification panel and click the cog for preferences. In the native
+**Show notifications on** dropdown, **Active display** places a fresh deck on
+Hyprland's focused monitor. A visible deck stays put when focus moves.
+**Only DP-1**, for example, pins notifications to that output; disconnected selections are
+retained, with a connected-display fallback until the output returns.
+**All displays** shows the same deck everywhere. Dismissal and snoozing remain shared.
+
+The dropdown, number field, switch, header and separator reuse Omarchy's UI
+components rather than defining a separate control style.
+Use arrows or `j`/`k` in the dropdown, Enter to choose and Escape to close the menu.
+
+**Edge spacing (px)** sets the distance from the bar and screen edges for both
+notification cards and the settings/history panel. It defaults to **12 logical
+pixels**, accepts 0–64, and applies immediately. Notifications remain top-right,
+clearing the bar only when it occupies the top or right edge. Internal padding
+and the spacing between cards are unchanged.
+
+**Show countdown animation** is off by default. Enable it to show a shrinking
+time-remaining line along the bottom of notifications. This changes only the
+visual timer; notifications still expire normally when it is disabled.
+
+The in-panel preferences expose display selection, edge spacing, countdown
+animation and sharing offers. They save to the same bar-widget entry and persist
+across shell restarts. The other options below can be set on that entry too;
+there is no second user configuration file to maintain. Defaults are for a fresh
+configuration, not a reset of choices you have already saved.
+
 | key | default | what it does |
 | --- | --- | --- |
 | `stacking` | `source` | `source` gives each sender its own deck; `all` puts everything in one |
+| `displayMode` | `active` | `active` follows focus for each fresh deck; `specific` uses `displayName`; `all` mirrors notifications |
+| `displayName` | empty | output name for `specific`, such as `DP-1`; retained while disconnected |
+| `edgeSpacing` | `12` | distance from the bar and screen edges in logical pixels (0–64), for notification cards and the panel |
+| `showCountdown` | `false` | opt in to the animated time-remaining line; does not change notification expiry |
+| `offerSnoozeWhenSharing` | `true` | offer a timed snooze when a Hyprland portal sharing session is detected; never mute automatically |
 | `fontScale` | `100` | notification font size as a percentage of the theme (75–200); scales card text, actions and inline replies, leaving the bar and panel unchanged |
-| `actionsAlign` | `right` | which end of a card its buttons sit at |
-| `hideSettingsAction` | `true` | drop the browser's "Settings" button, which is on every web notification and is never the one you wanted |
-| `snoozeDurations` | `30, 60, 240, tomorrow` | what the snooze menus offer — minutes, or `tomorrow` |
-| `wakeHour` | `8` | the hour "until tomorrow" wakes a source at |
+| `actionsAlign` | `right` | `right` or `left` alignment for the card's action buttons |
+| `hideSettingsAction` | `true` | hide the browser's repeated Settings action on notification cards |
+| `snoozeDurations` | `30, 60, 240, tomorrow` | offered snooze lengths: `15`, `30`, `60`, `120`, `240`, `480` minutes or `tomorrow`; an empty selection uses the defaults |
+| `wakeHour` | `8` | wake hour for `tomorrow`, on a 24-hour clock (0–23); currently `0` falls back to `8` |
 | `smartRaise` | `true` | match a site against browser window titles, so a click lands in the window already showing it |
 | `alwaysShow` | `false` | keep the bar slot even when nothing is held back, so the centre of the bar never shifts |
 | `codesBypassQuiet` | `true` | let a notification carrying a verification code through a snooze or a silence |
 | `timeFormat` | `system` | `system` follows `LC_TIME`; `24h` and `12h` pin it |
-| `sourceLimit` | `8` | how many quietened sources the panel lists |
-| `heldPerSource` | `10` | how many held notifications it shows per source |
+| `sourceLimit` | `8` | number of quietened sources listed in the panel; settings range 2–20 |
+| `heldPerSource` | `10` | held notifications shown per source; settings range 3–25 |
 | `recentCount` | `5` | recent notifications shown in the panel (1–20), including when notifications are enabled; resets on shell restart |
+| `fetchRemoteIcons` | `false` | opt in to website-icon requests; reveals your IP and approximate notification time to the source website, and requires Bubblewrap and Pillow; local/cached icons remain available when off |
+| `allowDefaultActionOnCardClick` | `false` | allow the sender's default action on a card click; when off, card clicks use known-window focus or a validated source URL, while explicit action buttons remain available |
+| `historyHours` | `24` | disk-history retention: `0` disables history, otherwise `1`, `24` or `168` hours; capped at 100 entries |
+| `clipboardTimeout` | `60` | clear a copied verification code after `30`, `60` or `90` seconds, only if the clipboard still contains that code |
 
-Notification text at 100% and 150% of the theme size:
+`fontScale` adjusts notification content, actions and inline replies from
+75–200% while the bar and panel keep their usual size. Long titles wrap;
+actions that do not fit move behind **More**, where long labels wrap in
+full-width buttons rather than being clipped.
 
-| 100% (default) | 150% |
-| --- | --- |
-| ![Sample notification at 100%](assets/font-scale-100.png) | ![Sample notification at 150%](assets/font-scale-150.png) |
+Disk history is trimmed by age and count: **24 hours or 100 entries** by default,
+whichever limit is reached first. `historyHours` changes the age limit or disables
+history; Recent remains a separate in-memory list. Resolved icons are dropped
+after 60 days unused.
 
-Long titles wrap, and actions that do not fit move behind **More**. At 200%:
-
-| Action row | More expanded |
-| --- | --- |
-| ![Actions at 200%](assets/font-scale-200.png) | ![All actions at 200%](assets/font-scale-200-more.png) |
-
-Long action labels wrap inside the expanded list, with the button growing to
-fit the full text:
-
-![Wrapped action label at 200%](assets/font-scale-200-long.png)
-
-Every history entry is the text of a message somebody sent you, so it is
-trimmed by age as well as count: **7 days or 200 entries**, whichever comes
-first. Resolved icons are dropped after 60 days unused, and nothing is ever
-written to the system log.
-
-Settings live on the bar widget's entry in `shell.json`, all in one place
-next to `id`:
+Merge options into the existing bar-widget entry in `shell.json`, alongside `id`.
+For example, this is a widget entry, **not a complete replacement for shell.json**:
 
 ```json
-{ "id": "njpatel.omapager", "snoozeDurations": ["60", "480"], "wakeHour": 9 }
+{
+  "id": "njpatel.omapager",
+  "edgeSpacing": 12,
+  "showCountdown": false,
+  "fontScale": 100,
+  "historyHours": 24
+}
 ```
+
+### Appearance inherited from Omarchy
+
+These are **Omarchy-wide values, not additional Omapager options**. Omapager reads
+the shared `Color`, `Style` and `Border` components; it does not maintain its own
+copy of the theme. Omarchy merges the active theme's `shell.toml` with
+`~/.config/omarchy/shell.toml`, with user values taking precedence. Put persistent
+theme overrides in the latter, not in Omapager's `shell.json` entry or the
+generated active-theme files.
+
+| Appearance | Source |
+| --- | --- |
+| Card colors | Omarchy's `[notifications]` background, text, border and countdown roles; critical notifications also use the shared urgent color |
+| Card border width | `[notifications] border-width`, with optional `border-width-top/right/bottom/left` overrides; otherwise `max(1, Style.space(2))`, exactly as in stock notifications—2 logical pixels at the default scale |
+| Panel surface and border | The shared `KeyboardPanel` uses Omarchy's `[popups]` colors and border settings |
+| Corner rounding | `Style.cornerRadius`, which follows Hyprland's `decoration:rounding` |
+| Typography | Omarchy's `[font]` size tokens; action buttons, timestamps and replies use the shared UI font, and the panel uses the bar's font. Notification titles and body text use Liberation Sans, matching the stock card. Omapager's `fontScale` multiplies card text sizes only |
+| Button, switch and dropdown states | Native Omarchy controls use the shared `[controls]` fill, border, hover, pressed and focus tokens |
+| Internal spacing and padding | `Style.space(...)` and `Style.spacing` follow Omarchy's `[spacing]` settings, including font-linked scaling; the panel inherits the shared popup padding |
+| Bar clearance and panel orientation | The live Omarchy bar supplies its position, thickness and visibility; Omapager adds bar thickness only to the top/right notification edge that needs clearing, and `KeyboardPanel` positions the panel beside its bar icon |
+
+For example, to set the card border width explicitly, add or update this section
+in **`~/.config/omarchy/shell.toml`**:
+
+```toml
+[notifications]
+border-width = 2
+```
+
+That changes every component using Omarchy's notification border tokens, not just
+Omapager. The panel border uses `[popups]` instead. There is currently no separate
+Omapager border-width option.
+
+**Edge spacing is an explicit exception.** `edgeSpacing` replaces the shared
+`Style.gapsOut` distance for the notification deck and the panel's bar gap and
+screen margin. Its default is 12 logical pixels, independent of theme spacing
+scale and Hyprland's `general:gaps_out`.
+
+Other geometry is fixed in Omapager but scaled through `Style.space`: the card's
+base width is 380, the expanded-card gap is 6, and the gap between source decks is 11.
+These are not plugin options. At 2× display scaling, 12 logical pixels occupy
+24 physical pixels; display scaling does not change the configured value.
+
+### Sharing offers
+
+When the Hyprland screen-sharing portal creates a screen, window or area stream,
+the bar shows a sharing indicator. Click it to choose **30 minutes**, **1 hour**,
+**4 hours**, or **Not now**. No notification toast or panel opens automatically,
+and notifications continue until you choose a snooze. The ordinary snooze rules
+still apply, including critical alerts and the configured verification-code exception.
+
+An offer is handled once until all detected streams end. Additional simultaneous
+streams do not repeat it. If DND or a global snooze is already active, no offer is
+shown for that sharing period. A chosen snooze keeps its timer regardless of when
+sharing ends: it can outlast a short share or expire during a long one.
+
+Detection reads current PipeWire video-node metadata, including streams already
+present at shell startup. It recognises the Hyprland portal's `xdph-streaming-`
+media names, not arbitrary video sources or compositor capture events. Direct
+VNC captures, screenshots and applications that bypass that portal do not trigger
+it; portal-based recording can. This is a convenience, not a privacy guarantee.
+Only 64 video-source nodes are tracked. Dismissal is in memory, so restarting the
+shell during a share can offer again. Disable the offer in settings or set
+`offerSnoozeWhenSharing` to `false` in the same widget config entry.
 
 ## The bar
 
-omapager takes a slot in the bar only while it is keeping something from you,
-and nothing at all the rest of the time. Hovering the centre of the bar reveals
-it, the way Omarchy reveals its own inactive indicators — that is the way back
-into silence when nothing is showing.
+omapager takes a slot in the bar while notifications are held back or a sharing
+offer is waiting. Hovering the centre of the bar reveals it otherwise, the way
+Omarchy reveals its own inactive indicators — that is the way back into silence
+when nothing is showing.
 
 | | |
 | --- | --- |
 | crossed-out bell, in the theme's urgent colour | silenced |
-| bell with a `z` in it, in amber | snoozed — everything, or a source |
+| bell with a `z` in it, in the theme's accent colour | snoozed — everything, or a source |
+| monitor-share icon, in the theme's accent colour | sharing detected; click for a snooze offer, without toggling DND |
 | crossed-out bell, dimmed | nothing held back |
 
-Same crossed-out bell as Omarchy's own indicator, so a silenced desktop looks
-the same whichever service is running. Amber rather than red for a snooze,
-because a snooze ends by itself.
+The icon shapes distinguish quiet states without inventing another palette:
+urgent for silencing, accent for snoozes and sharing offers. The theme owns both.
 
 **Left-click** silences and unsilences. **Right-click** opens the panel: the
 switch, a button beside it that snoozes everything for a while, the Recent
@@ -287,6 +397,7 @@ omarchy-shell omapager probe            what the daemon believes, as JSON
 
 omarchy-shell omapager.panel toggle     the panel
 omarchy-shell omapager.panel expand x   open a source's held list, as clicking it would
+omarchy-shell omapager.panel openSettings  display, edge-spacing and sharing-offer settings
 ```
 
 ## Seeing it work
@@ -295,15 +406,22 @@ omarchy-shell omapager.panel expand x   open a source's held list, as clicking i
 bin/omapager-demo                       # the everyday scenes
 bin/omapager-demo --scene interactive   # codes, links, and the sender's buttons
 bin/omapager-demo --scene routing       # where a click sends you, per source
-bin/omapager-demo --scene reply         # inline reply, against a stand-in phone
+bin/omapager-demo --scene reply --keep --timeout 30000  # local inline-reply demo
 bin/omapager-demo --replay 40           # your own notifications, re-sent
 bin/omapager-demo --list
 ```
 
 `--scene routing` reads your open windows and prints what each card *should*
 do before it sends anything, so you can check it against what happens.
-`--scene reply` writes a fixture the daemon treats as a repliable notification
-and logs the reply to a file rather than sending it to a person.
+`--scene reply` creates an **Omapager reply demo** notification. Hover it, choose
+**Reply**, type and press Enter. No phone or special shell environment is needed;
+the reply is saved locally, never sent to a person.
+
+The synthetic session and latest reply are stored as `notification.json` and
+`reply.json` under `~/.local/state/omarchy/omapager/reply-demo/`. Only demo requests
+expose that directory to the helper sandbox; real notification state stays hidden.
+Each run replaces the session, and sessions expire after 30 minutes. Demo fixtures
+cannot stand in for another app, and an older session cannot accept a new reply.
 
 ## Requirements
 
@@ -314,8 +432,8 @@ Two more things are worth having, and they are not the same kind of thing.
 **`wl-clipboard` — recommended.** Not an Omarchy dependency, so check before you
 assume it: `command -v wl-copy`. The copy buttons work either way, but with it a
 copied verification code is marked sensitive and Omarchy's clipboard history
-skips it. Either way the code is cleared again 90 seconds later, unless you have
-copied something else since — that stays.
+skips it. The code is cleared after `clipboardTimeout` seconds (60 by default),
+unless you have copied something else since—that stays.
 
 **KDE Connect — the whole phone half.** Without it there are no phone
 notifications at all: it is the bridge that puts them on the bus in the first

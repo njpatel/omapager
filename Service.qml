@@ -14,6 +14,7 @@ import Quickshell.Io
 import Quickshell.Wayland
 import Quickshell.Hyprland
 import Quickshell.Services.Notifications
+import Quickshell.Services.Pipewire
 import qs.Commons
 
 import "Store.js" as Store
@@ -78,6 +79,33 @@ Item {
   // is dropped by default and can be put back.
   property bool hideSettingsAction: true
 
+  property string displayMode: "active"
+  property string displayName: ""
+  property string deckDisplayName: ""
+  readonly property var displayNames: Quickshell.screens.map(function(screen) { return screen.name })
+  readonly property string focusedDisplayName: {
+    var name = Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : ""
+    return displayNames.indexOf(name) >= 0 ? name : (displayNames[0] || "")
+  }
+  readonly property string configuredDisplayName: displayMode === "specific" && displayNames.indexOf(displayName) >= 0
+    ? displayName : focusedDisplayName
+  readonly property string targetDisplayName: {
+    if (displayMode === "specific" && displayNames.indexOf(displayName) >= 0) return configuredDisplayName
+    if (displayNames.indexOf(deckDisplayName) >= 0) return deckDisplayName
+    return focusedDisplayName
+  }
+  // A live deck stays put while focus moves. Losing that display moves it to
+  // a usable one; a configured specific display remains selected for replug.
+  onDisplayNamesChanged: {
+    if (deckDisplayName && displayNames.indexOf(deckDisplayName) < 0)
+      deckDisplayName = configuredDisplayName
+  }
+  onDisplayModeChanged: { if (toasts.count > 0) deckDisplayName = configuredDisplayName }
+  onDisplayNameChanged: { if (displayMode === "specific" && toasts.count > 0) deckDisplayName = configuredDisplayName }
+  function pinDeckDisplay() {
+    if (toasts.count === 0) deckDisplayName = configuredDisplayName
+  }
+
   // A verification code is the one thing quiet cannot afford to swallow: you
   // asked for it thirty seconds ago, it expires in five minutes, and no amount
   // of "I'll look later" applies. Codes are only ever detected from a keyword
@@ -99,6 +127,49 @@ Item {
     doNotDisturb = on
     saveQuiet()
   }
+
+  // The Hyprland portal names all its PipeWire video streams alike: monitor,
+  // window and region. Observe their lifetime, not compositor frame activity,
+  // which also includes screenshots and VNC and has no startup snapshot.
+  property bool offerSnoozeWhenSharing: true
+  readonly property var sharingCandidates: {
+    var nodes = Pipewire.nodes.values, out = []
+    for (var i = 0; i < nodes.length && out.length < 64; i++)
+      if (nodes[i].type === PwNodeType.VideoSource) out.push(nodes[i])
+    return out
+  }
+  PwObjectTracker { objects: service.sharingCandidates }
+  readonly property int sharingStreams: {
+    if (!Pipewire.ready) return 0
+    var count = 0
+    for (var i = 0; i < sharingCandidates.length; i++) {
+      var node = sharingCandidates[i]
+      if (!node.ready) continue
+      var props = node.properties
+      if (props["media.class"] === "Video/Source"
+          && String(props["media.name"] || "").indexOf("xdph-streaming-") === 0) count++
+    }
+    return count
+  }
+  readonly property bool sharingActive: sharingStreams > 0
+  property bool sharingOfferHandled: false
+  readonly property bool sharingOfferPending: offerSnoozeWhenSharing && sharingActive
+    && !sharingOfferHandled && !doNotDisturb && !globalSnoozeUntil
+  readonly property string sharingDetectionStatus: !offerSnoozeWhenSharing ? "Sharing offers are off"
+    : !Pipewire.ready ? "Sharing detection unavailable: PipeWire disconnected"
+    : sharingActive ? "Portal sharing detected; notifications stay on until you snooze"
+    : "Watching for Hyprland portal screen, window or area sharing"
+  onSharingActiveChanged: {
+    sharingOfferHandled = sharingActive && (doNotDisturb || globalSnoozeUntil > 0)
+  }
+  onDoNotDisturbChanged: { if (doNotDisturb && sharingActive) sharingOfferHandled = true }
+  onGlobalSnoozeUntilChanged: { if (globalSnoozeUntil > 0 && sharingActive) sharingOfferHandled = true }
+  function dismissSharingOffer() { if (sharingActive) sharingOfferHandled = true }
+  function snoozeSharingOffer(seconds) {
+    if (!sharingOfferPending || [1800, 3600, 14400].indexOf(seconds) < 0) return
+    sharingOfferHandled = true
+    snoozeSource(globalKey, "Everything", seconds, true)
+  }
   readonly property int gap: Style.space(6)
 
   // ------------------------------------------------------------- bar room
@@ -118,18 +189,14 @@ Item {
     if (size > 0) return size
     return barVertical ? Style.bar.sizeVertical : Style.bar.sizeHorizontal
   }
-  // How far the deck sits from the edges it hangs off. One number for both,
-  // because two of them is what you see: the cards were 6 under the bar and 14
-  // in from the screen edge, which reads as a mistake even when you cannot say
-  // which side is wrong.
-  readonly property int deckInset: Style.space(14)
+  readonly property int notificationWidth: Style.space(380)
+  property int edgeSpacing: 12
+  property bool showCountdown: false
 
-  // Where the surface is clipped, which is the bar's own edge - a card
-  // arriving is revealed as it comes out from under the bar rather than seen
-  // sliding across it. The inset is applied to the deck inside the clip, not
-  // here, or cards would pop into existence in the middle of the gap.
-  readonly property int barClearance: (barPosition === "top" ? barThickness : 0) + Style.gapsOut
-  readonly property int edgeClearance: (barPosition === "right" ? barThickness : 0) + deckInset
+  // Clear the bar only on the edge it occupies; keep the configured gap on
+  // both edges of the top-right notification deck.
+  readonly property int barClearance: (barPosition === "top" ? barThickness : 0) + edgeSpacing
+  readonly property int edgeClearance: (barPosition === "right" ? barThickness : 0) + edgeSpacing
 
   readonly property int lowDuration: 5000
   readonly property int normalDuration: 8000
@@ -449,7 +516,10 @@ Item {
   property var refs: ({})
   property int keySeed: 0
 
-  ListModel { id: toasts }
+  ListModel {
+    id: toasts
+    onCountChanged: { if (count === 0) service.deckDisplayName = "" }
+  }
 
   // ------------------------------------------------------ live capacity
   //
@@ -858,7 +928,7 @@ Item {
 
     // Silenced or snoozed still means recorded: "what did I miss" is the whole
     // point of a store. It goes straight to history without being on screen.
-    // Critical is never muted - that is what critical means.
+    // A sharing offer never changes delivery; only an explicit snooze does.
     var muted = doNotDisturb ? "silenced"
               : (globalSnoozeUntil || snoozedUntil(row.groupKey)) ? "snoozed" : ""
     if (muted && codesBypassQuiet && String(row.code || "")) muted = ""
@@ -956,6 +1026,7 @@ Item {
         Store.applyTo(toasts, at, row)      // an update, in place
         service.retarget(undefined, undefined, snap, deckNow)
       } else {
+        service.pinDeckDisplay()
         toasts.insert(0, row)
         // Where it comes from: under the bar, transparent. The layout has
         // already made room for it, so this is the only thing the arrival
@@ -1624,7 +1695,14 @@ Item {
         doNotDisturb: service.doNotDisturb, expanded: service.expanded,
         hasWlCopy: service.hasWlCopy, security: service.sandboxStatus,
         fetchRemoteIcons: service.fetchIcons,
-        allowDefaultActionOnCardClick: service.allowDefaultActionOnCardClick})
+        allowDefaultActionOnCardClick: service.allowDefaultActionOnCardClick,
+        sharingActive: service.sharingActive, sharingStreams: service.sharingStreams,
+        sharingOfferPending: service.sharingOfferPending, offerSnoozeWhenSharing: service.offerSnoozeWhenSharing,
+        globalSnoozeUntil: service.globalSnoozeUntil,
+        displayMode: service.displayMode, displayName: service.displayName,
+        displays: service.displayNames, focusedDisplay: service.focusedDisplayName,
+        targetDisplay: service.targetDisplayName,
+        notificationDisplays: service.displayMode === "all" ? service.displayNames : [service.targetDisplayName]})
     }
     function clear(): string { service.clearAll("cleared"); return "ok" }
     function dnd(): string {
@@ -1848,10 +1926,9 @@ Item {
 
   // ------------------------------------------------------------- surface
   //
-  // One full-screen layer per output. Full-screen and fixed: a surface that
-  // resizes as cards come and go lets the compositor scale a stale buffer,
-  // which is visible as the cards briefly stretching. The mask keeps every
-  // pixel outside the deck click-through.
+  // One fixed-width layer per output. Keeping the surface height fixed avoids
+  // compositor rescaling while cards enter or leave; the mask keeps everything
+  // outside the deck click-through.
   Variants {
     model: Quickshell.screens
 
@@ -1859,6 +1936,7 @@ Item {
       id: surface
       required property var modelData
       screen: modelData
+      readonly property bool showingNotifications: service.displayMode === "all" || modelData.name === service.targetDisplayName
       // Always mapped, even with nothing to draw. It used to appear with the
       // first notification and vanish with the last, and a layer surface
       // coming and going makes the compositor re-evaluate focus each time -
@@ -1869,24 +1947,6 @@ Item {
       //
       // Input is unaffected: the mask follows the deck, and an empty deck is a
       // zero-area mask, which is click-through everywhere.
-      // Always mapped, even with nothing to draw. It used to appear with the
-      // first notification and vanish with the last, and a layer surface
-      // coming and going makes the compositor re-evaluate its layer set each
-      // time - which on a scrolling layout drags the viewport somewhere else
-      // the moment you dismiss the last card. The surface is the canvas; the
-      // deck is what gets painted on it.
-      //
-      // Input is unaffected: the mask follows the deck, and an empty deck is a
-      // zero-area mask, which is click-through everywhere.
-      // Always mapped, even with nothing to draw. It used to appear with the
-      // first notification and vanish with the last, and a layer surface
-      // coming and going makes the compositor re-evaluate its layer set each
-      // time - which on a scrolling layout drags the viewport somewhere else
-      // the moment you dismiss the last card. The surface is the canvas; the
-      // deck is what gets painted on it.
-      //
-      // Input is unaffected: the mask follows the deck, so an empty deck is a
-      // zero-area mask and the whole surface is click-through.
       visible: true
       color: "transparent"
 
@@ -1900,14 +1960,14 @@ Item {
       // notification layer holding the keyboard the rest of the time would
       // swallow every keystroke on the desktop, so this is tightly bounded:
       // Escape closes it, so does answering, and so does the timeout below.
-      WlrLayershell.keyboardFocus: service.replyingKey !== ""
+      WlrLayershell.keyboardFocus: surface.showingNotifications && service.replyingKey !== ""
                                    ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
       exclusionMode: ExclusionMode.Ignore
 
       // As wide as the deck needs and no wider. Full-screen was the obvious
       // shape - the deck can sit anywhere in it - but it meant Qt re-rendering
       // a 5120x2880 surface for every frame of every arrival, for a stack
-      // 340pt across. The width is a constant, so the buffer is allocated once
+      // 380px across. The width is a constant, so the buffer is allocated once
       // and never resized under an animation; the height stays full so the
       // deck can grow downwards without the window changing size either.
       anchors { top: true; bottom: true; right: true }
@@ -1916,39 +1976,30 @@ Item {
       // Only the deck takes input; the rest of the surface stays
       // click-through. Tracking the item keeps the region honest as the deck
       // grows and shrinks.
-      mask: Region { item: deck }
+      mask: Region { item: surface.showingNotifications ? deck : null }
 
-      // The notification area proper: it begins at the bar's lower edge and is
-      // clipped there, so a card arriving from above is revealed as it comes
-      // down rather than being seen sliding across the panel. The extra height
-      // is room for the bottom card's shadow, which clipping would otherwise
-      // cut off square.
+      // Cards enter from behind the bar. Reserve only enough side/bottom room
+      // for their scale animation; native notification surfaces have no custom
+      // drop shadows to accommodate.
       Item {
         id: clipper
+        visible: surface.showingNotifications
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.topMargin: service.barClearance
         anchors.rightMargin: 0
-        // Room for the shadow on both sides. The clip is here to hide a card
-        // dropping in from behind the bar, which is a vertical concern only -
-        // but an item that clips and is exactly as wide as the card cuts the
-        // shadow off flat down both edges. So the clipper is wider than the
-        // card and the deck sits inset within it: left by a comfortable
-        // margin, right by however much room there is between the card and the
-        // screen edge, which is all a shadow can have there anyway.
-        readonly property int shadowRoom: Style.space(30)
+        readonly property int motionInset: Style.spacing.sm
         // In from the screen's right edge - plus the bar's width, if the bar
         // is the thing occupying that edge.
         readonly property int edgeGap: service.edgeClearance
-        width: Style.space(340) + shadowRoom + edgeGap
-        height: deck.y + deck.height + Style.space(30)
+        width: service.notificationWidth + motionInset + edgeGap
+        height: deck.y + deck.height + motionInset
         clip: true
 
         Item {
           id: deck
-          y: service.deckInset
-        x: clipper.shadowRoom
-        width: Style.space(340)
+        x: clipper.motionInset
+        width: service.notificationWidth
         // From the same clock as everything on it, so the clip and its
         // contents can never disagree mid-move.
         height: service.deckHeight
@@ -2044,6 +2095,7 @@ Item {
             hovered: service.hoverKey === model.key
             actions: service.actionsOf(model.key, service.refsRevision)
             fontScale: service.fontScale
+            showCountdown: service.showCountdown
             actionsAlign: service.actionsAlign
             replyError: service.replyingKey === model.key ? service.replyError : ""
             replying: service.replyingKey === model.key
@@ -2074,8 +2126,10 @@ Item {
             // The target height, not the drawn one: a step function of the
             // card's state, so the layout moves on events rather than frames.
             drawnHeight: service.at(model.key, "height")
-            onTargetHeightChanged: service.noteHeight(model.key, targetHeight)
-            Component.onCompleted: service.noteHeight(model.key, targetHeight)
+            // Hidden outputs collapse effective child visibility. Their text
+            // measurements must not overwrite the visible deck's height.
+            onTargetHeightChanged: if (surface.showingNotifications) service.noteHeight(model.key, targetHeight)
+            Component.onCompleted: if (surface.showingNotifications) service.noteHeight(model.key, targetHeight)
 
             onExpired: service.closeToast(model.key, "expired")
             onActivated: service.activate(model.key)

@@ -18,7 +18,7 @@
   },
   "barWidget": {
     "displayName": "Notification state",
-    "description": "Appears only when notifications are being held back: crossed-out bell when silenced, zzz when a source is snoozed. Click silences, right-click opens a panel to wake sources or snooze them for longer.",
+    "description": "Appears when notifications are being held back or a detected share is waiting for a snooze decision. Click the sharing indicator to choose a timed snooze; notification delivery is never changed automatically.",
     "category": "Status",
     "aliases": [
       "notifications",
@@ -46,6 +46,11 @@
       "codesBypassQuiet": true,
       "timeFormat": "system",
       "smartRaise": true,
+      "displayMode": "active",
+      "displayName": "",
+      "edgeSpacing": 12,
+      "showCountdown": false,
+      "offerSnoozeWhenSharing": true,
       "fetchRemoteIcons": false,
       "allowDefaultActionOnCardClick": false,
       "historyHours": 24,
@@ -74,6 +79,23 @@
         ],
         "defaultValue": "right",
         "description": "Which end of a card its action buttons sit at."
+      },
+      {
+        "key": "edgeSpacing",
+        "type": "integer",
+        "label": "Edge spacing (px)",
+        "description": "Distance from the bar and screen edges for notifications and the notification panel, in logical pixels.",
+        "min": 0,
+        "max": 64,
+        "step": 1,
+        "defaultValue": 12
+      },
+      {
+        "key": "showCountdown",
+        "type": "boolean",
+        "label": "Show countdown animation",
+        "description": "Animate the time remaining along the bottom of notifications. Notifications still expire normally when this is off.",
+        "defaultValue": false
       },
       {
         "key": "fontScale",
@@ -208,6 +230,32 @@
         "label": "Raise the window a site is open in",
         "description": "Match a notification's site against browser window titles, so a Slack notification lands in the browser already showing Slack rather than opening a new tab. Off, only a window whose class carries the site is raised.",
         "defaultValue": true
+      },
+      {
+        "key": "displayMode",
+        "type": "enum",
+        "label": "Notification display",
+        "options": [
+          "active",
+          "specific",
+          "all"
+        ],
+        "defaultValue": "active",
+        "description": "active = the Hyprland focused monitor; specific = the output named below, falling back to the focused monitor while it is absent; all = every monitor."
+      },
+      {
+        "key": "displayName",
+        "type": "string",
+        "label": "Specific monitor output name",
+        "defaultValue": "",
+        "description": "Stable output name used by specific display mode. The in-panel picker fills this from Quickshell's current screens and keeps the name if that output is disconnected."
+      },
+      {
+        "key": "offerSnoozeWhenSharing",
+        "type": "boolean",
+        "label": "Offer to snooze when sharing starts",
+        "defaultValue": true,
+        "description": "Detect screen, window, and area portal sharing sessions and offer a timed snooze. Notification delivery is not automatically muted."
       },
       {
         "key": "fetchRemoteIcons",

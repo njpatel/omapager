@@ -90,6 +90,7 @@ function extract(src, startMarker, endMarker) {
   return src.slice(s, e);
 }
 const capacitySource = [
+  extract(source, 'function pinDeckDisplay()', '\n  // A verification code'),
   extract(source, 'function rememberRecent(row)', '// ------------------------------------------------------- what was held'),
   extract(source, 'function durationFor(urgency, requested)', '// ------------------------------------------------------------- snooze'),
   extract(source, 'function liveCount()', '// ------------------------------------------------------------- icons'),
@@ -116,6 +117,7 @@ function newCapacityScope() {
     maxLiveNotifications: 100, heights: {}, leaving: {}, layoutRevision: 0,
     replyingKey: '', held: [], doNotDisturb: false, globalSnoozeUntil: 0,
     recentRows: [], recentLimit: 20,
+    configuredDisplayName: 'fixture-display', deckDisplayName: '',
     snoozeRevision: 0, snoozes: {},
     codesBypassQuiet: false, hideSettingsAction: false,
     lowDuration: 5000, normalDuration: 8000, maxDuration: 30000,

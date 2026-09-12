@@ -288,10 +288,12 @@ half of the feature set has no input, not a degraded one.
 
 Run `tests/font-layout.sh` on an Omarchy installation. It renders the actual
 Toast and DeedButton components offscreen without starting a notification
-daemon. Three explicit typography profiles (12px monospace, 14px monospace and
-12px proportional) each run 77 cases, including:
+daemon. Three explicit control-typography profiles (12px monospace, 14px monospace
+and 12px proportional) each run 78 cases; card content retains the stock
+notification font. Cases include:
 
 - Every 5% font-scale step from 75–200%, with both action alignments.
+- Hiding and showing a card without changing its measured content height.
 - Opening More, checking labels and buttons against every clipping ancestor,
   and activating Reply or a wrapped action.
 - Long labels, unbroken strings, RTL text and literal markup; changing font
@@ -302,3 +304,32 @@ daemon. Three explicit typography profiles (12px monospace, 14px monospace and
 The long-label cases reach the expanded list, not just the More-only row.
 Set `OMARCHY_SHELL_DIR` if the shell is installed somewhere other than
 `/usr/share/omarchy/shell`.
+
+## Native UI integration
+
+Use the installed `qs.Ui` kit rather than copying first-party component code.
+`Toast` composes `BorderSurface`, `PanelActionButton`, `Button` and `TextField`;
+the panel uses the real `PanelHero`, `CursorSurface`, `Dropdown` and
+`ToggleSwitch`. Card borders come from `Border.surfaceSpec("notifications", ...)`,
+including gradient and per-side widths. Content geometry includes those insets.
+The canvas follows the stock 380px notification width and `Style.gapsOut`.
+
+The stock card's headline/body use Liberation Sans at `Style.font.title`;
+controls, glyphs and metadata follow `Style.font.family`. Theme roles determine
+colours, padding and corners. Do not reintroduce minimum rounding, hand-tinted
+control states or extra card shadows.
+
+Intentional differences are the deck/grouping behavior, sender fallback mark,
+bounded 2→8-line body disclosure, action marks, More overflow, expiry indicator
+and inline reply. Critical headlines use `Color.urgent` so non-expiring alerts
+retain a visible urgency cue without overriding the theme's border spec.
+`DeedButton` still adapts the native Button's label measurement because the
+shared component has no wrapping-label API; keep its full-width action labels
+readable at large font sizes. Replies reserve space for Send on the detected
+LTR/RTL trailing edge. No reply delivery is implied by a component-only UI test.
+
+Card measurement must use content state (`hasBody`), not effective Item.visible:
+an inactive output makes child visibility false even when the row has a body.
+Only the selected notification surfaces report measurements to the shared deck.
+The visibility regression fails if hiding a card shrinks the visible card's
+measured content height.
