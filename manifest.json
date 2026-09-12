@@ -18,7 +18,7 @@
   },
   "barWidget": {
     "displayName": "Notification state",
-    "description": "Appears only when notifications are being held back: crossed-out bell when silenced, zzz when a source is snoozed. Click silences, right-click opens a panel to wake sources or snooze them for longer.",
+    "description": "Appears when notifications are being held back or a detected share is waiting for a snooze decision. Click the sharing indicator to choose a timed snooze; notification delivery is never changed automatically.",
     "category": "Status",
     "aliases": [
       "notifications",
@@ -47,7 +47,7 @@
       "smartRaise": true,
       "displayMode": "active",
       "displayName": "",
-      "pauseWhileScreenSharing": true
+      "offerSnoozeWhenSharing": true
     },
     "schema": [
       {
@@ -206,11 +206,11 @@
         "description": "Stable output name used by specific display mode. The in-panel picker fills this from Quickshell's current screens and keeps the name if that output is disconnected."
       },
       {
-        "key": "pauseWhileScreenSharing",
+        "key": "offerSnoozeWhenSharing",
         "type": "boolean",
-        "label": "Pause notifications while sharing a screen",
+        "label": "Offer to snooze when sharing starts",
         "defaultValue": true,
-        "description": "Automatically hold notifications while the sharing detector reports an active capture. This remains separate from snooze and Do Not Disturb."
+        "description": "Detect screen, window, and area portal sharing sessions and offer a timed snooze. Notification delivery is not automatically muted."
       }
     ]
   }

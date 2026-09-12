@@ -1,11 +1,12 @@
 // The bar indicator, and the panel behind it.
 //
-// Nothing held back, nothing on the bar. omapager takes a slot only when it is
-// keeping something from you - the desktop is silenced, everything is snoozed,
-// or one source is - which is Omarchy's own convention for status icons: they
-// appear when there is a state to report and are otherwise revealed by
-// hovering the centre of the bar. A bell that is always there, always showing
-// zero, is a permanent reminder of nothing.
+// Nothing held back, no sharing offer, nothing on the bar. omapager takes a
+// slot when it is keeping something from you - the desktop is silenced,
+// everything is snoozed, or one source is - and while a detected share is
+// waiting for a snooze decision. Otherwise it follows Omarchy's convention
+// for inactive status icons and appears only while the bar centre is revealed.
+// A bell that is always there, always showing zero, is a permanent reminder of
+// nothing.
 //
 // The states worth a glyph are the ones you cannot discover any other way, and
 // the ones you can forget you are in. What is on screen needs no icon: it is
@@ -26,8 +27,8 @@ BarWidget {
   // than breaking the bar.
   readonly property var service: bar && bar.shell ? bar.shell.serviceFor("njpatel.omapager") : null
   readonly property bool silenced: service ? service.doNotDisturb : false
-  readonly property bool screenSnoozed: service ? service.screenSnoozed : false
-  onScreenSnoozedChanged: { if (screenSnoozed && !settingsView) controller.hide() }
+  readonly property bool sharingActive: service ? service.sharingActive : false
+  readonly property bool sharingOfferPending: service ? service.sharingOfferPending : false
 
   // liveSnoozes() reads a plain map, which nothing re-evaluates on its own, so
   // the service bumps a revision whenever that map moves. This is what every
@@ -46,7 +47,7 @@ BarWidget {
 
   // Quiet by decision, as opposed to quiet because nothing happened.
   readonly property bool codesLetThrough: service ? service.codesBypassQuiet : true
-  readonly property bool quiet: silenced || globalSnoozed || screenSnoozed
+  readonly property bool quiet: silenced || globalSnoozed
   readonly property bool hasState: quiet || snoozed.length > 0
 
   // Shown when there is something to say, while the panel is open, and on the
@@ -58,7 +59,7 @@ BarWidget {
   // because a widget that was not there is now taking a slot; holding the slot
   // open costs a permanently dim bell and buys a clock that never moves.
   readonly property bool alwaysShow: setting("alwaysShow", false) === true
-  readonly property bool revealed: hasState || opened || alwaysShow
+  readonly property bool revealed: hasState || sharingOfferPending || opened || alwaysShow
     || (bar && bar.centerSectionRevealHeld === true && bar.centerHoverRevealSuppressed !== true)
 
   readonly property string configuredDisplayMode: {
@@ -66,7 +67,7 @@ BarWidget {
     return mode === "specific" || mode === "all" ? mode : "active"
   }
   readonly property string configuredDisplayName: String(setting("displayName", "") || "")
-  readonly property bool configuredPauseWhileScreenSharing: setting("pauseWhileScreenSharing", true) !== false
+  readonly property bool configuredOfferSnoozeWhenSharing: setting("offerSnoozeWhenSharing", true) !== false
   readonly property var availableScreens: Quickshell.screens || []
   readonly property bool configuredDisplayPresent: {
     if (configuredDisplayName === "") return false
@@ -76,7 +77,7 @@ BarWidget {
     return false
   }
   readonly property string sharingDetectionStatus: service && service.sharingDetectionStatus
-    ? String(service.sharingDetectionStatus) : "Checking screen sharing"
+    ? String(service.sharingDetectionStatus) : "Watching for Hyprland portal screen, window or area sharing"
 
   function persistSettings(values) {
     var entry = { id: pager.moduleName }
@@ -103,8 +104,8 @@ BarWidget {
       persistSettings({ displayMode: "specific", displayName: next })
   }
 
-  function toggleSharingPauseSetting() {
-    persistSettings({ pauseWhileScreenSharing: !configuredPauseWhileScreenSharing })
+  function toggleSharingOfferSetting() {
+    persistSettings({ offerSnoozeWhenSharing: !configuredOfferSnoozeWhenSharing })
   }
 
   // ------------------------------------------------------------- settings
@@ -139,7 +140,7 @@ BarWidget {
     // not pass through a transient specific-without-a-name state.
     service.displayName = configuredDisplayName
     service.displayMode = configuredDisplayMode
-    service.pauseWhileScreenSharing = configuredPauseWhileScreenSharing
+    service.offerSnoozeWhenSharing = configuredOfferSnoozeWhenSharing
   }
 
   // Derived settings bindings may still hold the previous entry in the
@@ -188,6 +189,10 @@ BarWidget {
   readonly property string bellOff: "\u{f009b}"
   readonly property string bellSleep: "\u{f00a0}"
   readonly property string bell: "\u{f009a}"
+
+  // nf-md-monitor-share: an offer prompted by an active portal share, not a
+  // quiet state. It must not look like the snoozed bell beside it.
+  readonly property string sharingGlyph: "\u{f1483}"
 
   // Collapsed to nothing when there is nothing to report: an empty slot in the
   // bar is still a gap in the bar. Never animated, and every state is exactly
@@ -246,7 +251,7 @@ BarWidget {
   // to look at something rather than change it, which is what a right-click
   // means everywhere else.
   function pressed(buttonCode) {
-    if (buttonCode === Qt.RightButton || screenSnoozed) togglePanel()
+    if (buttonCode === Qt.RightButton) togglePanel()
     else if (quiet) letEverythingThrough()
     else toggleSilence()
   }
@@ -351,10 +356,9 @@ BarWidget {
   // was say it a second time and squeeze the title down to "Notificati...".
   // A snooze has an end, and the end is the whole story, so it says so and does
   // not rotate. The phrases are for the states with nothing more useful to say.
-  readonly property bool rotatingPhrases: opened && !globalSnoozed && !screenSnoozed
+  readonly property bool rotatingPhrases: opened && !globalSnoozed
 
   readonly property string stateLine: {
-    if (screenSnoozed) return "Sharing screen - held"
     if (globalSnoozed) return wakingAt(globalUntil)
     if (rotatingPhrases) return phrases[phraseIndex % phrases.length]
     if (silenced) return "Silenced"
@@ -368,7 +372,7 @@ BarWidget {
   // something being wrong rather than as something being chosen - the red
   // crossed bell and the switch already say silenced. Otherwise the hero's own
   // dim: darker(1.4), which is PanelHero's, not the 1.55 the body uses.
-  readonly property color stateColour: globalSnoozed || screenSnoozed ? snoozedColour
+  readonly property color stateColour: globalSnoozed ? snoozedColour
                                                      : Qt.darker(panelFg, 1.4)
 
   Timer {
@@ -440,11 +444,12 @@ BarWidget {
                               view: pager.settingsView ? "settings" : "notifications",
                               settingsView: pager.settingsView,
                               silenced: pager.silenced, globalSnoozed: pager.globalSnoozed,
-                              screenSnoozed: pager.screenSnoozed,
+                              sharingActive: pager.sharingActive,
+                              sharingOfferPending: pager.sharingOfferPending,
                               sharingDetectionStatus: pager.sharingDetectionStatus,
                               settings: { displayMode: pager.configuredDisplayMode,
                                           displayName: pager.configuredDisplayName,
-                                          pauseWhileScreenSharing: pager.configuredPauseWhileScreenSharing },
+                                          offerSnoozeWhenSharing: pager.configuredOfferSnoozeWhenSharing },
                               displayPresent: pager.configuredDisplayPresent,
                               sources: held, expanded: pager.expandedKey,
                               cardX: panel.cardOrigin.x, cardY: panel.cardOrigin.y,
@@ -459,18 +464,25 @@ BarWidget {
     spacing: 0
 
     Indicator {
-      visible: pager.silenced && !pager.screenSnoozed
+      visible: pager.sharingOfferPending
+      text: pager.sharingGlyph
+      colour: pager.snoozedColour
+      openPanelOnly: true
+      tooltipText: "Sharing detected - click to snooze"
+    }
+
+    Indicator {
+      visible: !pager.sharingOfferPending && pager.silenced
       text: pager.bellOff
       colour: pager.silencedColour
       tooltipText: "Notifications silenced - click to allow them, right-click for options"
     }
 
     Indicator {
-      visible: pager.screenSnoozed || (!pager.silenced && (pager.globalSnoozed || pager.snoozed.length > 0))
+      visible: !pager.sharingOfferPending && !pager.silenced && (pager.globalSnoozed || pager.snoozed.length > 0)
       text: pager.bellSleep
       colour: pager.snoozedColour
-      tooltipText: pager.screenSnoozed ? "Screen sharing - notifications held until capture stops"
-                   : pager.globalSnoozed
+      tooltipText: pager.globalSnoozed
                    ? ("Everything snoozed, back " + pager.waking(pager.globalUntil)
                       + " - right-click for options")
                    : ((pager.snoozed.length === 1
@@ -483,7 +495,7 @@ BarWidget {
     // indicators are being revealed. Same glyph and same dimming as Omarchy's
     // own, so it sits in that row without announcing itself.
     Indicator {
-      visible: !pager.hasState
+      visible: !pager.hasState && !pager.sharingOfferPending
       text: pager.bellOff
       colour: pager.bar ? pager.bar.barForeground : Color.foreground
       quiet: true
@@ -493,6 +505,7 @@ BarWidget {
 
   component Indicator: BarIconButton {
     property bool quiet: false
+    property bool openPanelOnly: false
     property color colour: pager.panelFg
     bar: pager.bar
     foreground: colour
@@ -509,7 +522,10 @@ BarWidget {
     fixedHeight: pager.vertical ? Style.bar.statusSlot : -1
     useActiveColor: false
     dimmed: quiet
-    onPressed: function(buttonCode) { pager.pressed(buttonCode) }
+    onPressed: function(buttonCode) {
+      if (openPanelOnly) pager.open()
+      else pager.pressed(buttonCode)
+    }
   }
 
   // ------------------------------------------------------------- the panel
@@ -634,7 +650,7 @@ BarWidget {
                 Text {
                   width: parent.width
                   textFormat: Text.PlainText
-                  text: "Where alerts appear and when they pause"
+                  text: "Where alerts appear and sharing offers"
                   color: pager.dim
                   font.family: pager.fontFamily
                   font.pixelSize: Style.font.caption
@@ -722,19 +738,19 @@ BarWidget {
             PanelSeparator { foreground: pager.panelFg }
 
             BorderSurface {
-              id: sharingPauseRow
+              id: sharingOfferRow
               width: parent.width
-              implicitHeight: Math.max(sharingPauseLabels.implicitHeight + Style.space(12), sharingPauseSwitch.implicitHeight)
-              color: sharingPauseMouse.containsMouse
+              implicitHeight: Math.max(sharingOfferLabels.implicitHeight + Style.space(12), sharingOfferSwitch.implicitHeight)
+              color: sharingOfferMouse.containsMouse
                 ? Style.hoverFillFor(pager.panelFg, Color.accent) : "transparent"
               borderSpec: Border.controlSpec("normal", pager.panelFg, Color.accent)
               radius: Style.cornerRadius
 
               Column {
-                id: sharingPauseLabels
+                id: sharingOfferLabels
                 anchors.left: parent.left
                 anchors.leftMargin: Style.space(8)
-                anchors.right: sharingPauseSwitch.left
+                anchors.right: sharingOfferSwitch.left
                 anchors.rightMargin: Style.space(8)
                 anchors.verticalCenter: parent.verticalCenter
                 spacing: Style.space(2)
@@ -742,7 +758,7 @@ BarWidget {
                 Text {
                   width: parent.width
                   textFormat: Text.PlainText
-                  text: "Pause while sharing a screen"
+                  text: "Offer to snooze when sharing starts"
                   color: pager.panelFg
                   font.family: pager.fontFamily
                   font.pixelSize: Style.font.bodySmall
@@ -762,28 +778,28 @@ BarWidget {
               }
 
               ToggleSwitch {
-                id: sharingPauseSwitch
+                id: sharingOfferSwitch
                 anchors.right: parent.right
                 anchors.rightMargin: Style.space(3)
                 anchors.verticalCenter: parent.verticalCenter
-                checked: pager.configuredPauseWhileScreenSharing
+                checked: pager.configuredOfferSnoozeWhenSharing
                 interactive: false
                 foreground: pager.panelFg
               }
 
               MouseArea {
-                id: sharingPauseMouse
+                id: sharingOfferMouse
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                onClicked: pager.toggleSharingPauseSetting()
+                onClicked: pager.toggleSharingOfferSetting()
               }
             }
 
             Text {
               width: parent.width
               textFormat: Text.PlainText
-              text: "This automatic pause does not change snooze or Do Not Disturb."
+              text: "Detects screen, window, and area portal sessions. Notification delivery is not automatically muted."
               color: pager.dim
               font.family: pager.fontFamily
               font.pixelSize: Style.font.caption
@@ -813,10 +829,10 @@ BarWidget {
 
                 Text {
                   anchors.centerIn: parent
-                  text: pager.screenSnoozed ? pager.bellSleep : pager.silenced ? pager.bellOff
+                  text: pager.silenced ? pager.bellOff
                       : (pager.globalSnoozed || pager.snoozed.length > 0) ? pager.bellSleep
                       : pager.bell
-                  color: pager.screenSnoozed ? pager.snoozedColour : pager.silenced ? pager.silencedColour
+                  color: pager.silenced ? pager.silencedColour
                        : (pager.globalSnoozed || pager.snoozed.length > 0) ? pager.snoozedColour
                        : pager.panelFg
                   font.family: pager.fontFamily
@@ -844,7 +860,7 @@ BarWidget {
                 // A key on a desktop where everything is coming through anyway
                 // is a control for nothing.
                 PanelActionButton {
-                  visible: !pager.screenSnoozed && (pager.hasState || pager.globalChoosing)
+                  visible: pager.hasState || pager.globalChoosing
                   anchors.verticalCenter: parent.verticalCenter
                   iconText: pager.codesLetThrough ? pager.keyGlyph : pager.keyOff
                   tooltipText: pager.codesLetThrough
@@ -858,7 +874,6 @@ BarWidget {
                 }
 
                 PanelActionButton {
-                  enabled: !pager.screenSnoozed
                   anchors.verticalCenter: parent.verticalCenter
                   iconText: pager.globalSnoozed ? pager.bell : pager.bellSleep
                   tooltipText: pager.globalSnoozed ? "Let everything through now"
@@ -872,7 +887,6 @@ BarWidget {
                 }
 
                 ToggleSwitch {
-                  enabled: !pager.screenSnoozed
                   anchors.verticalCenter: parent.verticalCenter
                   // On means notifications are coming through, which is the
                   // way round anyone reads a switch on a thing called
@@ -889,6 +903,85 @@ BarWidget {
                   foreground: pager.panelFg
                   fontFamily: pager.fontFamily
                   onClicked: pager.settingsView = true
+                }
+              }
+            }
+          }
+
+          BorderSurface {
+            visible: !pager.settingsView && pager.sharingOfferPending
+            width: parent.width
+            implicitHeight: sharingOfferContent.implicitHeight + Style.space(16)
+            color: "transparent"
+            borderSpec: Border.controlSpec("normal", pager.panelFg, Color.accent)
+            radius: Style.cornerRadius
+
+            Column {
+              id: sharingOfferContent
+              anchors.fill: parent
+              anchors.margins: Style.space(8)
+              spacing: Style.space(5)
+
+              Text {
+                width: parent.width
+                text: "Sharing detected"
+                textFormat: Text.PlainText
+                color: pager.panelFg
+                font.family: pager.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                font.bold: true
+              }
+
+              Text {
+                width: parent.width
+                text: "Snooze notifications?"
+                textFormat: Text.PlainText
+                color: pager.dim
+                font.family: pager.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+
+              Row {
+                spacing: Style.space(5)
+
+                Button {
+                  text: "30 min"
+                  bordered: true
+                  foreground: pager.panelFg
+                  fontFamily: pager.fontFamily
+                  fontSize: Style.font.caption
+                  verticalPadding: 1
+                  onClicked: { if (pager.service) pager.service.snoozeSharingOffer(1800) }
+                }
+
+                Button {
+                  text: "1 hour"
+                  bordered: true
+                  foreground: pager.panelFg
+                  fontFamily: pager.fontFamily
+                  fontSize: Style.font.caption
+                  verticalPadding: 1
+                  onClicked: { if (pager.service) pager.service.snoozeSharingOffer(3600) }
+                }
+
+                Button {
+                  text: "4 hours"
+                  bordered: true
+                  foreground: pager.panelFg
+                  fontFamily: pager.fontFamily
+                  fontSize: Style.font.caption
+                  verticalPadding: 1
+                  onClicked: { if (pager.service) pager.service.snoozeSharingOffer(14400) }
+                }
+
+                Button {
+                  text: "Not now"
+                  bordered: true
+                  foreground: pager.panelFg
+                  fontFamily: pager.fontFamily
+                  fontSize: Style.font.caption
+                  verticalPadding: 1
+                  onClicked: { if (pager.service) pager.service.dismissSharingOffer() }
                 }
               }
             }
@@ -1171,7 +1264,7 @@ BarWidget {
           }
 
           Button {
-            visible: !pager.settingsView && !pager.screenSnoozed && (pager.quiet || pager.snoozed.length > 1)
+            visible: !pager.settingsView && (pager.quiet || pager.snoozed.length > 1)
             width: parent.width
             text: "Let everything through"
             bordered: true
