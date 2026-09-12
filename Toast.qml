@@ -579,12 +579,16 @@ Item {
                 Behavior on opacity { NumberAnimation { duration: card.fade } }
               }
 
-              PanelActionButton {
+              Button {
                 id: shut
                 anchors.centerIn: parent
-                iconText: "\u2715"
+                text: "\u2715"
+                tooltipText: "Dismiss notification"
+                bordered: true
+                horizontalPadding: Style.space(4)
+                verticalPadding: Style.space(2)
+                implicitWidth: implicitHeight
                 foreground: Color.notifications.text
-                hoverColor: Color.notifications.text
                 fontFamily: Style.font.family
                 fontSize: Style.font.caption * card.fontScale
                 // The deck owns pointer hover; mirror its coordinates into the

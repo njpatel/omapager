@@ -170,6 +170,13 @@ icons for good.
 
 ## Settings
 
+Omapager's behavior options live in its bar-widget entry in
+`~/.config/omarchy/shell.json`. Appearance also comes from Omarchy's shared theme
+and desktop settings; those are described separately under
+[Appearance inherited from Omarchy](#appearance-inherited-from-omarchy).
+
+### Omapager options
+
 Open the notification panel and click the cog for preferences. In the native
 **Show notifications on** dropdown, **Active display** places a fresh deck on
 Hyprland's focused monitor. A visible deck stays put when focus moves.
@@ -178,7 +185,7 @@ retained, with a connected-display fallback until the output returns.
 **All displays** shows the same deck everywhere. Dismissal and snoozing remain shared.
 
 The dropdown, number field, switch, header and separator reuse Omarchy's UI
-components. Fonts, internal spacing, borders and switch rounding follow the theme.
+components rather than defining a separate control style.
 Use arrows or `j`/`k` in the dropdown, Enter to choose and Escape to close the menu.
 
 **Edge spacing (px)** sets the distance from the bar and screen edges for both
@@ -191,8 +198,11 @@ and the spacing between cards are unchanged.
 time-remaining line along the bottom of notifications. This changes only the
 visual timer; notifications still expire normally when it is disabled.
 
-The preferences and configuration use the same bar-widget entry; changes made
-in the view persist across shell restarts. No separate settings file is created.
+The in-panel preferences expose display selection, edge spacing, countdown
+animation and sharing offers. They save to the same bar-widget entry and persist
+across shell restarts. The other options below can be set on that entry too;
+there is no second user configuration file to maintain. Defaults are for a fresh
+configuration, not a reset of choices you have already saved.
 
 | key | default | what it does |
 | --- | --- | --- |
@@ -203,34 +213,86 @@ in the view persist across shell restarts. No separate settings file is created.
 | `showCountdown` | `false` | opt in to the animated time-remaining line; does not change notification expiry |
 | `offerSnoozeWhenSharing` | `true` | offer a timed snooze when a Hyprland portal sharing session is detected; never mute automatically |
 | `fontScale` | `100` | notification font size as a percentage of the theme (75–200); scales card text, actions and inline replies, leaving the bar and panel unchanged |
-| `actionsAlign` | `right` | which end of a card its buttons sit at |
-| `hideSettingsAction` | `true` | drop the browser's "Settings" button, which is on every web notification and is never the one you wanted |
-| `snoozeDurations` | `30, 60, 240, tomorrow` | what the snooze menus offer — minutes, or `tomorrow` |
-| `wakeHour` | `8` | the hour "until tomorrow" wakes a source at |
+| `actionsAlign` | `right` | `right` or `left` alignment for the card's action buttons |
+| `hideSettingsAction` | `true` | hide the browser's repeated Settings action on notification cards |
+| `snoozeDurations` | `30, 60, 240, tomorrow` | offered snooze lengths: `15`, `30`, `60`, `120`, `240`, `480` minutes or `tomorrow`; an empty selection uses the defaults |
+| `wakeHour` | `8` | wake hour for `tomorrow`, on a 24-hour clock (0–23); currently `0` falls back to `8` |
 | `smartRaise` | `true` | match a site against browser window titles, so a click lands in the window already showing it |
 | `alwaysShow` | `false` | keep the bar slot even when nothing is held back, so the centre of the bar never shifts |
 | `codesBypassQuiet` | `true` | let a notification carrying a verification code through a snooze or a silence |
 | `timeFormat` | `system` | `system` follows `LC_TIME`; `24h` and `12h` pin it |
-| `sourceLimit` | `8` | how many quietened sources the panel lists |
-| `heldPerSource` | `10` | how many held notifications it shows per source |
+| `sourceLimit` | `8` | number of quietened sources listed in the panel; settings range 2–20 |
+| `heldPerSource` | `10` | held notifications shown per source; settings range 3–25 |
 | `recentCount` | `5` | recent notifications shown in the panel (1–20), including when notifications are enabled; resets on shell restart |
+| `fetchRemoteIcons` | `false` | opt in to website-icon requests; reveals your IP and approximate notification time to the source website, and requires Bubblewrap and Pillow; local/cached icons remain available when off |
+| `allowDefaultActionOnCardClick` | `false` | allow the sender's default action on a card click; when off, card clicks use known-window focus or a validated source URL, while explicit action buttons remain available |
+| `historyHours` | `24` | disk-history retention: `0` disables history, otherwise `1`, `24` or `168` hours; capped at 100 entries |
+| `clipboardTimeout` | `60` | clear a copied verification code after `30`, `60` or `90` seconds, only if the clipboard still contains that code |
 
 `fontScale` adjusts notification content, actions and inline replies from
 75–200% while the bar and panel keep their usual size. Long titles wrap;
 actions that do not fit move behind **More**, where long labels wrap in
 full-width buttons rather than being clipped.
 
-Every history entry is the text of a message somebody sent you, so it is
-trimmed by age as well as count: **7 days or 200 entries**, whichever comes
-first. Resolved icons are dropped after 60 days unused, and nothing is ever
-written to the system log.
+Disk history is trimmed by age and count: **24 hours or 100 entries** by default,
+whichever limit is reached first. `historyHours` changes the age limit or disables
+history; Recent remains a separate in-memory list. Resolved icons are dropped
+after 60 days unused.
 
-Settings live on the bar widget's entry in `shell.json`, all in one place
-next to `id`:
+Merge options into the existing bar-widget entry in `shell.json`, alongside `id`.
+For example, this is a widget entry, **not a complete replacement for shell.json**:
 
 ```json
-{ "id": "njpatel.omapager", "snoozeDurations": ["60", "480"], "wakeHour": 9 }
+{
+  "id": "njpatel.omapager",
+  "edgeSpacing": 12,
+  "showCountdown": false,
+  "fontScale": 100,
+  "historyHours": 24
+}
 ```
+
+### Appearance inherited from Omarchy
+
+These are **Omarchy-wide values, not additional Omapager options**. Omapager reads
+the shared `Color`, `Style` and `Border` components; it does not maintain its own
+copy of the theme. Omarchy merges the active theme's `shell.toml` with
+`~/.config/omarchy/shell.toml`, with user values taking precedence. Put persistent
+theme overrides in the latter, not in Omapager's `shell.json` entry or the
+generated active-theme files.
+
+| Appearance | Source |
+| --- | --- |
+| Card colors | Omarchy's `[notifications]` background, text, border and countdown roles; critical notifications also use the shared urgent color |
+| Card border width | `[notifications] border-width`, with optional `border-width-top/right/bottom/left` overrides; otherwise `max(1, Style.space(2))`, exactly as in stock notifications—2 logical pixels at the default scale |
+| Panel surface and border | The shared `KeyboardPanel` uses Omarchy's `[popups]` colors and border settings |
+| Corner rounding | `Style.cornerRadius`, which follows Hyprland's `decoration:rounding` |
+| Typography | Omarchy's `[font]` size tokens; action buttons, timestamps and replies use the shared UI font, and the panel uses the bar's font. Notification titles and body text use Liberation Sans, matching the stock card. Omapager's `fontScale` multiplies card text sizes only |
+| Button, switch and dropdown states | Native Omarchy controls use the shared `[controls]` fill, border, hover, pressed and focus tokens |
+| Internal spacing and padding | `Style.space(...)` and `Style.spacing` follow Omarchy's `[spacing]` settings, including font-linked scaling; the panel inherits the shared popup padding |
+| Bar clearance and panel orientation | The live Omarchy bar supplies its position, thickness and visibility; Omapager adds bar thickness only to the top/right notification edge that needs clearing, and `KeyboardPanel` positions the panel beside its bar icon |
+
+For example, to set the card border width explicitly, add or update this section
+in **`~/.config/omarchy/shell.toml`**:
+
+```toml
+[notifications]
+border-width = 2
+```
+
+That changes every component using Omarchy's notification border tokens, not just
+Omapager. The panel border uses `[popups]` instead. There is currently no separate
+Omapager border-width option.
+
+**Edge spacing is an explicit exception.** `edgeSpacing` replaces the shared
+`Style.gapsOut` distance for the notification deck and the panel's bar gap and
+screen margin. Its default is 12 logical pixels, independent of theme spacing
+scale and Hyprland's `general:gaps_out`.
+
+Other geometry is fixed in Omapager but scaled through `Style.space`: the card's
+base width is 380, the expanded-card gap is 6, and the gap between source decks is 11.
+These are not plugin options. At 2× display scaling, 12 logical pixels occupy
+24 physical pixels; display scaling does not change the configured value.
 
 ### Sharing offers
 
@@ -370,8 +432,8 @@ Two more things are worth having, and they are not the same kind of thing.
 **`wl-clipboard` — recommended.** Not an Omarchy dependency, so check before you
 assume it: `command -v wl-copy`. The copy buttons work either way, but with it a
 copied verification code is marked sensitive and Omarchy's clipboard history
-skips it. Either way the code is cleared again 90 seconds later, unless you have
-copied something else since — that stays.
+skips it. The code is cleared after `clipboardTimeout` seconds (60 by default),
+unless you have copied something else since—that stays.
 
 **KDE Connect — the whole phone half.** Without it there are no phone
 notifications at all: it is the bridge that puts them on the bus in the first
