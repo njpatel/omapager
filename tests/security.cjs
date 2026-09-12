@@ -64,6 +64,7 @@ function extract(src, startMarker, endMarker) {
   return src.slice(s, e);
 }
 const capacitySource = [
+  extract(source, 'function rememberRecent(row)', '// ------------------------------------------------------- what was held'),
   extract(source, 'function durationFor(urgency, requested)', '// ------------------------------------------------------------- snooze'),
   extract(source, 'function liveCount()', '// ------------------------------------------------------------- icons'),
   extract(source, 'function nextKey()', '// ------------------------------------------------------------- arrival'),
@@ -88,6 +89,7 @@ function newCapacityScope() {
     toasts, refs: {}, refsRevision: 0, keySeed: 0, liveKeys: Object.create(null),
     maxLiveNotifications: 100, heights: {}, leaving: {}, layoutRevision: 0,
     replyingKey: '', held: [], doNotDisturb: false, globalSnoozeUntil: 0,
+    recentRows: [], recentLimit: 20,
     codesBypassQuiet: false, hideSettingsAction: false,
     lowDuration: 5000, normalDuration: 8000, maxDuration: 30000,
     snoozedUntil: () => 0, storeProc: {}, storeBin: '', wantIcon: () => {},
@@ -138,6 +140,44 @@ function newCapacityScope() {
     return n;
   };
   return s;
+}
+
+{ // Expired notifications remain readable, newest first, without unbounded retention.
+  const s = newCapacityScope();
+  for (let i = 1; i <= 25; i++) {
+    const n = s.fakeNotification(i, 'Message ' + i);
+    s.handleNotification(n);
+    s.drainCallLater();
+    s.finishClose(s.keyForOriginal(i), 'expired');
+  }
+  assert.equal(s.toasts.count, 0);
+  assert.deepEqual(Array.from(s.recentRows, row => row.summary),
+    Array.from({ length: 20 }, (_, i) => 'Message ' + (25 - i)));
+}
+
+{ // Replacing a live sender updates one recent entry and moves it to the front.
+  const s = newCapacityScope();
+  const first = s.fakeNotification(1, 'First');
+  s.handleNotification(first);
+  s.handleNotification(s.fakeNotification(2, 'Second'));
+  s.drainCallLater();
+  first.replace({ summary: 'First updated', body: 'Latest text' });
+  s.drainCallLater();
+  assert.deepEqual(Array.from(s.recentRows, row => row.summary), ['First updated', 'Second']);
+  assert.equal(s.recentRows[0].bodyLine, 'Latest text');
+}
+
+{ // Quiet messages remain readable, but a code must not outlive its toast in Recent.
+  const s = newCapacityScope();
+  s.doNotDisturb = true;
+  s.handleNotification(s.fakeNotification(1, 'Held message'));
+  const code = s.fakeNotification(2, 'Your verification code is 938271');
+  s.handleNotification(code);
+  s.drainCallLater();
+  assert.equal(s.toasts.count, 0);
+  assert.equal(s.recentRows[1].summary, 'Held message');
+  assert.equal(s.recentRows[0].bodyLine, '[redacted]');
+  assert.ok(!JSON.stringify(s.recentRows).includes('938271'));
 }
 
 for (const held of [true, false]) {

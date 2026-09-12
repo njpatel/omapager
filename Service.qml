@@ -303,6 +303,9 @@ Item {
   readonly property int recentLimit: 20
 
   function rememberRecent(row) {
+    // Recent text outlives its toast too: use the existing history redaction
+    // policy rather than keeping a copied verification code around all session.
+    row = Store.sanitiseForPersistence(row)
     var entry = {
       key: String(row.key),
       source: String(row.source || row.app || "Notification").slice(0, 120),

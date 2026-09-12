@@ -97,6 +97,18 @@ that caught something and opens each one to show what it caught, newest first �
 capped at both ends, so a fortnight of silence doesn't turn a panel into a log
 file.
 
+**Keeps the notification you just missed.** The panel's Recent stack shows the
+newest notifications even while notifications are enabled, after their toasts
+expire or are dismissed. Right-click the bar indicator to read them; hover the
+centre of the bar to reveal it when nothing is held back. Cards show the source,
+arrival time, title and a two-line text preview, with no actions or replay.
+
+`recentCount` chooses how many cards to show: **1–20, default 5**. The latest 20
+text snapshots stay in memory for this shell session only, and replacing a live
+notification updates its entry rather than duplicating it. Restarting the shell
+clears Recent; it does not load or alter the existing disk history. Verification
+notifications use the same redacted placeholder as history, not the code.
+
 <img src="assets/quiet.png" width="404" alt="The bar indicator and the panel behind it">
 
 **Resolves real icons.** Your own icon themes win; web notifications fall back
@@ -154,6 +166,7 @@ icons for good.
 | `timeFormat` | `system` | `system` follows `LC_TIME`; `24h` and `12h` pin it |
 | `sourceLimit` | `8` | how many quietened sources the panel lists |
 | `heldPerSource` | `10` | how many held notifications it shows per source |
+| `recentCount` | `5` | recent notifications shown in the panel (1–20), including when notifications are enabled; resets on shell restart |
 
 Notification text at 100% and 150% of the theme size:
 
@@ -202,9 +215,9 @@ the same whichever service is running. Amber rather than red for a snooze,
 because a snooze ends by itself.
 
 **Left-click** silences and unsilences. **Right-click** opens the panel: the
-switch, a button beside it that snoozes everything for a while, and the list of
-what is being kept from you — when each source comes back, how much it has
-caught, and the messages themselves when you open one.
+switch, a button beside it that snoozes everything for a while, the Recent
+stack, and what is being kept from you — when each source comes back, how much
+it has caught, and the messages themselves when you open one.
 
 ## Keybindings
 

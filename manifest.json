@@ -170,7 +170,7 @@
         "key": "recentCount",
         "type": "integer",
         "label": "Recent notifications in the panel",
-        "description": "The newest notifications received this session, even when notifications are enabled. Resets when the shell restarts.",
+        "description": "The newest notifications received this session, even when notifications are enabled. Verification codes are redacted. Resets when the shell restarts.",
         "min": 1,
         "max": 20,
         "step": 1,

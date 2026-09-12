@@ -187,6 +187,20 @@ side effects. Notification labels are plain text; only sanitized body markup is
 RichText. Store.sanitiseForPersistence and the Python store independently redact
 code-bearing notifications. Do not remove either boundary.
 
+The panel's Recent stack is session-only, not another persistence path.
+`Service.rememberRecent()` keeps at most 20 bounded text snapshots after
+notification admission and uses `Store.sanitiseForPersistence()` so verification
+codes do not outlive their toast here either. Never retain Notification objects,
+images or actions in this stack. Replacements update by the existing live key;
+expiry and dismissal leave the snapshot readable. The widget's `recentCount`
+setting only selects 1–20 of those snapshots, and shell restart clears them.
+
+`node tests/security.cjs` covers recent ordering/eviction, expiry, replacement
+and redaction through the production notification lifecycle. For visual proof,
+use a private omalab bus: send seven short-lived synthetic notifications, wait
+for `omapager count` to return zero, then open `omapager.panel`. After the panel
+animation settles, verify the newest five remain with notifications enabled.
+
 - **`bin/omapager-icon` fetches, through `bin/omapager_http.py`.** This is the
   single network-security implementation for icon fetching; there is no second,
   competing HTTP client. `parse_url()` requires `http(s)`, a public-looking
