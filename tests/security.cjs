@@ -64,6 +64,7 @@ function extract(src, startMarker, endMarker) {
   return src.slice(s, e);
 }
 const capacitySource = [
+  extract(source, 'function rememberRecent(row)', '// ------------------------------------------------------- what was held'),
   extract(source, 'function durationFor(urgency, requested)', '// ------------------------------------------------------------- snooze'),
   extract(source, 'function liveCount()', '// ------------------------------------------------------------- icons'),
   extract(source, 'function nextKey()', '// ------------------------------------------------------------- arrival'),
@@ -88,13 +89,19 @@ function newCapacityScope() {
     toasts, refs: {}, refsRevision: 0, keySeed: 0, liveKeys: Object.create(null),
     maxLiveNotifications: 100, heights: {}, leaving: {}, layoutRevision: 0,
     replyingKey: '', held: [], doNotDisturb: false, globalSnoozeUntil: 0,
+    recentRows: [], recentLimit: 20,
+    snoozeRevision: 0, snoozes: {},
     codesBypassQuiet: false, hideSettingsAction: false,
     lowDuration: 5000, normalDuration: 8000, maxDuration: 30000,
-    snoozedUntil: () => 0, storeProc: {}, storeBin: '', wantIcon: () => {},
+    snoozedUntil: key => s.snoozes[key] || 0,
+    liveSnoozes: () => Object.keys(s.snoozes).map(key => ({ key })),
+    storeProc: {}, storeBin: '', wantIcon: () => {},
     lookForReply: () => {}, Security: S,
     Store: { ...Store, write: () => {} },
     NotificationUrgency: { Critical: 2, Normal: 1, Low: 0 },
-    Qt: { callLater: fn => later.push(fn) }, Style: { space: n => n },
+    Qt: { callLater: fn => later.push(fn),
+      md5: value => require('node:crypto').createHash('md5').update(value).digest('hex') },
+    Style: { space: n => n },
     holding: () => s.pointerHolding === true,
     snapshot: () => ({}), deckHeight: 0, retarget: () => {}, layout: { placements: {} },
   };
@@ -138,6 +145,82 @@ function newCapacityScope() {
     return n;
   };
   return s;
+}
+
+{ // Expired notifications remain readable, newest first, without unbounded retention.
+  const s = newCapacityScope();
+  for (let i = 1; i <= 25; i++) {
+    const n = s.fakeNotification(i, 'Message ' + i);
+    s.handleNotification(n);
+    s.drainCallLater();
+    s.finishClose(s.keyForOriginal(i), 'expired');
+  }
+  assert.equal(s.toasts.count, 0);
+  assert.deepEqual(Array.from(s.recentRows, row => row.summary),
+    Array.from({ length: 20 }, (_, i) => 'Message ' + (25 - i)));
+}
+
+{ // Replacing a live sender updates one recent entry and moves it to the front.
+  const s = newCapacityScope();
+  const first = s.fakeNotification(1, 'First');
+  s.handleNotification(first);
+  s.handleNotification(s.fakeNotification(2, 'Second'));
+  s.drainCallLater();
+  first.replace({ summary: 'First updated', body: 'Latest text' });
+  s.drainCallLater();
+  assert.deepEqual(Array.from(s.recentRows, row => row.summary), ['First updated', 'Second']);
+  assert.equal(s.recentRows[0].bodyLine, 'Latest text');
+}
+
+{ // A code must not outlive its toast, even in source metadata used for filtering.
+  const s = newCapacityScope();
+  const code = s.fakeNotification(1, 'Your verification code is 938271');
+  code.appName = 'Source 938271';
+  s.handleNotification(code);
+  s.drainCallLater();
+  const key = s.keyForOriginal(1), group = s.toasts.get(0).groupKey;
+  s.finishClose(key, 'expired');
+  assert.equal(s.recentForPanel(5)[0].bodyLine, '[redacted]');
+  assert.ok(!JSON.stringify(s.recentRows).includes('938271'));
+  s.snoozes[group] = 1;
+  assert.equal(s.recentForPanel(5).length, 0);
+}
+
+{ // Full quiet hides the entire recent list and held arrivals never backfill it.
+  const s = newCapacityScope();
+  s.handleNotification(s.fakeNotification(1, 'Before quiet'));
+  s.drainCallLater();
+  s.doNotDisturb = true;
+  s.handleNotification(s.fakeNotification(2, 'Silenced arrival'));
+  assert.equal(s.recentForPanel(5).length, 0);
+  s.doNotDisturb = false;
+  s.globalSnoozeUntil = 1;
+  s.handleNotification(s.fakeNotification(3, 'Global snooze arrival'));
+  assert.equal(s.recentForPanel(5).length, 0);
+  s.globalSnoozeUntil = 0;
+  assert.deepEqual(Array.from(s.recentForPanel(5), row => row.summary), ['Before quiet']);
+}
+
+{ // Filter before applying N, preserving other sources and restoring earlier rows on wake.
+  const s = newCapacityScope();
+  s.handleNotification(s.fakeNotification(1, 'Other source'));
+  const snoozed = s.fakeNotification(2, 'Soon snoozed');
+  snoozed.appName = 'Noisy';
+  s.handleNotification(snoozed);
+  s.drainCallLater();
+  const group = s.toasts.get(0).groupKey;
+  s.snoozes[group] = 1;
+  assert.deepEqual(Array.from(s.recentForPanel(1), row => row.summary), ['Other source']);
+  const held = s.fakeNotification(3, 'Held arrival');
+  held.appName = 'Noisy';
+  s.handleNotification(held);
+  delete s.snoozes[group];
+  assert.deepEqual(Array.from(s.recentForPanel(5), row => row.summary), ['Soon snoozed', 'Other source']);
+  s.snoozes[group] = 1;
+  snoozed.replace({ summary: 'Updated while snoozed' });
+  s.drainCallLater();
+  delete s.snoozes[group];
+  assert.deepEqual(Array.from(s.recentForPanel(5), row => row.summary), ['Other source']);
 }
 
 for (const held of [true, false]) {

@@ -59,6 +59,15 @@ BarWidget {
   readonly property bool revealed: hasState || opened || alwaysShow
     || (bar && bar.centerSectionRevealHeld === true && bar.centerHoverRevealSuppressed !== true)
 
+  readonly property int recentCount: {
+    var count = Number(setting("recentCount", 5))
+    return isFinite(count) ? Math.max(1, Math.min(20, Math.floor(count))) : 5
+  }
+  readonly property var recent: {
+    snoozeRevision
+    return service ? service.recentForPanel(recentCount) : []
+  }
+
   // ------------------------------------------------------------- settings
   //
   // The settings plumbing the daemon has been doing without. Only a bar widget
@@ -374,6 +383,8 @@ BarWidget {
       return JSON.stringify({ opened: pager.opened, panelVisible: panel.visible,
                               silenced: pager.silenced, globalSnoozed: pager.globalSnoozed,
                               sources: held, expanded: pager.expandedKey,
+                              recentCount: pager.recent.length, recentLimit: pager.recentCount,
+                              recentExpanded: pager.recentExpanded,
                               cardX: panel.cardOrigin.x, cardY: panel.cardOrigin.y,
                               cw: panel.contentWidth, ch: panel.contentHeight })
     }
@@ -450,11 +461,14 @@ BarWidget {
   }
 
   property string expandedKey: ""
+  property bool recentExpanded: false
+  onQuietChanged: if (quiet) recentExpanded = false
   property int cursorAt: 0
   property bool cursorLive: false
   property bool globalChoosing: false
   onOpenedChanged: {
     cursorAt = 0; cursorLive = false; expandedKey = ""; globalChoosing = false
+    recentExpanded = false
     phraseSwap.stop()          // never reopen onto a half-faded line
     // What has been held back, as of now - read on opening rather than kept
     // up to date, because the panel is the only thing that ever asks.
@@ -513,7 +527,7 @@ BarWidget {
         boundsBehavior: Flickable.StopAtBounds
         flickableDirection: Flickable.VerticalFlick
         interactive: contentHeight > height
-        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+        ScrollBar.vertical: ScrollBar { id: panelScrollBar; policy: ScrollBar.AsNeeded }
 
         Column {
           id: column
@@ -649,6 +663,120 @@ BarWidget {
                   fontSize: Style.font.caption
                   verticalPadding: 1
                   onClicked: pager.snoozeEverything(Number(modelData.seconds))
+                }
+              }
+            }
+          }
+
+          PanelSeparator { visible: !pager.quiet; foreground: pager.panelFg }
+
+          Item {
+            visible: !pager.quiet
+            width: parent.width
+            height: Math.max(recentHeading.implicitHeight, recentToggle.implicitHeight)
+
+            PanelSectionHeader {
+              id: recentHeading
+              anchors.left: parent.left
+              anchors.right: recentToggle.left
+              anchors.verticalCenter: parent.verticalCenter
+              text: "RECENT · " + pager.recent.length
+              foreground: pager.panelFg
+              fontFamily: pager.fontFamily
+            }
+
+            MouseArea {
+              anchors.left: parent.left
+              anchors.right: recentToggle.left
+              anchors.top: parent.top
+              anchors.bottom: parent.bottom
+              cursorShape: Qt.PointingHandCursor
+              onClicked: pager.recentExpanded = !pager.recentExpanded
+            }
+
+            PanelActionButton {
+              id: recentToggle
+              anchors.right: parent.right
+              // The scrollbar owns the right-edge hit area even over this row.
+              anchors.rightMargin: panelScrollBar.width
+              anchors.verticalCenter: parent.verticalCenter
+              iconText: pager.recentExpanded ? "\u{f0143}" : "\u{f0140}"
+              tooltipText: pager.recentExpanded ? "Hide recent notifications" : "Show recent notifications"
+              foreground: pager.panelFg
+              fontFamily: pager.fontFamily
+              focusable: true
+              onClicked: pager.recentExpanded = !pager.recentExpanded
+            }
+          }
+
+          Text {
+            visible: !pager.quiet && pager.recentExpanded && pager.recent.length === 0
+            width: parent.width
+            text: "New notifications stay here after their toast disappears."
+            textFormat: Text.PlainText
+            color: pager.dim
+            font.family: pager.fontFamily
+            font.pixelSize: Style.font.bodySmall
+            wrapMode: Text.WordWrap
+          }
+
+          Column {
+            visible: !pager.quiet && pager.recentExpanded
+            width: parent.width
+            spacing: Style.space(6)
+
+            Repeater {
+              model: !pager.quiet && pager.recentExpanded ? pager.recent : []
+
+              Rectangle {
+                id: recentCard
+                required property var modelData
+                width: parent.width
+                height: recentText.implicitHeight + Style.space(16)
+                radius: Style.cornerRadius
+                color: Qt.rgba(pager.panelFg.r, pager.panelFg.g, pager.panelFg.b, 0.05)
+
+                Column {
+                  id: recentText
+                  x: Style.space(8)
+                  y: Style.space(8)
+                  width: parent.width - Style.space(16)
+                  spacing: Style.space(3)
+
+                  Text {
+                    width: parent.width
+                    text: recentCard.modelData.source + " · "
+                          + pager.clockTime(new Date(recentCard.modelData.ts * 1000))
+                    textFormat: Text.PlainText
+                    color: pager.dim
+                    font.family: pager.fontFamily
+                    font.pixelSize: Style.font.caption
+                    elide: Text.ElideRight
+                  }
+
+                  Text {
+                    width: parent.width
+                    text: recentCard.modelData.summary
+                    textFormat: Text.PlainText
+                    color: pager.panelFg
+                    font.family: pager.fontFamily
+                    font.pixelSize: Style.font.bodySmall
+                    font.bold: true
+                    elide: Text.ElideRight
+                  }
+
+                  Text {
+                    visible: text !== ""
+                    width: parent.width
+                    text: recentCard.modelData.bodyLine
+                    textFormat: Text.PlainText
+                    color: pager.dim
+                    font.family: pager.fontFamily
+                    font.pixelSize: Style.font.caption
+                    wrapMode: Text.WordWrap
+                    maximumLineCount: 2
+                    elide: Text.ElideRight
+                  }
                 }
               }
             }

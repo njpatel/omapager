@@ -187,6 +187,31 @@ side effects. Notification labels are plain text; only sanitized body markup is
 RichText. Store.sanitiseForPersistence and the Python store independently redact
 code-bearing notifications. Do not remove either boundary.
 
+The panel's Recent stack is session-only, not another persistence path.
+`Service.rememberRecent()` keeps at most 20 bounded text snapshots after
+notification admission, excluding arrivals during global quiet or a source
+snooze. It uses `Store.sanitiseForPersistence()` so verification codes do not
+outlive their toast here either. Never retain Notification objects, images or
+actions in this stack. A source digest supports snooze matching without keeping
+its unredacted label. Replacements update by the existing live key; expiry and
+dismissal leave the snapshot readable. `recentForPanel()` filters currently
+snoozed sources before the widget's 1–20 card limit; global quiet hides the whole
+Recent block. Snooze revisions refresh that filter on snooze, wake and expiry.
+Shell restart clears the stack.
+The widget's `recentExpanded` state resets whenever the panel opens or closes,
+and when global quiet starts. The heading shows the filtered card count; its
+heading/chevron clicks reveal the cards. Collapsed lists instantiate no card
+delegates. Keep the disclosure button out of the Flickable scrollbar's hit area.
+
+`node tests/security.cjs` covers recent ordering/eviction, expiry, replacement,
+redaction and snooze filtering through the production notification lifecycle.
+For visual proof, use a private omalab bus: send short-lived notifications from
+two sources, expand Recent, snooze one and verify only the other remains. Snooze
+everything and verify the whole Recent block disappears. Wake the sources and
+verify held arrivals did not enter Recent while earlier entries become eligible.
+Also verify heading/chevron clicks toggle the list, reopening starts collapsed,
+and arrivals while collapsed do not reveal it.
+
 - **`bin/omapager-icon` fetches, through `bin/omapager_http.py`.** This is the
   single network-security implementation for icon fetching; there is no second,
   competing HTTP client. `parse_url()` requires `http(s)`, a public-looking
