@@ -1,6 +1,6 @@
 # Security changelog
 
-## Unreleased
+## v1.1.1 — 2026-09-13
 
 - Keep `fetchRemoteIcons` config-only. Removing its UI control does not change
   the default, opt-out behavior, cached-icon handling or network protections.
