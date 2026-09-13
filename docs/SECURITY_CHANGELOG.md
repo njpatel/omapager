@@ -1,6 +1,11 @@
 # Security changelog
 
-## Unreleased — preview markup, 2026-09-12
+## v1.0.0 — 2026-09-13
+
+The first tagged release includes the changes below. These implementation notes
+are not a claim of marketplace verification or a comprehensive security audit.
+
+### Preview markup — 2026-09-12
 
 - Flatten only allowlisted markup in plain-text previews, preserving escaped
   literals without interpreting them as rich text.
@@ -9,7 +14,7 @@
   move legacy or raw-only codes outside the keyword window. Regression checks
   cover both entry shapes; a private Omarchy lab verified a redacted Recent card.
 
-## Unreleased — maintainer follow-up, 2026-09-11
+### Maintainer follow-up — 2026-09-11
 
 Follow-up to PR #4 at `8f3a16cef4d4f05860b7fe7b4808c0eba189797a`:
 
@@ -32,7 +37,7 @@ Focused regressions and a private Omarchy lab exercised held replacements at
 capacity, cancellation, replay limits, ordinary-message persistence and restored
 offer rendering. No real phone, external URL or clipboard action was used.
 
-## Unreleased — hardening/main, 2026-09-09
+### Hardening integration — 2026-09-09
 
 Rebased onto current upstream `njpatel/omapager:main` at `06f5117d4cca5730470100f3b7949933adccd839`
 (previous local base: `29548e5761f1b9f419afe988d77f67e3dd3e81cb`), and fixed every
@@ -76,7 +81,7 @@ upstream" and "PR #4 review findings" sections for the full account; summary:
   re-validates through today's URL policy, rather than trusting a legacy
   entry's own copy of those fields.
 
-## Unreleased — hardening/main, 2026-09-06
+### Initial hardening — 2026-09-06
 
 Baseline: 29548e5761f1b9f419afe988d77f67e3dd3e81cb; predecessor fix verified.
 

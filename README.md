@@ -426,7 +426,12 @@ cannot stand in for another app, and an older session cannot accept a new reply.
 
 ## Requirements
 
-Omarchy (Quickshell 0.3.x, Hyprland), and Python 3 for the helpers in `bin/`.
+Omarchy (Quickshell 0.3.x, Hyprland), Python 3 and **Bubblewrap** (`bubblewrap`)
+for the helpers in `bin/`. Helpers fail closed if their sandbox cannot start;
+there is no automatic unsandboxed fallback.
+
+**Pillow** (`python-pillow`) is required for optional remote website icons.
+Remote fetching is off by default; local theme icons still work without it.
 
 Two more things are worth having, and they are not the same kind of thing.
 
