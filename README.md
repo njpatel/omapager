@@ -64,51 +64,39 @@ by expanding Recent in the panel. The list clears when the shell restarts.
 <img src="assets/native-panel-2x.png" width="420" alt="Notification panel with recent messages from the demo scenes">
 
 **Source icons.** Use local icons or fetch missing website icons automatically.
-You can turn fetching off in preferences.
+Set `fetchRemoteIcons` to `false` in the config to disable fetching.
 
 ## Install
 
-Check the [requirements](#requirements) before installing.
+Check the [requirements](#requirements), choose one installation method in
+step 1, then enable Omapager in step 2.
 
-### Releases via the marketplace
+### 1. Install
+
+#### Releases via the marketplace
 
 Find Omapager in the [Omarchy Plugin Marketplace](https://omarchyplugins.com/)
-and follow its installation instructions. See [releases and release notes](https://github.com/njpatel/omapager/releases)
-for published versions.
-
-The marketplace's current installer clones Git HEAD rather than a release tag.
-To stay on a release, pin the installed checkout before enabling it. For v1.1.0:
+and run its install command:
 
 ```bash
-git -C ~/.config/omarchy/plugins/njpatel.omapager fetch origin tag v1.1.0
-git -C ~/.config/omarchy/plugins/njpatel.omapager switch --detach v1.1.0
+omarchy plugin add https://github.com/njpatel/omapager.git
 ```
 
-For release updates, repeat with the new version tag. Marketplace updates are
-published separately and may lag the latest GitHub release.
+Until the new stable release is approved, the marketplace installs Git HEAD.
 
-### Edge via Git
+#### Edge via Git
 
-Use `main` for the latest changes between releases:
+Clone `main` for the latest changes between releases:
 
 ```bash
 git clone --branch main https://github.com/njpatel/omapager.git \
   ~/.config/omarchy/plugins/njpatel.omapager
 ```
 
-To update an edge checkout:
+### 2. Enable Omapager
 
-```bash
-git -C ~/.config/omarchy/plugins/njpatel.omapager pull --ff-only
-```
-
-If you previously pinned a release, switch the checkout back to `main` first.
-Keep local changes safe before switching versions.
-
-### Enable Omapager
-
-Only one notification daemon can run at a time. Disable the built-in service,
-enable Omapager and place its indicator beside the other bar indicators:
+After either installation method, disable the built-in notification service and
+enable Omapager. Only one notification daemon can run at a time.
 
 ```bash
 omarchy-shell shell rescanPlugins
@@ -117,7 +105,16 @@ omarchy plugin enable njpatel.omapager --section center --after omarchy.indicato
 omarchy restart shell
 ```
 
-After updating either channel, run `omarchy restart shell` to reload the plugin.
+### Updates
+
+Use the marketplace for release updates. For an edge checkout:
+
+```bash
+git -C ~/.config/omarchy/plugins/njpatel.omapager pull --ff-only
+omarchy restart shell
+```
+
+[Release notes](https://github.com/njpatel/omapager/releases) describe each update.
 Do not use `omarchy refresh shell`, which resets your shell configuration.
 
 ### Remove Omapager
@@ -135,15 +132,15 @@ want to remove the stored data.
 
 ## Settings
 
-Open the panel and click the settings cog to choose a display, toggle countdown
-animation or website icons, and control sharing suggestions.
+Open the panel and click the settings cog to choose a notification display,
+toggle countdown animation or control screen-sharing snooze suggestions.
 
-<img src="assets/display-settings-2x.png" width="420" alt="Notification preferences with display selection, countdown, website icons and sharing suggestions">
+<img src="assets/display-settings-2x.png" width="420" alt="Notification preferences for display, countdown animation and screen-sharing snooze suggestions">
 
 Changes save to the `njpatel.omapager` bar-widget entry in
 `~/.config/omarchy/shell.json`. You can edit the other options there too.
-`edgeSpacing` and `requireSandbox` are config-only. Defaults below apply to new
-configurations, not choices you have already saved.
+`edgeSpacing`, `fetchRemoteIcons` and `requireSandbox` are config-only. Defaults
+below apply to new configurations, not choices you have already saved.
 
 ### Omapager options
 
@@ -167,7 +164,7 @@ configurations, not choices you have already saved.
 | `sourceLimit` | `8` | Number of quietened sources listed in the panel, from 2 to 20. |
 | `heldPerSource` | `10` | Held notifications shown per source, from 3 to 25. |
 | `recentCount` | `5` | Recent notifications shown in the panel, from 1 to 20. Clears on shell restart. |
-| `fetchRemoteIcons` | `true` | Fetch missing website icons. Turning it off keeps local and validated cached icons. Requires Pillow. |
+| `fetchRemoteIcons` | `true` | Fetch missing website icons. Turning it off keeps local and validated cached icons. Requires Pillow. Config-only. |
 | `requireSandbox` | `false` | Require Bubblewrap instead of allowing helpers to run directly when it is unavailable. Config-only. |
 | `allowDefaultActionOnCardClick` | `false` | Allow the app's default action on a card click. Explicit action buttons remain available when off. |
 | `historyHours` | `24` | Keep disk history for `1`, `24` or `168` hours, with a 100-entry cap. `0` disables it. |
@@ -324,8 +321,8 @@ Each run creates a new demo session, which expires after 30 minutes.
 ### Automatic website icons
 
 Omapager checks local icons and its cache before fetching from a website.
-Fetch website icons is on by default. Switch it off in preferences or set
-`"fetchRemoteIcons": false` to stop requests and cancel the active lookup.
+Website-icon fetching is on by default. Set `"fetchRemoteIcons": false` in the
+widget's `shell.json` entry to stop requests and cancel the active lookup.
 Local and validated cached icons still work. Saved opt-outs survive upgrades.
 
 Requests expose your IP and request time to the source website and its icon

@@ -62,24 +62,24 @@
       {
         "key": "stacking",
         "type": "enum",
-        "label": "Live notifications stack",
+        "label": "Notification grouping",
         "options": [
           "all",
           "source"
         ],
         "defaultValue": "source",
-        "description": "all = one deck in the corner, same-source notifications grouped inside it; source = a separate deck per source, each expanding on its own."
+        "description": "Use one notification group or a separate group for each source."
       },
       {
         "key": "actionsAlign",
         "type": "enum",
-        "label": "Notification buttons",
+        "label": "Action button alignment",
         "options": [
           "right",
           "left"
         ],
         "defaultValue": "right",
-        "description": "Which end of a card its action buttons sit at."
+        "description": "Align action buttons to the left or right."
       },
       {
         "key": "showCountdown",
@@ -103,15 +103,15 @@
         "type": "boolean",
         "label": "Hide the browser's Settings button",
         "defaultValue": true,
-        "description": "Chrome puts a Settings action on every web notification. It is the same button on every card and it crowds out the ones that are worth pressing."
+        "description": "Hide the repeated Settings action on browser notifications."
       },
       {
         "key": "snoozeDurations",
         "type": "multiselect",
-        "label": "Snooze lengths",
-        "description": "What the snooze menus offer, on a card and in the panel. A desktop where half an hour is the useful unit and one where half a day is are both real.",
+        "label": "Snooze durations",
+        "description": "Choose the durations available in notification and panel snooze menus.",
         "noSelectionText": "30 minutes, 1 hour, 4 hours, until tomorrow",
-        "placeholderText": "Search lengths...",
+        "placeholderText": "Search durations...",
         "options": [
           {
             "value": "15",
@@ -163,7 +163,7 @@
         "key": "sourceLimit",
         "type": "integer",
         "label": "Sources listed in the panel",
-        "description": "How many quietened sources the panel lists at once. A fortnight of silence should not turn it into a log file.",
+        "description": "Maximum number of snoozed sources listed in the panel.",
         "min": 2,
         "max": 20,
         "step": 1,
@@ -173,7 +173,7 @@
         "key": "heldPerSource",
         "type": "integer",
         "label": "Held notifications shown per source",
-        "description": "How many of the notifications a source held back the panel will show when you open it.",
+        "description": "Maximum number of held notifications shown for each source.",
         "min": 3,
         "max": 25,
         "step": 1,
@@ -183,7 +183,7 @@
         "key": "recentCount",
         "type": "integer",
         "label": "Recent notifications in the panel",
-        "description": "The newest notifications from sources that are not snoozed. Click the collapsed Recent heading to show them. Hidden during full quiet; held arrivals are excluded. Verification codes are redacted. Resets when the shell restarts.",
+        "description": "Number of recent notifications shown when Recent is expanded. Clears on shell restart.",
         "min": 1,
         "max": 20,
         "step": 1,
@@ -192,34 +192,34 @@
       {
         "key": "alwaysShow",
         "type": "boolean",
-        "label": "Always show",
-        "description": "Keep the slot in the bar even when nothing is being held back. The icon appearing is the one moment the bar's centre shifts; this trades a permanently dim bell for a clock that never moves.",
+        "label": "Always show indicator",
+        "description": "Keep the bar indicator visible when no notifications are held.",
         "defaultValue": false
       },
       {
         "key": "codesBypassQuiet",
         "type": "boolean",
-        "label": "Let verification codes through",
-        "description": "A snooze or a silence holds everything back except a notification carrying a verification code. You asked for that code thirty seconds ago and it expires in five minutes, so \"I'll look later\" does not apply to it.",
+        "label": "Allow verification codes during quiet mode",
+        "description": "Allow verification-code notifications during snooze and Do Not Disturb.",
         "defaultValue": true
       },
       {
         "key": "timeFormat",
         "type": "enum",
-        "label": "Clock",
+        "label": "Time format",
         "options": [
           "system",
           "24h",
           "12h"
         ],
         "defaultValue": "system",
-        "description": "How wake times are written. system follows LC_TIME; Omarchy's own clock widget takes an explicit format string instead, so pin this if the two disagree."
+        "description": "Use the system time format, 24-hour time or 12-hour time."
       },
       {
         "key": "smartRaise",
         "type": "boolean",
-        "label": "Raise the window a site is open in",
-        "description": "Match a notification's site against browser window titles, so a Slack notification lands in the browser already showing Slack rather than opening a new tab. Off, only a window whose class carries the site is raised.",
+        "label": "Match browser window titles",
+        "description": "Match notification websites to browser window titles when focusing a window.",
         "defaultValue": true
       },
       {
@@ -232,28 +232,21 @@
           "all"
         ],
         "defaultValue": "active",
-        "description": "active = the Hyprland focused monitor; specific = the output named below, falling back to the focused monitor while it is absent; all = every monitor."
+        "description": "Use the active display, a selected output or all displays."
       },
       {
         "key": "displayName",
         "type": "string",
         "label": "Specific monitor output name",
         "defaultValue": "",
-        "description": "Stable output name used by specific display mode. The in-panel picker fills this from Quickshell's current screens and keeps the name if that output is disconnected."
+        "description": "Output name for specific-display mode. The selection is retained while disconnected."
       },
       {
         "key": "offerSnoozeWhenSharing",
         "type": "boolean",
-        "label": "Offer to snooze when sharing starts",
+        "label": "Suggest snooze during screen sharing",
         "defaultValue": true,
-        "description": "Detect screen, window, and area portal sharing sessions and offer a timed snooze. Notification delivery is not automatically muted."
-      },
-      {
-        "key": "fetchRemoteIcons",
-        "type": "boolean",
-        "label": "Fetch website icons",
-        "description": "Fetch missing website icons automatically. Sites can see your IP and approximate notification time. Requires Pillow; local and cached icons remain available when off.",
-        "defaultValue": true
+        "description": "Offer a timed snooze when screen sharing starts. Notifications are not muted automatically."
       },
       {
         "key": "allowDefaultActionOnCardClick",

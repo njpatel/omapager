@@ -178,10 +178,10 @@ Item {
   property bool sharingOfferHandled: false
   readonly property bool sharingOfferPending: offerSnoozeWhenSharing && sharingActive
     && !sharingOfferHandled && !doNotDisturb && !globalSnoozeUntil
-  readonly property string sharingDetectionStatus: !offerSnoozeWhenSharing ? "Sharing offers are off"
+  readonly property string sharingDetectionStatus: !offerSnoozeWhenSharing ? "Screen-sharing suggestions disabled"
     : !Pipewire.ready ? "Sharing detection unavailable: PipeWire disconnected"
-    : sharingActive ? "Portal sharing detected; notifications stay on until you snooze"
-    : "Watching for Hyprland portal screen, window or area sharing"
+    : sharingActive ? "Screen sharing detected"
+    : "No screen sharing detected"
   onSharingActiveChanged: {
     sharingOfferHandled = sharingActive && (doNotDisturb || globalSnoozeUntil > 0)
   }

@@ -199,7 +199,7 @@ Item {
     for (var i = 0; i < snoozeOptions.length; i++)
       out.push({ kind: "snooze", label: String(snoozeOptions[i].menuLabel),
                  value: Number(snoozeOptions[i].seconds) })
-    out.push({ kind: "silence", label: "Silence everything", value: 0 })
+    out.push({ kind: "silence", label: "Enable Do Not Disturb", value: 0 })
     return out
   }
 

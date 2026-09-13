@@ -92,22 +92,22 @@ BarWidget {
     ]
     for (var i = 0; i < availableScreens.length; i++) {
       var name = String(availableScreens[i].name || "")
-      if (name) options.push({ value: "output:" + name, label: "Only " + name })
+      if (name) options.push({ value: "output:" + name, label: name })
     }
     if (configuredDisplayMode === "specific" && !configuredDisplayPresent)
       options.push({ value: displayChoice, label: configuredDisplayName
-        ? "Only " + configuredDisplayName + " (disconnected)" : "Choose a display" })
+        ? configuredDisplayName + " (disconnected)" : "Select a display" })
     return options
   }
   readonly property string displayExplanation: configuredDisplayMode === "all"
-    ? "The same notifications appear on every display."
+    ? "Show notifications on all connected displays."
     : configuredDisplayMode === "specific" && configuredDisplayPresent
-      ? "Notifications stay on " + configuredDisplayName + "."
+      ? "Show notifications on " + configuredDisplayName + "."
       : configuredDisplayMode === "specific"
-        ? "Using the active display until your selected monitor is available."
-        : "New notifications follow your focus.\nVisible cards stay where they are."
+        ? "Selected display disconnected. Using the active display."
+        : "Use the focused display for new notification groups."
   readonly property string sharingDetectionStatus: service && service.sharingDetectionStatus
-    ? String(service.sharingDetectionStatus) : "Watching for Hyprland portal screen, window or area sharing"
+    ? String(service.sharingDetectionStatus) : "Sharing detection unavailable: service not ready"
 
   function persistSettings(values) {
     var entry = { id: pager.moduleName }
@@ -358,92 +358,14 @@ BarWidget {
     return "Snoozed until " + clockTime(when) + dayOffset(when)
   }
 
-  // The other panels put a line under their title that cycles the whole time
-  // they are open, so this one does too. Two sets, because the honest thing to
-  // say depends on which way the switch is: held back, or coming through. They
-  // are deliberately parallel - every quiet line has its opposite in the other
-  // list, in the same grammar - so flipping the switch reads as the same voice
-  // changing its mind rather than as two different panels.
-  readonly property var quietPhrases: [
-    "Holding messages",
-    "Hushing apps",
-    "Pocketing pings",
-    "Absorbing alerts",
-    "Muffling mentions",
-    "Guarding quiet",
-    "Sitting on notices",
-    "Deferring drama",
-    "Banking interruptions"
-  ]
-
-  // Index 0 is the plain statement rather than a joke: it is the first thing
-  // you see when the panel opens, and "is anything getting through" is a real
-  // question the panel exists to answer. The wit starts on the second beat.
-  readonly property var openPhrases: [
-    "Everything comes through",
-    "Passing messages on",
-    "Waving apps through",
-    "Relaying pings",
-    "Ferrying alerts",
-    "Forwarding mentions",
-    "Breaking the quiet",
-    "Handing over notices",
-    "Delivering drama",
-    "Spending interruptions"
-  ]
-
-  // Whichever set the switch is pointing at.
-  readonly property var phrases: hasState ? quietPhrases : openPhrases
-  property int phraseIndex: 0
-
-  // The wake time used to sit in a pill beside the title. It is gone: when
-  // everything is snoozed the line below says it in full, and when one source
-  // is, that source's own row says it and what it has caught. All the pill did
-  // was say it a second time and squeeze the title down to "Notificati...".
-  // A snooze has an end, and the end is the whole story, so it says so and does
-  // not rotate. The phrases are for the states with nothing more useful to say.
-  readonly property bool rotatingPhrases: opened && !globalSnoozed
-
   readonly property string stateLine: {
     if (globalSnoozed) return wakingAt(globalUntil)
-    if (rotatingPhrases) return phrases[phraseIndex % phrases.length]
-    if (silenced) return "Silenced"
-    if (snoozed.length === 1) return snoozed[0].label + ", back " + waking(snoozed[0].until)
+    if (silenced) return "Do Not Disturb on"
+    if (snoozed.length === 1) return "1 source snoozed"
     if (snoozed.length > 1) return snoozed.length + " sources snoozed"
-    return "Everything comes through"
+    return "Notifications enabled"
   }
 
-
-  Timer {
-    interval: 2800
-    running: pager.rotatingPhrases
-    repeat: true
-    onTriggered: phraseSwap.restart()
-  }
-
-  // The crossfade leaves metaOpacity wherever it was interrupted - closing the
-  // panel mid-swap and reopening it showed a title with nothing under it.
-  onRotatingPhrasesChanged: if (!rotatingPhrases) phraseSwap.stop()
-
-  // The two lists are read in step, so a switch flipped at phrase 7 would jump
-  // straight to the seventh line of the other set. Start the new set at its
-  // own beginning instead: on the way out of quiet that means "Everything
-  // comes through", which is exactly what just happened.
-  onHasStateChanged: {
-    phraseSwap.stop()
-    phraseIndex = 0
-    if (hero) hero.metaOpacity = 1   // settles before the panel's tree exists
-  }
-
-  SequentialAnimation {
-    id: phraseSwap
-    onStopped: hero.metaOpacity = 1
-    PropertyAnimation { target: hero; property: "metaOpacity"
-                        to: 0.0; duration: 180; easing.type: Easing.OutQuad }
-    ScriptAction { script: pager.phraseIndex = (pager.phraseIndex + 1) % pager.phrases.length }
-    PropertyAnimation { target: hero; property: "metaOpacity"
-                        to: 1.0; duration: 260; easing.type: Easing.InQuad }
-  }
 
   // Return types are spelled out because Quickshell wants them, and `string`
   // rather than `void` because this Qt's QML grammar rejects `void` outright.
@@ -451,12 +373,9 @@ BarWidget {
     target: "omapager.panel"
     function open(): string { pager.open(); return "open" }
     function openSettings(): string { pager.openSettings(); return "settings" }
-    // The line under the title, and which set it is drawing from. Reading it
-    // by eye means opening the panel, and an open panel owns the keyboard.
+    // Current notification status for scripts, without opening the panel.
     function line(): string {
-      return JSON.stringify({ line: pager.stateLine, rotating: pager.rotatingPhrases,
-                              set: pager.hasState ? "quiet" : "open",
-                              index: pager.phraseIndex, count: pager.phrases.length })
+      return JSON.stringify({ line: pager.stateLine })
     }
     function close(): string { controller.hide(); return "closed" }
     function toggle(): string { pager.togglePanel(); return controller.open ? "open" : "closed" }
@@ -510,27 +429,21 @@ BarWidget {
       text: pager.sharingGlyph
       colour: pager.snoozedColour
       openPanelOnly: true
-      tooltipText: "Sharing detected - click to snooze"
+      tooltipText: "Screen sharing detected. Open snooze controls."
     }
 
     Indicator {
       visible: !pager.sharingOfferPending && pager.silenced
       text: pager.bellOff
       colour: pager.silencedColour
-      tooltipText: "Notifications silenced - click to allow them, right-click for options"
+      tooltipText: "Disable Do Not Disturb. Right-click for notifications."
     }
 
     Indicator {
       visible: !pager.sharingOfferPending && !pager.silenced && (pager.globalSnoozed || pager.snoozed.length > 0)
       text: pager.bellSleep
       colour: pager.snoozedColour
-      tooltipText: pager.globalSnoozed
-                   ? ("Everything snoozed, back " + pager.waking(pager.globalUntil)
-                      + " - right-click for options")
-                   : ((pager.snoozed.length === 1
-                       ? (pager.snoozed[0].label + " snoozed " + pager.waking(pager.snoozed[0].until))
-                       : (pager.snoozed.length + " sources snoozed"))
-                      + " - right-click for options")
+      tooltipText: pager.stateLine + ". Right-click for controls."
     }
 
     // The resting state, which only appears while the bar's inactive
@@ -541,7 +454,7 @@ BarWidget {
       text: pager.bellOff
       colour: pager.bar ? pager.bar.barForeground : Color.foreground
       quiet: true
-      tooltipText: "Silence notifications - right-click for options"
+      tooltipText: "Enable Do Not Disturb. Right-click for notifications."
     }
   }
 
@@ -590,7 +503,6 @@ BarWidget {
   onOpenedChanged: {
     cursorAt = 0; cursorLive = false; expandedKey = ""; globalChoosing = false
     recentExpanded = false
-    phraseSwap.stop()          // never reopen onto a half-faded line
     if (!opened) settingsView = false
     // What has been held back, as of now - read on opening rather than kept
     // up to date, because the panel is the only thing that ever asks.
@@ -691,7 +603,7 @@ BarWidget {
               Dropdown {
                 id: displayDropdown
                 width: parent.width
-                label: "Show notifications on"
+                label: "Notification display"
                 value: pager.displayChoice
                 options: pager.displayOptions
                 foreground: pager.panelFg
@@ -747,47 +659,9 @@ BarWidget {
 
               Text {
                 width: parent.width
-                text: "Animate the time remaining.\nNotifications still expire when this is off."
+                text: "Show time remaining before a notification expires."
                 textFormat: Text.PlainText
                 color: Qt.darker(pager.panelFg, 1.4)
-                font.family: pager.fontFamily
-                font.pixelSize: Style.font.bodySmall
-                wrapMode: Text.WordWrap
-              }
-            }
-
-            PanelSeparator { foreground: pager.panelFg }
-
-            Column {
-              width: parent.width
-              spacing: Style.spacing.lg
-
-              Row {
-                width: parent.width
-                spacing: Style.spacing.controlGap
-                Text {
-                  width: parent.width - remoteIconsSwitch.width - parent.spacing
-                  anchors.verticalCenter: parent.verticalCenter
-                  text: "Fetch website icons"
-                  textFormat: Text.PlainText
-                  color: pager.panelFg
-                  font.family: pager.fontFamily
-                  font.pixelSize: Style.font.body
-                  wrapMode: Text.WordWrap
-                }
-                ToggleSwitch {
-                  id: remoteIconsSwitch
-                  anchors.verticalCenter: parent.verticalCenter
-                  checked: pager.configuredFetchRemoteIcons
-                  foreground: pager.panelFg
-                  onToggled: pager.persistSettings({ fetchRemoteIcons: !pager.configuredFetchRemoteIcons })
-                }
-              }
-              Text {
-                width: parent.width
-                text: "Fetch missing icons from websites.\nSites can see your IP; local and cached icons work when off."
-                textFormat: Text.PlainText
-                color: pager.dim
                 font.family: pager.fontFamily
                 font.pixelSize: Style.font.bodySmall
                 wrapMode: Text.WordWrap
@@ -807,7 +681,7 @@ BarWidget {
                 Text {
                   width: parent.width - sharingOfferSwitch.width - parent.spacing
                   anchors.verticalCenter: parent.verticalCenter
-                  text: "Suggest a snooze when sharing"
+                  text: "Suggest snooze during screen sharing"
                   textFormat: Text.PlainText
                   color: pager.panelFg
                   font.family: pager.fontFamily
@@ -826,7 +700,7 @@ BarWidget {
 
               Text {
                 width: parent.width
-                text: "A quiet offer in the bar.\nNothing is muted unless you choose."
+                text: "Offer a timed snooze when screen sharing starts."
                 textFormat: Text.PlainText
                 color: Qt.darker(pager.panelFg, 1.4)
                 font.family: pager.fontFamily
@@ -917,8 +791,8 @@ BarWidget {
                   anchors.verticalCenter: parent.verticalCenter
                   iconText: pager.codesLetThrough ? pager.keyGlyph : pager.keyOff
                   tooltipText: pager.codesLetThrough
-                    ? "Verification codes come through a snooze or a silence - click to hold them back too"
-                    : "Nothing comes through - click to let verification codes through"
+                    ? "Block verification codes during snooze and Do Not Disturb"
+                    : "Allow verification codes during snooze and Do Not Disturb"
                   foreground: pager.codesLetThrough ? pager.panelFg : pager.dim
                   fontFamily: pager.fontFamily
                   onClicked: {
@@ -929,8 +803,7 @@ BarWidget {
                 PanelActionButton {
                   anchors.verticalCenter: parent.verticalCenter
                   iconText: pager.globalSnoozed ? pager.bell : pager.bellSleep
-                  tooltipText: pager.globalSnoozed ? "Let everything through now"
-                                                   : "Snooze everything for a while"
+                  tooltipText: pager.globalSnoozed ? "End global snooze" : "Snooze all notifications"
                   foreground: pager.globalSnoozed ? pager.snoozedColour : pager.panelFg
                   fontFamily: pager.fontFamily
                   onClicked: {
@@ -1053,7 +926,7 @@ BarWidget {
             textFormat: Text.PlainText
               visible: pager.codesLetThrough
               width: parent.width
-              text: "Verification codes still come through."
+              text: "Verification-code exception enabled."
               color: pager.dim
               font.family: pager.fontFamily
               font.pixelSize: Style.font.caption
@@ -1125,7 +998,7 @@ BarWidget {
           Text {
             visible: !pager.settingsView && !pager.quiet && pager.recentExpanded && pager.recent.length === 0
             width: parent.width
-            text: "New notifications stay here after their toast disappears."
+            text: "No recent notifications."
             textFormat: Text.PlainText
             color: pager.dim
             font.family: pager.fontFamily
@@ -1217,8 +1090,8 @@ BarWidget {
             visible: !pager.settingsView && pager.sources.length === 0
             width: parent.width
             text: pager.quiet
-                  ? "Nothing has been held back yet."
-                  : "Nothing is snoozed. Right-click a notification to quieten the app or site it came from."
+                  ? "No held notifications."
+                  : "No snoozed sources. Right-click a notification to snooze its source."
             color: pager.dim
             font.family: pager.fontFamily
             font.pixelSize: Style.font.bodySmall
@@ -1370,7 +1243,7 @@ BarWidget {
                     PanelActionButton {
                       visible: line.modelData.held.length > 0
                       iconText: line.expanded ? "\u{f0143}" : "\u{f0140}"   // chevron up / down
-                      tooltipText: line.expanded ? "Hide what it held" : "See what it held"
+                      tooltipText: line.expanded ? "Hide held notifications" : "Show held notifications"
                       foreground: pager.panelFg
                       fontFamily: pager.fontFamily
                       onClicked: pager.expandedKey = line.expanded ? "" : line.modelData.key
@@ -1378,8 +1251,8 @@ BarWidget {
 
                     PanelActionButton {
                       iconText: line.choosing ? "✕" : "\u{f0150}"     // close / clock
-                      tooltipText: line.choosing ? "Leave it as it is"
-                                 : (line.snoozedByName ? "Snooze for longer" : "Snooze this source")
+                      tooltipText: line.choosing ? "Close snooze options"
+                                 : (line.snoozedByName ? "Extend snooze" : "Snooze source")
                       foreground: pager.panelFg
                       fontFamily: pager.fontFamily
                       onClicked: line.choosing = !line.choosing
@@ -1388,7 +1261,7 @@ BarWidget {
                     PanelActionButton {
                       visible: line.snoozedByName
                       iconText: "\u{f009a}"                 // nf-md-bell
-                      tooltipText: "Wake it now"
+                      tooltipText: "Resume notifications from this source"
                       foreground: pager.panelFg
                       fontFamily: pager.fontFamily
                       onClicked: pager.service.unsnooze(line.modelData.key)
@@ -1446,7 +1319,7 @@ BarWidget {
           Button {
             visible: !pager.settingsView && (pager.quiet || pager.snoozed.length > 1)
             width: parent.width
-            text: "Let everything through"
+            text: "Resume all notifications"
             bordered: true
             foreground: pager.panelFg
             fontFamily: pager.fontFamily

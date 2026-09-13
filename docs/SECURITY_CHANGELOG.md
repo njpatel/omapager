@@ -1,5 +1,10 @@
 # Security changelog
 
+## Unreleased
+
+- Keep `fetchRemoteIcons` config-only. Removing its UI control does not change
+  the default, opt-out behavior, cached-icon handling or network protections.
+
 ## v1.1.0 — 2026-09-13
 
 - Make missing website icons fetch automatically; provide a preferences opt-out

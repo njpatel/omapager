@@ -22,7 +22,7 @@ integration stability, as the plan requires.
    auto mode runs helpers directly; `requireSandbox: true` refuses that fallback.
    Actual helper failures are never retried directly. The probe reports capability
    and selected mode, not successful completion of every helper operation.
-6. Remote icons are automatic by default and can be disabled in preferences.
+6. Remote icons are automatic by default. The config-only fetchRemoteIcons option disables fetching.
    Local/validated cached icons remain usable with fetching off. The same network
    and image checks apply in both direct and sandboxed modes. `omapager_http.py`
    resolves once per hop, validates
