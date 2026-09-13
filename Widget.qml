@@ -69,6 +69,8 @@ BarWidget {
   readonly property string configuredDisplayName: String(setting("displayName", "") || "")
   readonly property bool configuredOfferSnoozeWhenSharing: setting("offerSnoozeWhenSharing", true) !== false
   readonly property bool configuredShowCountdown: setting("showCountdown", false) === true
+  readonly property bool configuredFetchRemoteIcons: setting("fetchRemoteIcons", true) !== false
+  readonly property bool configuredRequireSandbox: setting("requireSandbox", false) === true
   readonly property int configuredEdgeSpacing: {
     var spacing = Number(setting("edgeSpacing", 12))
     return isFinite(spacing) ? Math.max(0, Math.min(64, Math.round(spacing))) : 12
@@ -152,6 +154,7 @@ BarWidget {
   // read one - so this is the single place that can, and it pushes them over.
   function applySettings() {
     if (!service) return
+    service.requireSandbox = configuredRequireSandbox
     var stacking = String(setting("stacking", "source"))
     if (stacking === "all" || stacking === "source" && service.stacking !== stacking)
       service.commit(function() { service.stacking = stacking })
@@ -161,7 +164,7 @@ BarWidget {
     service.showCountdown = configuredShowCountdown
     var align = String(setting("actionsAlign", "right"))
     if (align === "left" || align === "right") service.actionsAlign = align
-    service.fetchIcons = setting("fetchRemoteIcons", false) === true
+    service.setFetchRemoteIcons(configuredFetchRemoteIcons)
     service.allowDefaultActionOnCardClick = setting("allowDefaultActionOnCardClick", false) === true
     var lifetime = Number(setting("clipboardTimeout", 60))
     service.clipboardTimeout = [30, 60, 90].indexOf(lifetime) >= 0 ? lifetime : 60
@@ -188,6 +191,7 @@ BarWidget {
     service.displayName = configuredDisplayName
     service.displayMode = configuredDisplayMode
     service.offerSnoozeWhenSharing = configuredOfferSnoozeWhenSharing
+    service.helperSettingsReady = true
   }
 
   // Derived settings bindings may still hold the previous entry in the
@@ -761,6 +765,44 @@ BarWidget {
               Row {
                 width: parent.width
                 spacing: Style.spacing.controlGap
+                Text {
+                  width: parent.width - remoteIconsSwitch.width - parent.spacing
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: "Fetch website icons"
+                  textFormat: Text.PlainText
+                  color: pager.panelFg
+                  font.family: pager.fontFamily
+                  font.pixelSize: Style.font.body
+                  wrapMode: Text.WordWrap
+                }
+                ToggleSwitch {
+                  id: remoteIconsSwitch
+                  anchors.verticalCenter: parent.verticalCenter
+                  checked: pager.configuredFetchRemoteIcons
+                  foreground: pager.panelFg
+                  onToggled: pager.persistSettings({ fetchRemoteIcons: !pager.configuredFetchRemoteIcons })
+                }
+              }
+              Text {
+                width: parent.width
+                text: "Fetch missing icons from websites.\nSites can see your IP; local and cached icons work when off."
+                textFormat: Text.PlainText
+                color: pager.dim
+                font.family: pager.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                wrapMode: Text.WordWrap
+              }
+            }
+
+            PanelSeparator { foreground: pager.panelFg }
+
+            Column {
+              width: parent.width
+              spacing: Style.spacing.lg
+
+              Row {
+                width: parent.width
+                spacing: Style.spacing.controlGap
 
                 Text {
                   width: parent.width - sharingOfferSwitch.width - parent.spacing
@@ -803,6 +845,19 @@ BarWidget {
                 wrapMode: Text.WordWrap
               }
             }
+              Text {
+                width: parent.width
+                visible: pager.service && (pager.service.sandboxStatus.mode === "direct"
+                                           || pager.service.sandboxStatus.mode === "blocked")
+                text: pager.service && pager.service.sandboxStatus.mode === "blocked"
+                  ? "Sandbox unavailable: helpers are blocked."
+                  : "Sandbox unavailable: helpers run directly as your user."
+                textFormat: Text.PlainText
+                color: pager.panelFg
+                font.family: pager.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                wrapMode: Text.WordWrap
+              }
           }
 
           PanelHero {

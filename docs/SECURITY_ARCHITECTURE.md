@@ -17,10 +17,15 @@ integration stability, as the plan requires.
    Its independent detector uses bounded summary/raw-body/body content, not
    generated metadata, with the same product/year exclusions and 24-before /
    72-after keyword windows as the JS detector. Recognition remains heuristic.
-5. QML launches `omapager-run-*` wrappers. Bubblewrap is required; no automatic
-   unsandboxed fallback exists. The probe distinguishes availability from an
-   operational namespace test. It does not claim every helper operation succeeded.
-6. Remote icons are opt-in. `omapager_http.py` resolves once per hop, validates
+5. QML launches `omapager-run-*` wrappers after Widget.applySettings supplies the
+   saved helper policy. Bubblewrap is used when its preflight succeeds. Otherwise
+   auto mode runs helpers directly; `requireSandbox: true` refuses that fallback.
+   Actual helper failures are never retried directly. The probe reports capability
+   and selected mode, not successful completion of every helper operation.
+6. Remote icons are automatic by default and can be disabled in preferences.
+   Local/validated cached icons remain usable with fetching off. The same network
+   and image checks apply in both direct and sandboxed modes. `omapager_http.py`
+   resolves once per hop, validates
    every address (including against an IPv6-mapped-IPv4 bypass) and connects
    to a numeric sockaddr, falling back across every validated address for that
    hop but never re-resolving and never letting a TLS failure be masked by a
@@ -53,7 +58,7 @@ as "ends in a number" — plain decimal and 0x-prefixed hex, including bare `0x`
 grammar as an ordinary hostname and later canonicalize to a private/loopback
 address. Mailto accepts one address, no query headers/attachments/percent
 escapes. External browser links may use valid nonstandard ports; automatic
-icon requests allow only HTTP:80/HTTPS:443.
+icon requests allow only HTTPS:443, including redirects and icon candidates.
 
 ## Limits and defaults
 
@@ -74,15 +79,24 @@ callbacks after cancellation, and startup restore/history replay share the cap.
 Stored IDs cannot replace a new session's live sender merely by matching its ID.
 
 History: 100 entries and 24 hours by default. `historyHours`: 0, 1, 24, 168.
-Remote icons: off (`fetchRemoteIcons`). Default card action: off
-(`allowDefaultActionOnCardClick`). Clipboard timeout: 60 seconds, choices 30/60/90.
-Widget.applySettings is the only settings path to the service, as upstream expects.
+Remote icons: on (`fetchRemoteIcons`); an explicit saved false is respected.
+Sandbox required: off (`requireSandbox`); operational Bubblewrap is still used.
+Default card action: off (`allowDefaultActionOnCardClick`). Clipboard timeout:
+60 seconds, choices 30/60/90. Widget.applySettings is the only settings path to
+the service; helpers wait for its saved policy before startup execution.
 
-HTTP caps: HTML 512 KiB, manifest 256 KiB, icon 1 MiB, three redirects, five-second
-socket timeout, bounded body deadline plus 45-second helper wall timeout. DNS is
-bounded by the helper timeout. No compressed responses. Remote PNG/JPEG/WebP/ICO
-must decode in Pillow, dimensions <=2048 per side, normalized PNG <=128 per side.
-Without Pillow remote bytes never reach Qt; local theme resolution still works.
+HTTP caps: HTML 512 KiB, up to two 256 KiB manifests, 16 links per page/manifest,
+six distinct icon downloads of at most 1 MiB, and three redirects per fetch.
+At most eight unique public DNS answers are retained. Socket operations have a
+five-second limit within a 12-second redirect-chain/body deadline; synchronous
+DNS and slow header processing remain bounded by the 45-second helper wall limit.
+No compressed responses. Remote PNG/JPEG/WebP/ICO must verify and decode in Pillow
+as a single frame, dimensions <=2048 per side, normalized PNG <=128 per side.
+Validated cache files are opened once without following symlinks and capped at
+256 KiB. Normalization and Qt still reopen local paths afterwards: other processes
+running as the same user can race those files, so this is not isolation from a
+hostile same-user desktop. Without Pillow remote bytes never reach Qt through the
+normal validated path; local theme resolution still works.
 
 ## Future separation
 

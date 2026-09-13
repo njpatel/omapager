@@ -1,103 +1,318 @@
 #!/usr/bin/python3
-"""Fail-closed helper namespaces. No unsandboxed compatibility fallback."""
+"""Run Omapager helpers sandboxed when possible, or directly by policy."""
 import json
+from functools import partial
 import os
 from pathlib import Path
+import re
 import resource
-import shutil
+import signal
+import stat
 import subprocess
 import sys
+import time
 from urllib.parse import unquote
+
 from omapager_files import private_dir
+
 
 BASE = Path(__file__).resolve().parent.parent
 HOME_DIR = Path.home()
-STATE = HOME_DIR / '.local/state/omarchy/omapager'
+STATE = HOME_DIR / ".local/state/omarchy/omapager"
+BWRAP = Path("/usr/bin/bwrap")
+PYTHON = Path("/usr/bin/python3")
+HELPER_KINDS = frozenset(("store", "icon", "kdeconnect"))
+TERMINATE_GRACE = 2
 
-def command(kind, args):
-    bwrap = shutil.which('bwrap')
-    if not bwrap:
-        raise RuntimeError('Bubblewrap is required')
-    if kind not in ('store', 'icon', 'kdeconnect', 'check'):
-        raise ValueError('unknown helper')
-    cmd = [bwrap, '--die-with-parent', '--new-session', '--unshare-all',
-           '--cap-drop', 'ALL', '--ro-bind', '/usr', '/usr', '--proc', '/proc',
-           '--dev', '/dev', '--tmpfs', '/tmp', '--tmpfs', '/home',
-           '--dir', str(HOME_DIR), '--clearenv', '--setenv', 'HOME', str(HOME_DIR),
-           '--setenv', 'PATH', '/usr/bin', '--setenv', 'LANG', 'C.UTF-8',
-           '--setenv', 'PYTHONDONTWRITEBYTECODE', '1', '--chdir', '/tmp']
-    for name in ('lib', 'lib64', 'bin', 'sbin'):
-        if Path('/'+name).exists():
-            cmd += ['--symlink', 'usr/'+name, '/'+name]
-    for name in ('/etc/ld.so.cache', '/etc/nsswitch.conf'):
-        if Path(name).exists(): cmd += ['--ro-bind', name, name]
-    cmd += ['--ro-bind', str(BASE), '/opt/omapager']
-    if kind == 'check':
-        return cmd + ['/usr/bin/true']
+
+class WrapperInterrupted(Exception):
+    def __init__(self, signum):
+        super().__init__(signum)
+        self.signum = signum
+
+
+def require_policy(environ):
+    value = environ.get("OMAPAGER_REQUIRE_SANDBOX")
+    if value in (None, "0"):
+        return False
+    if value == "1":
+        return True
+    raise ValueError("invalid sandbox policy")
+
+
+def executable(path):
+    return path.is_file() and os.access(path, os.X_OK)
+
+
+def bubblewrap_path():
+    return str(BWRAP) if executable(BWRAP) else None
+
+
+def clean_environment(extra=None):
+    environ = {
+        "HOME": str(HOME_DIR),
+        "LANG": "C.UTF-8",
+        "PATH": "/usr/bin",
+        "PYTHONDONTWRITEBYTECODE": "1",
+    }
+    if extra:
+        environ.update(extra)
+    return environ
+
+
+def validated_bus_environment(environ):
+    address = environ.get("DBUS_SESSION_BUS_ADDRESS", "")
+    if not address.startswith("unix:path=") or ";" in address:
+        raise RuntimeError("unsupported session bus address")
+    encoded_path, separator, option = address[len("unix:path="):].partition(",")
+    if separator:
+        if (not option.startswith("guid=") or len(option[5:]) != 32
+                or any(c not in "0123456789abcdefABCDEF" for c in option[5:])):
+            raise RuntimeError("unsupported session bus address")
+    bus = Path(unquote(encoded_path, errors="strict"))
+    runtime_text = environ.get("XDG_RUNTIME_DIR")
+    runtime = Path(runtime_text) if runtime_text else bus.parent
+    if (not bus.is_absolute() or not runtime.is_absolute() or bus.parent != runtime
+            or "\x00" in str(bus) or "\x00" in str(runtime)):
+        raise RuntimeError("session bus unavailable")
+    try:
+        runtime_stat = os.lstat(runtime)
+        bus_stat = os.lstat(bus)
+    except OSError as error:
+        raise RuntimeError("session bus unavailable") from error
+    if (not stat.S_ISDIR(runtime_stat.st_mode) or runtime_stat.st_uid != os.geteuid()
+            or runtime_stat.st_mode & 0o077):
+        raise RuntimeError("session bus unavailable")
+    if not stat.S_ISSOCK(bus_stat.st_mode) or bus_stat.st_uid != os.geteuid():
+        raise RuntimeError("session bus unavailable")
+    return {
+        "XDG_RUNTIME_DIR": str(runtime),
+        "DBUS_SESSION_BUS_ADDRESS": address,
+    }, bus
+
+
+def python_helper(kind, args, root="/opt/omapager"):
+    if kind not in HELPER_KINDS:
+        raise ValueError("unknown helper")
+    return [str(PYTHON), "-E", "-s", f"{root}/bin/omapager-{kind}", *args]
+
+
+def sandbox_command(kind, args, bwrap, environ):
+    if kind not in (*HELPER_KINDS, "check"):
+        raise ValueError("unknown helper")
+    cmd = [bwrap, "--die-with-parent", "--new-session", "--unshare-all",
+           "--cap-drop", "ALL", "--ro-bind", "/usr", "/usr", "--proc", "/proc",
+           "--dev", "/dev", "--tmpfs", "/tmp", "--tmpfs", "/home",
+           "--dir", str(HOME_DIR), "--clearenv", "--setenv", "HOME", str(HOME_DIR),
+           "--setenv", "PATH", "/usr/bin", "--setenv", "LANG", "C.UTF-8",
+           "--setenv", "PYTHONDONTWRITEBYTECODE", "1", "--chdir", "/tmp"]
+    for name in ("lib", "lib64", "bin", "sbin"):
+        if Path("/" + name).exists():
+            cmd += ["--symlink", "usr/" + name, "/" + name]
+    for name in ("/etc/ld.so.cache", "/etc/nsswitch.conf"):
+        if Path(name).exists():
+            cmd += ["--ro-bind", name, name]
+    cmd += ["--ro-bind", str(BASE), "/opt/omapager"]
+    if kind == "check":
+        return cmd + ["/usr/bin/true"]
+
     private_dir(STATE)
-    if kind == 'store':
-        cmd += ['--bind', str(STATE), str(STATE)]
-    elif kind == 'icon':
-        icons = private_dir(STATE / 'icons')
-        cmd += ['--bind', str(icons), str(icons)]
-        for part in ('.local/share/icons', '.local/share/applications', '.config/omarchy/omapager/icons'):
+    if kind == "store":
+        cmd += ["--bind", str(STATE), str(STATE)]
+    elif kind == "icon":
+        icons = private_dir(STATE / "icons")
+        cmd += ["--bind", str(icons), str(icons)]
+        for part in (".local/share/icons", ".local/share/applications",
+                     ".config/omarchy/omapager/icons"):
             path = HOME_DIR / part
             if path.is_dir() and not path.is_symlink():
-                cmd += ['--ro-bind', str(path), str(path)]
-        if '--fetch' in args:
-            cmd += ['--share-net']
-            for name in ('/etc/resolv.conf', '/etc/ssl/certs', '/etc/ca-certificates'):
-                if Path(name).exists(): cmd += ['--ro-bind', name, name]
-    elif kind == 'kdeconnect':
-        # This exposes the session bus, not all runtime files. Bus mediation is
-        # a documented residual capability; no claim of destination filtering.
-        address = os.environ.get('DBUS_SESSION_BUS_ADDRESS', '')
-        if not address.startswith('unix:path=') or ';' in address:
-            raise RuntimeError('unsupported session bus address')
-        encoded_path, _, guid = address[len('unix:path='):].partition(',')
-        if guid and (not guid.startswith('guid=') or len(guid[5:]) != 32
-                     or any(c not in '0123456789abcdefABCDEF' for c in guid[5:])):
-            raise RuntimeError('unsupported session bus address')
-        bus = Path(unquote(encoded_path, errors='strict'))
-        runtime = Path(os.environ.get('XDG_RUNTIME_DIR', str(bus.parent)))
-        if not bus.is_absolute() or not runtime.is_absolute() or not bus.is_socket():
-            raise RuntimeError('session bus unavailable')
-        cmd += ['--ro-bind', str(bus), str(bus), '--setenv', 'XDG_RUNTIME_DIR', str(runtime),
-                '--setenv', 'DBUS_SESSION_BUS_ADDRESS', address]
-        # A reply demo gets only its own private fixture/result directory, never
-        # the real notification store. Normal phone operations do not mount it.
-        demo_app = 'Omapager reply demo'
-        demo_request = (len(args) == 3 and args[:2] == ['find', demo_app]) or (
-            len(args) == 5 and args[0] == 'reply'
-            and args[1].startswith('demo:') and args[3] == demo_app)
-        demo = STATE / 'reply-demo'
+                cmd += ["--ro-bind", str(path), str(path)]
+        if "--fetch" in args:
+            cmd += ["--share-net"]
+            for name in ("/etc/resolv.conf", "/etc/ssl/certs", "/etc/ca-certificates"):
+                if Path(name).exists():
+                    cmd += ["--ro-bind", name, name]
+    elif kind == "kdeconnect":
+        bus_environment, bus = validated_bus_environment(environ)
+        cmd += ["--ro-bind", str(bus), str(bus)]
+        for name, value in bus_environment.items():
+            cmd += ["--setenv", name, value]
+
+        # A reply demo gets only its private fixture/result directory. Normal
+        # phone operations never receive the notification store mount.
+        demo_app = "Omapager reply demo"
+        demo_request = (len(args) == 3 and args[:2] == ["find", demo_app]) or (
+            len(args) == 5 and args[0] == "reply"
+            and re.fullmatch(r"demo:[0-9a-f]{32}", args[1]) is not None
+            and args[3] == demo_app)
+        demo = STATE / "reply-demo"
         if demo_request and demo.is_dir() and not demo.is_symlink():
             private_dir(demo)
-            cmd += ['--ro-bind' if args[0] == 'find' else '--bind', str(demo), str(demo)]
-    return cmd + ['/usr/bin/python3', '/opt/omapager/bin/omapager-'+kind] + args
+            cmd += ["--ro-bind" if args[0] == "find" else "--bind",
+                    str(demo), str(demo)]
+    return cmd + python_helper(kind, args)
+
+
+def direct_command(kind, args):
+    return python_helper(kind, args, str(BASE))
+
+
+def direct_environment(kind, environ):
+    if kind not in HELPER_KINDS:
+        raise ValueError("unknown helper")
+    extra = validated_bus_environment(environ)[0] if kind == "kdeconnect" else None
+    return clean_environment(extra)
+
 
 def limits():
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
     resource.setrlimit(resource.RLIMIT_CPU, (30, 30))
-    resource.setrlimit(resource.RLIMIT_AS, (512*1024*1024, 512*1024*1024))
-    resource.setrlimit(resource.RLIMIT_FSIZE, (2*1024*1024, 2*1024*1024))
+    resource.setrlimit(resource.RLIMIT_AS, (512 * 1024 * 1024, 512 * 1024 * 1024))
+    resource.setrlimit(resource.RLIMIT_FSIZE, (2 * 1024 * 1024, 2 * 1024 * 1024))
 
-if __name__ == '__main__':
+
+def prepare_child(signal_mask):
+    signal.pthread_sigmask(signal.SIG_SETMASK, signal_mask)
+    limits()
+
+
+def stop_process_group(proc):
+    if proc.returncode is not None:
+        return
     try:
-        kind = Path(sys.argv[0]).name.removeprefix('omapager-run-')
-        args = sys.argv[1:]
-        if kind == 'helper':
+        os.killpg(proc.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        try:
+            proc.wait()
+        except ChildProcessError:
+            pass
+        return
+
+    # Observe the leader without reaping it. Keeping its PID reserved makes the
+    # final group signal safe while descendants get a grace period to exit.
+    deadline = time.monotonic() + TERMINATE_GRACE
+    while time.monotonic() < deadline:
+        try:
+            exited = os.waitid(os.P_PID, proc.pid,
+                               os.WEXITED | os.WNOHANG | os.WNOWAIT)
+        except ChildProcessError:
+            # Another waiter already reaped it; the numeric PGID is no longer
+            # safely attributable to this launch.
+            return
+        if exited:
+            break
+        time.sleep(0.02)
+    try:
+        # Always finish the known group: the leader may have exited on TERM
+        # while a descendant ignored it. The unreaped leader prevents PID reuse.
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    try:
+        proc.wait()
+    except ChildProcessError:
+        pass
+
+
+def run_supervised(argv, environ, timeout):
+    handled_signals = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
+    previous = {}
+
+    def interrupted(signum, _frame):
+        raise WrapperInterrupted(signum)
+
+    old_mask = signal.pthread_sigmask(signal.SIG_BLOCK, handled_signals)
+    masked = True
+    proc = None
+    try:
+        for signum in handled_signals:
+            previous[signum] = signal.signal(signum, interrupted)
+        # stdin/stdout/stderr deliberately inherit unchanged. The child is a
+        # session leader so wrapper termination and deadlines reap its group.
+        child_setup = partial(prepare_child, old_mask)
+        proc = subprocess.Popen(argv, env=environ, preexec_fn=child_setup,
+                                start_new_session=True)
+        masked = False
+        signal.pthread_sigmask(signal.SIG_SETMASK, old_mask)
+        try:
+            return proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            stop_process_group(proc)
+            raise
+    except WrapperInterrupted:
+        if proc is not None:
+            stop_process_group(proc)
+        raise
+    finally:
+        try:
+            if masked:
+                signal.pthread_sigmask(signal.SIG_SETMASK, old_mask)
+        finally:
+            for signum, handler in previous.items():
+                signal.signal(signum, handler)
+
+
+def probe_sandbox(bwrap):
+    try:
+        return run_supervised(sandbox_command("check", [], bwrap, {}),
+                              clean_environment(), 5) == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def mode_status(required):
+    bwrap = bubblewrap_path()
+    operational = bool(bwrap and probe_sandbox(bwrap))
+    mode = "sandboxed" if operational else ("blocked" if required else "direct")
+    return {
+        "bubblewrapAvailable": bwrap is not None,
+        "sandboxOperational": operational,
+        "required": required,
+        "unsandboxedFallback": not required,
+        "mode": mode,
+    }, bwrap
+
+
+def run_helper(kind, args, required, environ):
+    if kind not in HELPER_KINDS:
+        raise ValueError("unknown helper")
+    status, bwrap = mode_status(required)
+    if status["mode"] == "blocked":
+        raise RuntimeError("sandbox required")
+    if status["mode"] == "sandboxed":
+        argv = sandbox_command(kind, args, bwrap, environ)
+        child_environment = clean_environment()
+    else:
+        argv = direct_command(kind, args)
+        child_environment = direct_environment(kind, environ)
+    # This is the sole actual-helper execution. A failure is returned directly;
+    # it is never replayed in a less restricted mode.
+    return run_supervised(argv, child_environment, 45)
+
+
+def main(argv=None, environ=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    environ = os.environ if environ is None else environ
+    try:
+        kind = Path(sys.argv[0]).name.removeprefix("omapager-run-")
+        args = argv
+        if kind == "helper":
+            if not args:
+                raise ValueError("helper kind required")
             kind, args = args[0], args[1:]
-        if kind == 'status':
-            available = shutil.which('bwrap') is not None
-            active = available and subprocess.run(command('check', []), stdout=subprocess.DEVNULL,
-                                                   stderr=subprocess.DEVNULL, timeout=5).returncode == 0
-            print(json.dumps({'bubblewrapAvailable': available, 'sandboxOperational': bool(active),
-                              'required': True, 'unsandboxedFallback': False}))
-            sys.exit(0)
-        if kind == 'capabilities':
-            sys.exit(0 if shutil.which('wl-copy') and shutil.which('wl-paste') else 1)
-        sys.exit(subprocess.run(command(kind, args), timeout=45, preexec_fn=limits).returncode)
-    except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired):
-        sys.stderr.write('omapager: helper unavailable; sandbox required or input rejected\n')
-        sys.exit(1)
+        required = require_policy(environ)
+        if kind == "status":
+            print(json.dumps(mode_status(required)[0]))
+            return 0
+        if kind == "capabilities":
+            return 0 if executable(Path("/usr/bin/wl-copy")) and executable(Path("/usr/bin/wl-paste")) else 1
+        return run_helper(kind, args, required, environ)
+    except WrapperInterrupted as error:
+        return 128 + error.signum
+    except (OSError, UnicodeError, ValueError, RuntimeError, subprocess.TimeoutExpired):
+        sys.stderr.write("omapager: helper unavailable; sandbox policy or input rejected\n")
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

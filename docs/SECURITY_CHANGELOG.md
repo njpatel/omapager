@@ -1,5 +1,17 @@
 # Security changelog
 
+## v1.1.0 — 2026-09-13
+
+- Make missing website icons fetch automatically; provide a preferences opt-out
+  while retaining local and validated cached icons. Preserve explicit saved false.
+- Enforce HTTPS and the same destination, DNS-pinning, redirect and image checks
+  regardless of sandbox availability.
+- Prefer operational Bubblewrap without requiring it by default. A saved
+  requireSandbox=true blocks helper execution when sandboxing is unavailable.
+  Select mode before execution; never retry a failed helper outside the sandbox.
+- Apply saved helper policy before startup reads/writes and expose direct or
+  blocked execution in preferences and the diagnostic probe.
+
 ## v1.0.0 — 2026-09-13
 
 The first tagged release includes the changes below. These implementation notes

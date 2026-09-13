@@ -39,7 +39,6 @@ for path in (ROOT/'.github/workflows').glob('*.yml'):
 service=(ROOT/'Service.qml').read_text()
 for helper in ('store','icon','kdeconnect'):
     if f'"bin/omapager-{helper}"' in service:errors.append('raw helper launch: '+helper)
-if 'property bool fetchIcons: false' not in service:errors.append('remote icons no longer opt-in')
 if 'property bool allowDefaultActionOnCardClick: false' not in service:errors.append('default actions no longer opt-in')
 if errors:raise SystemExit('\n'.join(errors))
 print('static security invariants: passed')

@@ -203,7 +203,7 @@ function write(proc, bin, verb, payload, args) {
 }
 
 function _pump(proc) {
-  if (_busy || _queue.length === 0) return
+  if (proc.policyReady === false || _busy || _queue.length === 0) return
   var job = _queue.shift()
   _busy = true
   proc.command = [job.bin, job.verb].concat(job.args)

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Real namespaces, synthetic HOME, no live notification state or session bus."""
+"""Real namespaces plus synthetic direct/required helper-mode boundaries."""
+import contextlib
+import io
 import importlib.machinery
 import importlib.util
 import json
@@ -19,9 +21,10 @@ r=importlib.util.module_from_spec(spec);loader.exec_module(r)
 with tempfile.TemporaryDirectory(prefix='omapager-sandbox-') as tmp:
     r.HOME_DIR=Path(tmp)/'home';r.HOME_DIR.mkdir()
     r.STATE=r.HOME_DIR/'.local/state/omarchy/omapager'
+    bwrap=r.bubblewrap_path();assert bwrap
     secret=r.HOME_DIR/'.ssh/id_test';secret.parent.mkdir();secret.write_text('synthetic secret')
     for kind in ('store','icon'):
-        cmd=r.command(kind,[])
+        cmd=r.sandbox_command(kind,[],bwrap,os.environ)
         cut=cmd.index('/usr/bin/python3')
         code=f'''import os,socket
 assert not os.path.exists({str(secret)!r})
@@ -32,7 +35,7 @@ assert s.connect_ex(('1.1.1.1',443)) != 0
         writable=r.STATE if kind=='store' else r.STATE/'icons'
         code+=f"open({str(writable/'check')!r}, 'w').write('ok')\n"
         subprocess.run(cmd[:cut]+['/usr/bin/python3','-c',code],check=True,timeout=10)
-    cmd=r.command('store',['put'])
+    cmd=r.sandbox_command('store',['put'],bwrap,os.environ)
     subprocess.run(cmd,input=json.dumps({'key':'n1','body':'Your code is 938271','codes':'938271'}),text=True,check=True,timeout=10)
     assert '938271' not in (r.STATE/'live/n1.json').read_text()
     runtime = r.HOME_DIR / 'private-runtime'
@@ -47,7 +50,7 @@ assert s.connect_ex(('1.1.1.1',443)) != 0
         demo_note.write_text('{"synthetic":true}')
         with patch.dict(os.environ, {'DBUS_SESSION_BUS_ADDRESS': address,
                                      'XDG_RUNTIME_DIR': str(runtime)}):
-            cmd = r.command('kdeconnect', [])
+            cmd = r.sandbox_command('kdeconnect', [], bwrap, os.environ)
         cut = cmd.index('/usr/bin/python3')
         code = f'''import os
 from pathlib import Path
@@ -65,7 +68,7 @@ assert not Path('/run/user/{os.getuid()}/bus').exists()
         ]:
             with patch.dict(os.environ, {'DBUS_SESSION_BUS_ADDRESS': address,
                                          'XDG_RUNTIME_DIR': str(runtime)}):
-                cmd = r.command('kdeconnect', args)
+                cmd = r.sandbox_command('kdeconnect', args, bwrap, os.environ)
             cut = cmd.index('/usr/bin/python3')
             code = f'''from pathlib import Path
 assert not Path({str(secret)!r}).exists()
@@ -85,9 +88,34 @@ else:
             with patch.dict(os.environ, {'DBUS_SESSION_BUS_ADDRESS': invalid,
                                          'XDG_RUNTIME_DIR': str(runtime)}):
                 try:
-                    r.command('kdeconnect', [])
+                    r.sandbox_command('kdeconnect', [], bwrap, os.environ)
                 except (RuntimeError, ValueError):
                     pass
                 else:
                     raise AssertionError('accepted unsupported bus address')
-print('sandbox: HOME/network denied, scoped writes, OTP redaction, private bus and reply-demo isolation passed')
+    surprise_env = {'PYTHONPATH': '/attacker', 'LD_PRELOAD': '/attacker/library.so',
+                    'AWS_SECRET_ACCESS_KEY': 'secret', 'http_proxy': 'http://127.0.0.1:9'}
+    assert r.direct_environment('store', surprise_env) == {
+        'HOME': str(r.HOME_DIR), 'LANG': 'C.UTF-8', 'PATH': '/usr/bin',
+        'PYTHONDONTWRITEBYTECODE': '1'}
+    with patch.object(r, 'bubblewrap_path', return_value=None):
+        status, _ = r.mode_status(False)
+        assert status['mode'] == 'direct' and status['unsandboxedFallback']
+        assert r.run_helper('store', ['restore'], False, surprise_env) == 0
+        blocked, _ = r.mode_status(True)
+        assert blocked['mode'] == 'blocked' and not blocked['unsandboxedFallback']
+    with patch.object(r, 'bubblewrap_path', return_value='/usr/bin/bwrap'), \
+            patch.object(r, 'probe_sandbox', return_value=False), \
+            patch.object(r, 'direct_command', side_effect=AssertionError('required downgrade')):
+        broken, _ = r.mode_status(False)
+        assert broken['bubblewrapAvailable'] and not broken['sandboxOperational']
+        assert broken['mode'] == 'direct'
+        try:
+            r.run_helper('store', ['restore'], True, surprise_env)
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError('required mode executed without an operational sandbox')
+    with contextlib.redirect_stderr(io.StringIO()):
+        assert r.main(['status'], {'OMAPAGER_REQUIRE_SANDBOX': 'invalid'}) == 1
+print('sandbox: namespaces, scoped mounts, direct fallback, required blocking and clean environment passed')

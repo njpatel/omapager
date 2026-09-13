@@ -1,48 +1,28 @@
-# Omapager v1.0.0
+# Omapager v1.1.0
 
-The first tagged release of Omapager, a notification daemon for Omarchy with grouped notification decks, actionable cards and per-source quiet controls.
+Changes from **9–13 September**, for people already using Omapager. The new v1.1.0 defaults are first; the remaining highlights also include work shipped in v1.0.0 during this five-day window.
 
-## Notifications that fit the desktop
+## New in v1.1.0
 
-- Group notifications by source and expand a deck to read its messages without losing the individual cards.
-- Use Omarchy's native colours, typography, buttons, borders and theme-controlled corners. Notification text can be scaled from 75–200% without resizing the bar or panel text.
-- Act on detected verification codes, links and phone numbers, use sender-provided actions, and reply inline to supported KDE Connect notifications.
-- Keep recent notifications in the panel after their popups disappear. Recent starts collapsed and resets on shell restart; verification codes are redacted.
-- Snooze individual sources or everything for a chosen duration, or enable Do Not Disturb. Critical notifications and the configurable verification-code exception retain their existing behaviour.
+- **Website icons are automatic again.** Missing icons are fetched by default, with a **Fetch website icons** switch in preferences. Switching it off stops new requests and cancels the current lookup; local and validated cached icons still work. An explicit saved `fetchRemoteIcons: false` is respected.
+- **Bubblewrap is no longer a hard dependency.** Helpers use it when operational and otherwise run directly as your user. Set `requireSandbox: true` in the widget's `shell.json` entry to require isolation instead. That policy is applied before startup helpers run, and a failed helper is never replayed outside its sandbox.
+- **Automatic fetching keeps strict boundaries.** HTTPS-only requests, public-address checks, DNS pinning, redirect validation, bounded downloads and verified raster decoding apply in both execution modes. Added coverage for downgrade attempts, malformed icon metadata, slow responses, cached icons with fetching disabled, and helper cancellation.
+- **Security trade-offs are documented.** The README now explains what icon requests disclose, what the optional sandbox does and does not protect, and how to turn fetching off or require sandboxing. The demo's helper calls follow the same configured policies.
 
-## Display and sharing controls
+## Also landed in the last five days
 
-- Choose the active display, a specific output or all displays. A fresh deck follows focus in active-display mode; an already-visible deck stays put.
-- Retain a selected output across disconnection, with a connected-display fallback while it is unavailable.
-- Detect Hyprland portal sharing sessions and offer a timed snooze. Detection never mutes notifications automatically: you choose 30 minutes, 1 hour, 4 hours or Not now.
-- Keep preferences focused on display selection, countdown animation and sharing suggestions. Edge spacing is config-only, defaults to 12 logical pixels, and supports 0–64. The visual countdown is off by default; notifications still expire normally.
+- Notification cards and panels now use Omarchy's native controls, theme borders and typography. The close button is a compact bordered control; settings sits to the left of the enable switch. The README has refreshed screenshots, the original named/icon-rich demos and a default-theme ASCII header.
+- Added active-display, specific-output and all-display routing, plus explicit timed snooze offers when Hyprland portal sharing is detected. Sharing detection does not mute notifications automatically.
+- Added the collapsed **Recent** stack and notification font scaling. Edge spacing is config-only, defaults to 12 logical pixels, and the visual countdown is optional and off by default.
+- Fixed escaped preview text, hidden-display card measurement, notification replacements, ordinary numbered messages being over-redacted, and restored offers. Preferences now handles Escape correctly, and merely hovering a source cannot arm the unsnooze shortcut.
+- Repaired the local inline-reply demo. Replies go to its private result file, never to a real phone.
 
-## Safer defaults and fixes
+## Updating
 
-- Require Bubblewrap for storage, icon and KDE Connect helpers, with no automatic unsandboxed fallback.
-- Leave remote website-icon fetching and implicit sender default actions off by default. Remote icon connections use validated public addresses, including redirects, and downloaded images are checked before use.
-- Bound notification admission and stored content. Disk history defaults to 24 hours and 100 entries; detected verification-code notifications are redacted before persistence. Copied codes clear after 60 seconds by default if the clipboard still contains the same code.
-- Preserve ordinary numbered build messages, escaped text and restored action offers. Fix notification replacement/lifetime handling and hidden-display card measurement.
-- Restore Escape when switching to preferences, prevent pointer hover from arming state-changing keyboard shortcuts, and keep the card's context menu available on the compact close button.
-- Repair the local reply demo using a dedicated short-lived session. Demo replies stay in a private local result file and are never sent to a phone.
+Restart with `omarchy restart shell` after updating. Pillow is needed for remote icon decoding; Bubblewrap is optional unless you enable `requireSandbox`. If your saved configuration explicitly disables remote icons, use the new preferences switch to enable them.
 
-## Upgrading and requirements
+Website requests expose your IP and request time to the source site and its icon hosts. Direct helper mode is not sandboxed. See the README's **Security** section for protections and limitations; this release does not imply marketplace verification.
 
-This release replaces the earlier untagged `0.1.0` manifest version; configuration remains on the same `njpatel.omapager` bar-widget entry in `~/.config/omarchy/shell.json`.
+Thanks to @theaxlklo for the hardening and integration fixes, and @salemsayed for notification font scaling.
 
-- Use Omarchy with Quickshell 0.3.x, Hyprland, Python 3 and Bubblewrap. Pillow is required for optional remote website icons. `wl-clipboard` is recommended; KDE Connect and its phone app are needed for real phone notifications and replies.
-- Keep the built-in `omarchy.notifications` service disabled while Omapager is enabled so only one daemon owns the notification bus name.
-- Review the safer defaults when upgrading from older untagged builds, especially history retention, remote icons and card-click actions. Existing stored notifications are processed under the current validation and redaction policy.
-- After updating the plugin, run `omarchy restart shell` to recreate its notification surfaces.
-
-The `v1.0.0` tag and GitHub source archives identify this release. Marketplace submission or verification is a separate step and is not implied by this release.
-
-## Known limits
-
-Sharing detection recognises the Hyprland portal's stream metadata, not every capture application. It is a convenience, not a privacy guarantee. Dismissing a sharing offer is in-memory, so restarting the shell during a share can offer again. Code recognition is heuristic; real-phone reply support depends on the notification exposing a uniquely matching KDE Connect reply channel.
-
-## Contributors
-
-- @theaxlklo (Axel Calo): notification, storage, network, action and helper hardening, with regression coverage and integration work in #4.
-- @salemsayed (Salem Sayed Abdel Gawad): notification font scaling in #5.
-- @njpatel: Omapager, display routing, sharing offers, Recent, native UI integration, follow-up fixes and demo/documentation work.
+[Changes since v1.0.0](https://github.com/njpatel/omapager/compare/v1.0.0...v1.1.0)

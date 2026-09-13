@@ -32,20 +32,43 @@ Item {
   readonly property string storeBin: Qt.resolvedUrl("bin/omapager-run-store").toString().replace(/^file:\/\//, "")
   readonly property string iconBin: Qt.resolvedUrl("bin/omapager-run-icon").toString().replace(/^file:\/\//, "")
 
-  // Network requests reveal notification timing; opt-in only.
-  property bool fetchIcons: false
+  // Missing website icons are fetched automatically unless the user opts out.
+  property bool fetchIcons: true
+  property bool requireSandbox: false
+  property bool helperSettingsReady: false
+  readonly property var helperEnvironment: ({
+    OMAPAGER_REQUIRE_SANDBOX: !helperSettingsReady || requireSandbox ? "1" : "0"
+  })
+  onRequireSandboxChanged: {
+    sandboxStatus = ({ required: requireSandbox, sandboxOperational: false, mode: "pending" })
+    if (helperSettingsReady) {
+      sandboxProbe.running = false
+      sandboxProbeDelay.restart()
+    }
+  }
   property bool allowDefaultActionOnCardClick: false
   property int clipboardTimeout: 60
-  property var sandboxStatus: ({ required: true, sandboxOperational: false })
+  property var sandboxStatus: ({ required: false, sandboxOperational: false, mode: "pending" })
   readonly property string helperBin: Qt.resolvedUrl("bin/omapager-run-helper").toString().replace(/^file:\/\//, "")
   Process {
-    running: true
+    id: sandboxProbe
+    running: false
+    environment: service.helperEnvironment
     command: [service.helperBin, "status"]
     stdout: StdioCollector {
       onStreamFinished: {
-        try { service.sandboxStatus = JSON.parse(text) } catch (e) {}
+        try {
+          var result = JSON.parse(text)
+          if (service.helperSettingsReady && result.required === service.requireSandbox)
+            service.sandboxStatus = result
+        } catch (e) {}
       }
     }
+  }
+  Timer {
+    id: sandboxProbeDelay
+    interval: 1
+    onTriggered: sandboxProbe.running = true
   }
   function setHistoryHours(hours) {
     Store.write(storeProc, storeBin, "policy", {historyHours: hours})
@@ -414,10 +437,11 @@ Item {
   property int heldRevision: 0
   property int heldLimit: 80          // read from the store; the panel shows far fewer
 
-  function refreshHeld() { if (!heldProc.running) heldProc.running = true }
+  function refreshHeld() { if (helperSettingsReady && !heldProc.running) heldProc.running = true }
 
   Process {
     id: heldProc
+    environment: service.helperEnvironment
     running: false
     command: [service.storeBin, "held", String(service.heldLimit)]
     stdout: StdioCollector {
@@ -554,6 +578,24 @@ Item {
   property var iconQueue: []
   property string iconWanted: ""
 
+  function setFetchRemoteIcons(enabled) {
+    if (fetchIcons === enabled) return
+    fetchIcons = enabled
+    // Cancelling the wrapper also stops its child. Do not accept a late result
+    // from a request the user just disabled; retry that source without fetching.
+    if (!enabled && iconProc.running && iconProc.fetchAllowed) {
+      iconProc.cancelled = true
+      iconProc.running = false
+    }
+    if (enabled) {
+      // A local-only lookup may have cached the browser fallback. Resolve again
+      // so enabling fetching can replace it with the website's own icon.
+      iconCache = ({})
+      for (var i = 0; i < toasts.count; i++) wantIcon(toasts.get(i))
+    }
+    pumpIcons()
+  }
+
   function wantIcon(row) {
     // A file the sender handed over is an icon we can keep. A live handle is
     // not: "image://qsimage/12/1" is raw pixels held inside this shell, it
@@ -566,6 +608,7 @@ Item {
     if (String(row.image || "").indexOf("image://") !== 0 && String(row.image || "")) return
     var key = String(row.groupKey || row.source || row.app || "")
     if (!key) return
+    if (iconWanted === key) return
     if (iconCache[key] !== undefined) {
       // Write it onto the row in hand as well as onto the model. This is
       // called before the row is inserted, so applyIcon - which walks the
@@ -588,9 +631,12 @@ Item {
   }
 
   function pumpIcons() {
-    if (iconProc.running || iconQueue.length === 0) return
+    if (!helperSettingsReady || iconProc.running || iconWanted !== "" || iconQueue.length === 0) return
     var job = iconQueue.shift()
     iconWanted = job.key
+    iconProc.job = job
+    iconProc.fetchAllowed = fetchIcons
+    iconProc.cancelled = false
     var args = [iconBin, "--key=" + job.key, "--app=" + job.app,
                 "--app-icon=" + job.appIcon, "--source=" + job.source,
                 "--scheme", service.lightTheme ? "light" : "dark"]
@@ -615,14 +661,26 @@ Item {
 
   Process {
     id: iconProc
+    environment: service.helperEnvironment
+    property var job: null
+    property bool fetchAllowed: false
+    property bool cancelled: false
     running: false
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        var path = String(text || "").trim()
-        service.iconCache[service.iconWanted] = path
-        if (path) service.applyIcon(service.iconWanted, path)
+        var job = iconProc.job
+        var path = iconProc.cancelled ? "" : String(text || "").trim()
+        if (!iconProc.cancelled) {
+          service.iconCache[service.iconWanted] = path
+          if (path) service.applyIcon(service.iconWanted, path)
+        }
+        if (job && (iconProc.cancelled || (!iconProc.fetchAllowed && service.fetchIcons))) {
+          if (service.iconQueue.length < 100) service.iconQueue.unshift(job)
+        }
         service.iconWanted = ""
+        iconProc.job = null
+        iconProc.cancelled = false
         Qt.callLater(service.pumpIcons)
       }
     }
@@ -1385,6 +1443,7 @@ Item {
 
   Process {
     id: replyProc
+    environment: service.helperEnvironment
     property string replyKey: ""
     running: false
     onExited: function(code, status) {
@@ -1406,6 +1465,7 @@ Item {
 
   Process {
     id: findProc
+    environment: service.helperEnvironment
     property var job: ({})
     running: false
     stdout: StdioCollector {
@@ -1452,7 +1512,7 @@ Item {
   }
 
   function pumpReplies() {
-    if (findProc.running || replyQueue.length === 0) return
+    if (!helperSettingsReady || findProc.running || replyQueue.length === 0) return
     var queue = replyQueue.slice()
     var job = queue.shift()
     replyQueue = queue
@@ -1471,7 +1531,7 @@ Item {
     var at = rowIndexFor(key)
     if (at < 0) return
     var path = String(toasts.get(at).replyPath || "")
-    if (!path || !String(text).trim() || String(text).length > 4096 || replyProc.running) return
+    if (!helperSettingsReady || !path || !String(text).trim() || String(text).length > 4096 || replyProc.running) return
     replyProc.running = false
     replyProc.replyKey = key
     replyProc.command = [kdeBin, "reply", path, String(text), String(toasts.get(at).source), String(toasts.get(at).bodyLine)]
@@ -1602,7 +1662,12 @@ Item {
   }
 
   // ------------------------------------------------------------- store
-  Process { id: storeProc; running: false }
+  Process {
+    id: storeProc
+    running: false
+    environment: service.helperEnvironment
+    property bool policyReady: service.helperSettingsReady
+  }
 
   function restoreRows(rows, replay) {
     // Restore is oldest first; history is newest first. Both insert at zero.
@@ -1625,6 +1690,7 @@ Item {
 
   Process {
     id: restoreProc
+    environment: service.helperEnvironment
     running: false
     command: [service.storeBin, "restore"]
     stdout: StdioCollector {
@@ -1637,6 +1703,7 @@ Item {
 
   Process {
     id: quietRestoreProc
+    environment: service.helperEnvironment
     running: false
     command: [service.storeBin, "quiet"]
     stdout: StdioCollector {
@@ -1662,13 +1729,24 @@ Item {
   // Housekeeping, once, at startup. History trims itself on every close, so
   // this is really for the icon cache - nothing else ever looks at it, and
   // without this it only ever grows.
-  Process { id: tidyProc; running: false; command: [service.storeBin, "tidy"] }
+  Process {
+    id: tidyProc
+    environment: service.helperEnvironment
+    running: false
+    command: [service.storeBin, "tidy"]
+  }
 
-  Component.onCompleted: {
+  // Wait for the bar widget's saved policy before any helper can run. Otherwise
+  // a stored requireSandbox=true could be bypassed during service startup.
+  onHelperSettingsReadyChanged: if (helperSettingsReady) Qt.callLater(function() {
+    sandboxProbe.running = true
     restoreProc.running = true
     quietRestoreProc.running = true
     tidyProc.running = true
-  }
+    Store._pump(storeProc)
+    pumpIcons()
+    pumpReplies()
+  })
 
   // ------------------------------------------------------------- server
   NotificationServer {
@@ -1912,6 +1990,7 @@ Item {
 
   Process {
     id: replayProc
+    environment: service.helperEnvironment
     running: false
     command: [service.storeBin, "history", String(service.replayCount)]
     stdout: StdioCollector {
@@ -1922,7 +2001,7 @@ Item {
     }
   }
 
-  function replayHistory() { if (!replayProc.running) replayProc.running = true }
+  function replayHistory() { if (helperSettingsReady && !replayProc.running) replayProc.running = true }
 
   // ------------------------------------------------------------- surface
   //

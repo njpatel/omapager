@@ -197,10 +197,10 @@ Internal padding and the spacing between cards are unchanged.
 time-remaining line along the bottom of notifications. This changes only the
 visual timer; notifications still expire normally when it is disabled.
 
-<img src="assets/display-settings-2x.png" width="420" alt="Notification preferences with display selection, optional countdown animation and sharing snooze suggestions">
+<img src="assets/display-settings-2x.png" width="420" alt="Notification preferences with display selection, countdown, website icons and sharing suggestions">
 
-The in-panel preferences expose display selection, countdown animation and
-sharing offers. They save to the same bar-widget entry and persist
+The in-panel preferences expose display selection, countdown animation, website
+icon fetching and sharing offers. They save to the same bar-widget entry and persist
 across shell restarts. The other options below can be set on that entry too;
 there is no second user configuration file to maintain. Defaults are for a fresh
 configuration, not a reset of choices you have already saved.
@@ -225,7 +225,8 @@ configuration, not a reset of choices you have already saved.
 | `sourceLimit` | `8` | number of quietened sources listed in the panel; settings range 2–20 |
 | `heldPerSource` | `10` | held notifications shown per source; settings range 3–25 |
 | `recentCount` | `5` | recent notifications shown in the panel (1–20), including when notifications are enabled; resets on shell restart |
-| `fetchRemoteIcons` | `false` | opt in to website-icon requests; reveals your IP and approximate notification time to the source website, and requires Bubblewrap and Pillow; local/cached icons remain available when off |
+| `fetchRemoteIcons` | `true` | fetch missing website icons automatically; switch off in preferences to stop requests while retaining local/cached icons; requires Pillow |
+| `requireSandbox` | `false` | config-only: use operational Bubblewrap when available, otherwise run helpers directly; `true` blocks helpers instead of allowing direct execution |
 | `allowDefaultActionOnCardClick` | `false` | allow the sender's default action on a card click; when off, card clicks use known-window focus or a validated source URL, while explicit action buttons remain available |
 | `historyHours` | `24` | disk-history retention: `0` disables history, otherwise `1`, `24` or `168` hours; capped at 100 entries |
 | `clipboardTimeout` | `60` | clear a copied verification code after `30`, `60` or `90` seconds, only if the clipboard still contains that code |
@@ -398,7 +399,7 @@ omarchy-shell omapager probe            what the daemon believes, as JSON
 
 omarchy-shell omapager.panel toggle     the panel
 omarchy-shell omapager.panel expand x   open a source's held list, as clicking it would
-omarchy-shell omapager.panel openSettings  display, edge-spacing and sharing-offer settings
+omarchy-shell omapager.panel openSettings  notification preferences
 ```
 
 ## Seeing it work
@@ -419,19 +420,93 @@ do before it sends anything, so you can check it against what happens.
 the reply is saved locally, never sent to a person.
 
 The synthetic session and latest reply are stored as `notification.json` and
-`reply.json` under `~/.local/state/omarchy/omapager/reply-demo/`. Only demo requests
-expose that directory to the helper sandbox; real notification state stays hidden.
+`reply.json` under `~/.local/state/omarchy/omapager/reply-demo/`. In sandboxed mode,
+only demo requests expose that directory; real notification state stays hidden.
 Each run replaces the session, and sessions expire after 30 minutes. Demo fixtures
 cannot stand in for another app, and an older session cannot accept a new reply.
 
+## Security
+
+### Automatic website icons
+
+Omapager prefers your local icon overrides and installed application icons, then
+uses cached website icons or fetches a missing icon from the notification's source
+website. **Fetch website icons** is on by default. Turn it off in preferences, or
+set `"fetchRemoteIcons": false` on the bar-widget entry, to stop new requests and
+cancel an in-progress icon lookup. Existing local and validated cached icons remain
+usable. An explicit saved `false` is respected when upgrading.
+
+Fetching discloses your IP address and request time to the source site and any
+public servers it uses for redirects or icon hosting. Omapager does not attach
+notification text, verification codes, browser cookies or authentication headers.
+It does not use a third-party favicon service or guess parent domains. Caching
+avoids a request for every notification, but is not a guarantee of anonymity.
+
+Network and image validation apply **with or without Bubblewrap**:
+
+- Automatic icon requests use HTTPS on its standard port. Invalid URLs, embedded
+  credentials, IP literals and local/private destinations are rejected.
+- DNS answers must all be public. Connections use those checked addresses rather
+  than resolving the name again; TLS still verifies the original hostname.
+- Redirects and icon/manifest URLs go through the same checks. Proxy environment
+  variables do not redirect the fetcher around them.
+- Requests have redirect, byte and time limits. Remote images must pass Pillow's
+  format/dimension checks and are re-encoded as small PNGs before Qt sees them;
+  remote SVGs are not rendered. Invalid downloads fall back to local icons or the
+  sender's initial rather than relaxing validation.
+
+These are defences against hostile inputs, not a claim that any image decoder,
+website or notification sender is infallible. Keep the system's Python, Pillow,
+TLS libraries and Bubblewrap updated.
+
+
+These checks are not a boundary against another process already running as your
+user and modifying local cache files. The UI ultimately opens local image paths;
+validation does not make that shared account's files immutable.
+### Optional helper sandbox
+
+The storage, icon and KDE Connect helpers use Bubblewrap automatically when a
+namespace preflight succeeds. If Bubblewrap is missing or that preflight fails,
+the default is to run the helper directly as your user. This is **not sandboxed**:
+the helper has the filesystem and network access your account normally has,
+although the same input validation, clean environment and resource limits apply.
+
+Set **`"requireSandbox": true`** on the bar-widget entry in `shell.json` to refuse
+direct helper execution. This is config-only. If sandboxing is unavailable, persistence,
+icon lookup and phone reply helpers fail rather than run without isolation. The
+saved policy is applied before startup helpers launch. Changes govern subsequent
+helper launches; they cannot undo work an already-running helper has performed.
+
+The execution mode is chosen before a helper runs. A failed actual helper is
+**never replayed unsandboxed**, avoiding both a security downgrade and duplicate
+side effects. In sandboxed mode the storage helper can write Omapager's state,
+the icon helper can write its icon cache and read selected local icon paths, and
+KDE Connect can access the selected session bus. The bus is not filtered by
+destination, and remote-icon fetching needs network access: Bubblewrap reduces
+exposure but does not make these capabilities disappear or isolate the QML shell.
+
+Inspect `omarchy-shell omapager probe` for availability, operational sandbox status,
+whether it is required, and the selected `sandboxed`, `direct` or `blocked` mode.
+Other helpers can still fail for reasons unrelated to that preflight.
+
+### Stored notifications and clipboard
+
+Disk history defaults to 24 hours and 100 entries. Detected-code notifications are
+redacted before persistence; recognition is heuristic, not a guarantee that every
+secret is identified. Copied codes are cleared after the configured timeout only
+when the clipboard still contains that code. State is kept under
+`~/.local/state/omarchy/omapager/`. See the options above for retention and clipboard
+settings, and [SECURITY.md](SECURITY.md) for reporting a vulnerability.
+
 ## Requirements
 
-Omarchy (Quickshell 0.3.x, Hyprland), Python 3 and **Bubblewrap** (`bubblewrap`)
-for the helpers in `bin/`. Helpers fail closed if their sandbox cannot start;
-there is no automatic unsandboxed fallback.
+Omarchy (Quickshell 0.3.x, Hyprland) and Python 3 for the helpers in `bin/`.
+**Bubblewrap** (`bubblewrap`) is optional: Omapager uses it when operational and
+otherwise runs helpers directly, unless `requireSandbox` is enabled.
 
-**Pillow** (`python-pillow`) is required for optional remote website icons.
-Remote fetching is off by default; local theme icons still work without it.
+**Pillow** (`python-pillow`) is needed to validate and decode remote website icons.
+Automatic fetching is on by default; without Pillow, remote images are not used.
+Local theme icons still work. See [Security](#security) for the trade-offs.
 
 Two more things are worth having, and they are not the same kind of thing.
 

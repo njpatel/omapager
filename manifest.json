@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "njpatel.omapager",
   "name": "Omapager",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "Neil Patel",
   "license": "Apache-2.0",
   "description": "Notifications for Omarchy: a stacking, grouping replacement for the built-in service, with markup parsing, resolved source icons, inline reply, and per-source snooze.",
@@ -51,7 +51,8 @@
       "edgeSpacing": 12,
       "showCountdown": false,
       "offerSnoozeWhenSharing": true,
-      "fetchRemoteIcons": false,
+      "fetchRemoteIcons": true,
+      "requireSandbox": false,
       "allowDefaultActionOnCardClick": false,
       "historyHours": 24,
       "clipboardTimeout": 60,
@@ -251,8 +252,8 @@
         "key": "fetchRemoteIcons",
         "type": "boolean",
         "label": "Fetch website icons",
-        "description": "Contacts the source website and reveals your IP and approximate notification time. Requires Bubblewrap and Pillow.",
-        "defaultValue": false
+        "description": "Fetch missing website icons automatically. Sites can see your IP and approximate notification time. Requires Pillow; local and cached icons remain available when off.",
+        "defaultValue": true
       },
       {
         "key": "allowDefaultActionOnCardClick",

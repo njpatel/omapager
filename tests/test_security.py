@@ -185,7 +185,7 @@ class Network(unittest.TestCase):
         answer=(socket.AF_INET,socket.SOCK_STREAM,6,'',('93.184.216.34',443))
         sock=MagicMock();ctx=MagicMock()
         with patch.object(socket,'socket',return_value=sock),patch.object(socket,'getaddrinfo',side_effect=AssertionError('second DNS lookup')),patch.object(net.ssl,'create_default_context',return_value=ctx):
-            c=net.PinnedHTTPConnection('example.com',443,answer,True);c.connect()
+            c=net.PinnedHTTPConnection('example.com',443,answer,time.monotonic()+net.REQUEST_DEADLINE);c.connect()
         sock.connect.assert_called_once_with(('93.184.216.34',443))
         ctx.wrap_socket.assert_called_once_with(sock,server_hostname='example.com')
     def test_redirects(self):

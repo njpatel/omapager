@@ -249,10 +249,13 @@ and arrivals while collapsed do not reveal it.
 Adding anything that fetches, opens, or writes a path from notification text
 means extending one of these, not working around it.
 
-Use the `bin/omapager-run-*` wrappers: Bubblewrap is required, with no
-unsandboxed fallback. Remote icons are off by default, use the pinned
-transport above, and require sandboxed Pillow raster decoding. Tests use
-synthetic data only. Run `node tests/baseline.cjs`, `node tests/security.cjs`,
+Use the `bin/omapager-run-*` wrappers. Helpers wait until Widget.applySettings has
+supplied `requireSandbox`; each launch receives OMAPAGER_REQUIRE_SANDBOX=0 or 1.
+Auto mode prefers operational Bubblewrap, then direct execution if its preflight
+is unavailable. Required mode fails closed. Never replay a failed actual helper
+directly. Remote icons are automatic by default, use the pinned HTTPS transport,
+and require Pillow validation in either mode. Tests use synthetic data only.
+Run `node tests/baseline.cjs`, `node tests/security.cjs`,
 Python unittest discovery, Qt policy tests and `security/check_invariants.py`
 after changes. See `docs/VALIDATION.md` for exact commands and integration
 limits.
@@ -269,8 +272,9 @@ python3 -B -m unittest discover -s tests -p test_icon_network.py -v
 
 Comments say **why**, and especially why not the obvious thing — most of them
 are a bug that took a while to find. Keep them when you move code; delete them
-when they stop being true. Runtime dependencies: Quickshell, Hyprland, Python 3 and Bubblewrap.
-Pillow is optional for local icons and required for opted-in remote icons.
+when they stop being true. Runtime dependencies: Quickshell, Hyprland and Python 3.
+Bubblewrap is optional unless requireSandbox is enabled. Pillow is optional for
+local icons and required for remote icons, whose automatic fetching can be disabled.
 Additional dependencies require an explicit security/compatibility review.
 
 `wl-clipboard` is **not** an Omarchy dependency and may simply be absent, so
