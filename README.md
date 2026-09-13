@@ -36,14 +36,22 @@ without leaving the card.
 deck. Hovering expands it. Nothing is hidden behind a "3 more" summary —
 every notification is a real card you can act on.
 
+<img src="assets/deck.gif" width="410" alt="Notification arrivals group into a deck, expand to show each message, and reveal native action buttons; countdown animation is disabled">
+
+[Watch the demo video](assets/deck.mp4). Captured from an isolated Omarchy session
+at 2× scale with 12px edge spacing and countdown animation off. Expansion is
+driven on cue through the plugin's demo IPC.
+
 **Uses the shell's visual language.** Cards use Omarchy's notification palette,
-380px width, outer gaps, border specs and theme-controlled corners, without
+380px width, border specs and theme-controlled corners, without
 additional drop shadows. Message text follows the stock card's Liberation Sans
 typography; controls and metadata use the system font. Shared buttons, fields,
 panel headers and cursor surfaces honour the theme's control tokens, including
 gradient and per-side borders. Grouping, the sender fallback mark, action offers
 and inline replies remain omapager features rather than copies of the simpler
 stock card.
+Distance from the bar and screen edges is configurable and defaults to 12 logical
+pixels; it is not inherited from Omarchy's outer gaps.
 
 A body is held to two lines while you are scanning a deck, and opens to its
 full length — up to eight lines — once the deck is expanded, or on hover when
@@ -74,6 +82,8 @@ Connect, and the ones carrying a reply channel grow a text field on the card.
 The answer goes back to the conversation, and the notification is dismissed on
 the phone too. Nothing new lands and nothing expires while you are typing, so
 the field cannot move out from under you mid-sentence.
+
+<img src="assets/reply.png" width="410" alt="Inline reply to the local demo sender using the native reply field and Send button">
 
 
 **Sends you back where it came from.** Clicking a card focuses the window that
@@ -197,6 +207,8 @@ and the spacing between cards are unchanged.
 **Show countdown animation** is off by default. Enable it to show a shrinking
 time-remaining line along the bottom of notifications. This changes only the
 visual timer; notifications still expire normally when it is disabled.
+
+<img src="assets/display-settings-2x.png" width="420" alt="Notification preferences with 12px edge spacing and countdown animation switched off">
 
 The in-panel preferences expose display selection, edge spacing, countdown
 animation and sharing offers. They save to the same bar-widget entry and persist
