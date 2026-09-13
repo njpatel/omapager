@@ -315,10 +315,10 @@ DEMO_REPLY = os.path.join(DEMO_STATE, "reply.json")
 
 def reply_scene():
     """Create an explicit, short-lived demo session with no real phone target."""
-    who, message = "Demo sender", "did you get the build working in the end?"
+    who, message = "Seif Lotfy", "did you get the build working in the end?"
     write_json(DEMO_FIXTURE, dict(token=secrets.token_hex(16), created=time.time(),
                                  title=who, text=message))
-    return [dict(app="KDE Connect", summary="Omapager reply demo",
+    return [dict(app="KDE Connect", icon="whatsapp", summary="Omapager reply demo",
                  body="%s: %s" % (who, message))]
 
 

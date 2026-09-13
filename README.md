@@ -16,7 +16,7 @@ built-in notification service with a stacking deck that groups by source,
 reads what a notification is actually offering you, and lets you act on it
 without leaving the card.
 
-<img src="assets/native-card-2x.png" width="410" alt="Notification card using Omarchy's native typography, borders and spacing">
+<img src="assets/native-card-2x.png" width="410" alt="Original demo notifications from Slack, WhatsApp and GitHub with their source icons">
 
 ## What it does
 
@@ -26,9 +26,10 @@ every notification is a real card you can act on.
 
 <img src="assets/deck.gif" width="410" alt="Notification arrivals group into a deck, expand to show each message, and reveal native action buttons; countdown animation is disabled">
 
-[Watch the demo video](assets/deck.mp4). Captured from an isolated Omarchy session
-at 2× scale with 12px edge spacing and countdown animation off. Expansion is
-driven on cue through the plugin's demo IPC.
+[Watch the demo video](assets/deck.mp4). The original demo scenes use Gurbinder,
+Dominic and Seif with Slack, WhatsApp, GitHub and Google icons. Captured in an
+isolated Omarchy session at 2× scale with 12px edge spacing and countdown off;
+expansion is driven on cue through the plugin's demo IPC.
 
 **Uses the shell's visual language.** Cards use Omarchy's notification palette,
 380px width, border specs and theme-controlled corners, without
@@ -63,7 +64,7 @@ conservative: `412 passed, 0 failed` is not a code, and neither is
 all along; most desktops draw none of them. Reply, Mark as read, whatever the
 app offered, appear as buttons on hover.
 
-<img src="assets/native-actions-2x.png" width="410" alt="Native action buttons with a wrapped overflow action">
+<img src="assets/native-actions-2x.png" width="410" alt="Google verification notification with its source icon, Copy code action and compact close button">
 
 **Replies to your phone.** Phone notifications reach the desktop through KDE
 Connect, and the ones carrying a reply channel grow a text field on the card.
@@ -71,7 +72,7 @@ The answer goes back to the conversation, and the notification is dismissed on
 the phone too. Nothing new lands and nothing expires while you are typing, so
 the field cannot move out from under you mid-sentence.
 
-<img src="assets/reply.png" width="410" alt="Inline reply to the local demo sender using the native reply field and Send button">
+<img src="assets/reply.png" width="410" alt="Local reply demo using Seif Lotfy's original message, a WhatsApp icon and the native reply field">
 
 
 **Sends you back where it came from.** Clicking a card focuses the window that

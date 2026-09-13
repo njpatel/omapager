@@ -325,6 +325,11 @@ controls, glyphs and metadata follow `Style.font.family`. Theme roles determine
 colours, padding and corners. Do not reintroduce minimum rounding, hand-tinted
 control states or extra card shadows.
 
+README media uses the curated `bin/omapager-demo` scenes: retain their names,
+message text and recognisable source icons. Warm or provision the public icons
+before recording and inspect them in the rendered cards. Generic test fixtures
+and letter-tile loading states are not substitutes for the demo presentation.
+
 Intentional differences are the deck/grouping behavior, sender fallback mark,
 bounded 2→8-line body disclosure, action marks, More overflow, opt-in countdown
 and inline reply. Critical headlines use `Color.urgent` so non-expiring alerts
