@@ -226,7 +226,11 @@ function _pump(proc) {
 // a placeholder: encoded variants, URLs and sender metadata cannot leak it.
 function sanitiseForPersistence(row) {
   var out = normalise(row)
-  var secret = out.codes || out.code || Detect.codes(Markup.oneLine(out.summary + " " + out.rawBody + " " + out.body)).length
+  // Preview text keeps literal markup. Strip it for detection so long attributes
+  // cannot push a code outside the keyword window in a legacy/raw-only entry.
+  var secret = out.codes || out.code || Detect.codes(
+      Markup.decodeEntities(out.summary + " " + out.rawBody + " " + out.body)
+        .replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()).length
   if (secret) {
     for (var k in SHAPE) if (typeof SHAPE[k] === "string" && k !== "key") out[k] = ""
     out.summary = "Verification notification"

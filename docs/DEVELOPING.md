@@ -92,6 +92,14 @@ Crop to the card and check a corner pixel is the card's own colour.
 - `Text.linkColor` is ignored for `RichText`; the colour has to be in the
   markup (`Markup.colourLinks`). And `lineCount` counts *paragraphs*, so
   overflow is measured from `contentHeight`.
+- Collapsed bodies use plain text so Qt can elide them. `Markup.oneLine()`
+  must decode entities and apply the rich renderer's allowlist before stripping
+  markup. Otherwise escaped Slack tags leak into previews, or literal text such
+  as `List<String>` disappears. Undo only the preview's own escaping afterwards,
+  and keep the sink plain text. `node tests/security.cjs` covers fresh/restored
+  escaped bodies, paired angle-bracket literals and the sender-decoding limit.
+  Redaction deliberately strips all tag-shaped content separately: retained
+  literal attributes must not move a code outside the detector's keyword window.
 - `MultiEffect` re-renders its whole blurred source on every repaint of the
   item it is attached to. Shadows go on a childless plate, never on a card with
   a countdown ticking in it.

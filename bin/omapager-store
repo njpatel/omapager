@@ -122,10 +122,10 @@ def sanitise(entry):
     allowed = {"key", "originalId", "senderPid", "app", "appIcon", "summary",
                "body", "rawBody", "bodyLine", "source", "groupKey", "urgency",
                "expireTimeout", "duration", "ts", "closed_ts", "closed_reason"}
-    # Match Store.sanitiseForPersistence's bounded summary/rawBody/body view,
+    # Scan the same bounded summary/rawBody/body fields as Store's redaction,
     # not metadata: keys/groupKey and app names can contain unrelated numbers
-    # or product keywords. Strip tags to spaces before decoding, as oneLine
-    # does, so formatting and split digit groups keep their word boundaries.
+    # or product keywords. This independent detector strips raw tags before
+    # decoding; unlike a display preview, it need not preserve literal markup.
     text = " ".join(entry.get(k, "")[:limit] if isinstance(entry.get(k), str) else ""
                     for k, limit in (("summary", MAX_SUMMARY), ("rawBody", MAX_BODY),
                                      ("body", MAX_BODY)))[:MAX_BODY]

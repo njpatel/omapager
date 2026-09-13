@@ -1,5 +1,14 @@
 # Security changelog
 
+## Unreleased — preview markup, 2026-09-12
+
+- Flatten only allowlisted markup in plain-text previews, preserving escaped
+  literals without interpreting them as rich text.
+- Keep the independent JS redaction scan separate from display previews. Strip
+  tag-shaped content before code detection so long literal attributes cannot
+  move legacy or raw-only codes outside the keyword window. Regression checks
+  cover both entry shapes; a private Omarchy lab verified a redacted Recent card.
+
 ## Unreleased — maintainer follow-up, 2026-09-11
 
 Follow-up to PR #4 at `8f3a16cef4d4f05860b7fe7b4808c0eba189797a`:
