@@ -912,6 +912,14 @@ BarWidget {
                   }
                 }
 
+                PanelActionButton {
+                  anchors.verticalCenter: parent.verticalCenter
+                  iconText: "\u{f0493}"                 // nf-md-cog
+                  tooltipText: "Notification settings"
+                  foreground: pager.panelFg
+                  fontFamily: pager.fontFamily
+                  onClicked: pager.settingsView = true
+                }
                 ToggleSwitch {
                   anchors.verticalCenter: parent.verticalCenter
                   // On means notifications are coming through, which is the
@@ -922,14 +930,6 @@ BarWidget {
                   onToggled: pager.quiet ? pager.letEverythingThrough() : pager.toggleSilence()
                 }
 
-                PanelActionButton {
-                  anchors.verticalCenter: parent.verticalCenter
-                  iconText: "\u{f0493}"                 // nf-md-cog
-                  tooltipText: "Notification settings"
-                  foreground: pager.panelFg
-                  fontFamily: pager.fontFamily
-                  onClicked: pager.settingsView = true
-                }
               }
             }
           }
