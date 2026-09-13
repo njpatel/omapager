@@ -1,15 +1,3 @@
-> **Unreleased hardening branch:** based on upstream commit
-> `29548e5761f1b9f419afe988d77f67e3dd3e81cb`. See
-> [upstream handoff](docs/UPSTREAM_HANDOFF.md) for the implementation and review
-> notes. Bubblewrap is required for helpers; remote icons and implicit sender
-> default actions are off by default. History defaults to 24 hours/100 entries,
-> and detected-code notifications are stored as redacted placeholders.
-> This branch is a draft review proposal and has not passed live integration testing.
-> The original feature documentation below describes the upstream UX; the
-> [security architecture](docs/SECURITY_ARCHITECTURE.md) overrides conflicting
-> security/default-behavior statements. Use reviewed commits for installation,
-> and complete disposable-session integration checks before enabling this branch.
-
 <img src="assets/title.png" width="1266" alt="Omapager">
 
 <!--
@@ -194,24 +182,24 @@ Hyprland's focused monitor. A visible deck stays put when focus moves.
 retained, with a connected-display fallback until the output returns.
 **All displays** shows the same deck everywhere. Dismissal and snoozing remain shared.
 
-The dropdown, number field, switch, header and separator reuse Omarchy's UI
+The dropdown, switches, header and separators reuse Omarchy's UI
 components rather than defining a separate control style.
 Use arrows or `j`/`k` in the dropdown, Enter to choose and Escape to close the menu.
 
-**Edge spacing (px)** sets the distance from the bar and screen edges for both
-notification cards and the settings/history panel. It defaults to **12 logical
-pixels**, accepts 0–64, and applies immediately. Notifications remain top-right,
-clearing the bar only when it occupies the top or right edge. Internal padding
-and the spacing between cards are unchanged.
+`edgeSpacing` is a **config-only** option in the bar-widget's `shell.json` entry,
+not a preferences control. It sets the distance from the bar and screen edges
+for notification cards and the panel: **12 logical pixels** by default, range
+0–64. Notifications remain top-right, clearing the bar only on the top or right.
+Internal padding and the spacing between cards are unchanged.
 
 **Show countdown animation** is off by default. Enable it to show a shrinking
 time-remaining line along the bottom of notifications. This changes only the
 visual timer; notifications still expire normally when it is disabled.
 
-<img src="assets/display-settings-2x.png" width="420" alt="Notification preferences with 12px edge spacing and countdown animation switched off">
+<img src="assets/display-settings-2x.png" width="420" alt="Notification preferences with display selection, optional countdown animation and sharing snooze suggestions">
 
-The in-panel preferences expose display selection, edge spacing, countdown
-animation and sharing offers. They save to the same bar-widget entry and persist
+The in-panel preferences expose display selection, countdown animation and
+sharing offers. They save to the same bar-widget entry and persist
 across shell restarts. The other options below can be set on that entry too;
 there is no second user configuration file to maintain. Defaults are for a fresh
 configuration, not a reset of choices you have already saved.

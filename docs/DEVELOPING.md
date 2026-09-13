@@ -307,7 +307,7 @@ Set `OMARCHY_SHELL_DIR` if the shell is installed somewhere other than
 
 Use the installed `qs.Ui` kit rather than copying first-party component code.
 `Toast` composes `BorderSurface`, `Button` and `TextField`; the panel uses the real
-`PanelHero`, `CursorSurface`, `Dropdown`, `NumberField` and `ToggleSwitch`.
+`PanelHero`, `CursorSurface`, `Dropdown` and `ToggleSwitch`.
 Card borders come from `Border.surfaceSpec("notifications", ...)`, including
 gradient and per-side widths. Content geometry includes those insets.
 The canvas follows the stock scaled 380px notification width. `edgeSpacing`

@@ -717,34 +717,6 @@ BarWidget {
               width: parent.width
               spacing: Style.spacing.lg
 
-              NumberField {
-                width: parent.width
-                label: "Edge spacing (px)"
-                from: 0
-                to: 64
-                value: pager.configuredEdgeSpacing
-                foreground: pager.panelFg
-                fontFamily: pager.fontFamily
-                onModified: function(value) { pager.persistSettings({ edgeSpacing: value }) }
-              }
-
-              Text {
-                width: parent.width
-                text: "Space from the bar and screen edges.\nApplies to notifications and this panel."
-                textFormat: Text.PlainText
-                color: Qt.darker(pager.panelFg, 1.4)
-                font.family: pager.fontFamily
-                font.pixelSize: Style.font.bodySmall
-                wrapMode: Text.WordWrap
-              }
-            }
-
-            PanelSeparator { foreground: pager.panelFg }
-
-            Column {
-              width: parent.width
-              spacing: Style.spacing.lg
-
               Row {
                 width: parent.width
                 spacing: Style.spacing.controlGap
