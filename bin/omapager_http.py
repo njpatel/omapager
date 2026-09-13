@@ -106,8 +106,9 @@ class PinnedHTTPConnection(http.client.HTTPConnection):
                 # TLS validation is inseparable from every connection. A bad
                 # certificate or hostname is not masked by trying another IP.
                 sock.settimeout(self.remaining())
-                self.sock = ssl.create_default_context().wrap_socket(
-                    sock, server_hostname=self.host)
+                context = ssl.create_default_context()
+                context.minimum_version = ssl.TLSVersion.TLSv1_2
+                self.sock = context.wrap_socket(sock, server_hostname=self.host)
                 return
             except BaseException:
                 sock.close()

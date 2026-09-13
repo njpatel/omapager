@@ -46,8 +46,10 @@ with tempfile.TemporaryDirectory(prefix='omapager-tls-smoke-') as directory:
         '-subj', '/CN=example.com', '-addext', 'subjectAltName=DNS:example.com',
     ], check=True, capture_output=True)
     server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    server_context.minimum_version = ssl.TLSVersion.TLSv1_2
     server_context.load_cert_chain(cert, key)
     client_context = ssl.create_default_context(cafile=str(cert))
+    client_context.minimum_version = ssl.TLSVersion.TLSv1_2
     server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
     server.socket = server_context.wrap_socket(server.socket, server_side=True)
     thread = threading.Thread(target=server.serve_forever, daemon=True)

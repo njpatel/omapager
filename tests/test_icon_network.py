@@ -58,8 +58,10 @@ class IconNetworkTest(unittest.TestCase):
             "-addext", "subjectAltName=DNS:source.test,DNS:target.test",
         ], check=True, capture_output=True)
         cls.server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        cls.server_context.minimum_version = ssl.TLSVersion.TLSv1_2
         cls.server_context.load_cert_chain(cert, key)
         cls.client_context = ssl.create_default_context(cafile=str(cert))
+        cls.client_context.minimum_version = ssl.TLSVersion.TLSv1_2
 
     @contextlib.contextmanager
     def transport(self, scheme="https", rebound=None, redirect=False,

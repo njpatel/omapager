@@ -444,8 +444,9 @@ avoids a request for every notification, but is not a guarantee of anonymity.
 
 Network and image validation apply **with or without Bubblewrap**:
 
-- Automatic icon requests use HTTPS on its standard port. Invalid URLs, embedded
-  credentials, IP literals and local/private destinations are rejected.
+- Automatic icon requests use HTTPS on its standard port with TLS 1.2 or newer.
+  Invalid URLs, embedded credentials, IP literals and local/private destinations
+  are rejected.
 - DNS answers must all be public. Connections use those checked addresses rather
   than resolving the name again; TLS still verifies the original hostname.
 - Redirects and icon/manifest URLs go through the same checks. Proxy environment
