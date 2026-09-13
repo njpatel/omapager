@@ -1978,9 +1978,9 @@ Item {
       // grows and shrinks.
       mask: Region { item: surface.showingNotifications ? deck : null }
 
-      // Cards enter from behind the bar. Reserve only enough side/bottom room
-      // for their scale animation; native notification surfaces have no custom
-      // drop shadows to accommodate.
+      // Clip arrivals at the configured deck edge. Reserve only enough
+      // side/bottom room for their scale animation; native notification
+      // surfaces have no custom drop shadows to accommodate.
       Item {
         id: clipper
         visible: surface.showingNotifications

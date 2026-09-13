@@ -243,7 +243,14 @@ BarWidget {
   PanelController { id: controller }
   readonly property bool opened: controller.open
   property bool settingsView: false
-  onSettingsViewChanged: { if (!settingsView) displayDropdown.close() }
+  onSettingsViewChanged: {
+    if (!settingsView) displayDropdown.close()
+    // The shared panel focuses its target only when it opens. A view switch
+    // inside an already-open panel must transfer focus after bindings settle.
+    Qt.callLater(function() {
+      if (pager.opened) (pager.settingsView ? settingsPage : keys).forceActiveFocus()
+    })
+  }
 
   // KeyboardPanel dismisses itself by calling close() on its owner, and falls
   // back to writing its own `open` property when the owner has no such
@@ -1291,7 +1298,9 @@ BarWidget {
                     cursorShape: Qt.PointingHandCursor
                     onContainsMouseChanged: if (containsMouse) {
                       pager.cursorAt = line.index
-                      pager.cursorLive = true
+                      // Hover selects visually, but only keyboard navigation
+                      // may arm state-changing shortcuts on this row.
+                      pager.cursorLive = false
                     }
                     onClicked: pager.expandedKey = line.expanded ? "" : line.modelData.key
                   }

@@ -583,7 +583,6 @@ Item {
                 id: shut
                 anchors.centerIn: parent
                 text: "\u2715"
-                tooltipText: "Dismiss notification"
                 bordered: true
                 horizontalPadding: Style.space(4)
                 verticalPadding: Style.space(2)
@@ -606,6 +605,7 @@ Item {
                 visible: opacity > 0.01
                 Behavior on opacity { NumberAnimation { duration: card.fade } }
                 onClicked: card.dismissed()
+                onRightClicked: card.menuOpen = !card.menuOpen
               }
             }
           }

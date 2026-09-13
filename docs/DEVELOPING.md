@@ -172,11 +172,9 @@ across a restart), `history/` (one file per notification), `icons/` (resolved
 per source), `quiet.json` (snoozes + silencing). It is state, not cache: it
 survives `rm -rf ~/.cache`.
 
-Every history entry is the text of a message somebody sent, so it is trimmed by
-**age as well as count** — 7 days or 200 entries, whichever bites first, on
-every close. Icons are pruned at 60 days by `tidy`, which the daemon runs at
-startup. Nothing is written to the journal: no `console.log` anywhere, and the
-Python helpers speak on stdout, which is the IPC channel.
+History is trimmed by age and count on every close: 24 hours or 100 entries by
+default. `historyHours` selects 0 (disabled), 1, 24 or 168 hours. Icons are pruned
+at 60 days by `tidy`, which the daemon runs at startup.
 
 ## Security boundaries in this branch
 
@@ -300,11 +298,19 @@ Set `OMARCHY_SHELL_DIR` if the shell is installed somewhere other than
 ## Native UI integration
 
 Use the installed `qs.Ui` kit rather than copying first-party component code.
-`Toast` composes `BorderSurface`, `PanelActionButton`, `Button` and `TextField`;
-the panel uses the real `PanelHero`, `CursorSurface`, `Dropdown` and
-`ToggleSwitch`. Card borders come from `Border.surfaceSpec("notifications", ...)`,
-including gradient and per-side widths. Content geometry includes those insets.
-The canvas follows the stock 380px notification width and `Style.gapsOut`.
+`Toast` composes `BorderSurface`, `Button` and `TextField`; the panel uses the real
+`PanelHero`, `CursorSurface`, `Dropdown`, `NumberField` and `ToggleSwitch`.
+Card borders come from `Border.surfaceSpec("notifications", ...)`, including
+gradient and per-side widths. Content geometry includes those insets.
+The canvas follows the stock scaled 380px notification width. `edgeSpacing`
+defaults to 12 logical pixels and overrides `Style.gapsOut` for notification
+placement and the panel's bar gap and screen margin.
+
+When switching panel views while open, transfer focus to the new view after
+bindings settle; the shared panel otherwise focuses only on opening. Pointer
+hover may highlight a source, but must disarm state-changing keyboard shortcuts.
+Only deliberate keyboard navigation arms them. Right-clicking the dismiss button
+must open the same menu as right-clicking the card.
 
 The stock card's headline/body use Liberation Sans at `Style.font.title`;
 controls, glyphs and metadata follow `Style.font.family`. Theme roles determine
@@ -312,7 +318,7 @@ colours, padding and corners. Do not reintroduce minimum rounding, hand-tinted
 control states or extra card shadows.
 
 Intentional differences are the deck/grouping behavior, sender fallback mark,
-bounded 2→8-line body disclosure, action marks, More overflow, expiry indicator
+bounded 2→8-line body disclosure, action marks, More overflow, opt-in countdown
 and inline reply. Critical headlines use `Color.urgent` so non-expiring alerts
 retain a visible urgency cue without overriding the theme's border spec.
 `DeedButton` still adapts the native Button's label measurement because the
