@@ -27,8 +27,17 @@ function snapshot(n, key, urgencyEnum) {
   // (/^[a-zA-Z0-9_.-]{1,256}$/, no "/") is what actually keeps
   // "../../etc/passwd" or a "file://" URL from being promoted into one.
   if (img.indexOf("image://icon/") === 0) {
-    named = img.substring("image://icon/".length)
-    img = ""
+    var iconPayload = img.substring("image://icon/".length)
+    if (iconPayload.charAt(0) === "/") {
+      // Not a theme name: Quickshell stuffs an image-path hint into the icon
+      // scheme ("image://icon//tmp/..."), which is how Chromium-family web
+      // notifications deliver the page's own icon. The icon provider loads
+      // such a path fine - the built-in service passes it straight through.
+      // Keep it drawable here instead of discarding it as a bad name.
+    } else {
+      named = iconPayload
+      img = ""
+    }
   } else if (!/^image:\/\/qsimage\/[0-9]+\/[0-9]+$/.test(img)) {
     img = ""
   }
@@ -133,7 +142,15 @@ function normalise(row) {
   out.link = Security.safeHttpUrl(out.link)
   out.phone = out.phone.slice(0, Security.MAX_PHONE)
   out.codes = out.codes.split(" ").slice(0, Security.MAX_CODES).join(" ")
-  out.image = /^image:\/\/qsimage\/[0-9]+\/[0-9]+$/.test(out.image) ? out.image : ""
+  // qsimage = in-process pixels (KDE Connect). "image://icon//..." = an
+  // image-path hint Quickshell wrapped in the icon scheme - an absolute file
+  // path, not a theme name; the icon provider loads it (the built-in service
+  // relies on this for every Chromium web notification). No "..": the payload
+  // must stay a plain absolute path.
+  var okQsimage = /^image:\/\/qsimage\/[0-9]+\/[0-9]+$/.test(out.image)
+  var okIconPath = out.image.indexOf("image://icon//") === 0
+                && out.image.indexOf("..") === -1
+  out.image = (okQsimage || okIconPath) ? out.image : ""
   out.stored_image = ""
   out.bodyRich = Markup.render(out.body)
   out.bodyLine = Markup.oneLine(out.body)
