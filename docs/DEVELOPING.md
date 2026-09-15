@@ -65,6 +65,20 @@ Screenshots are a last resort: the panel dismisses on **any** click, so a user
 at the keyboard will close it under you, and a wide crop catches their desktop.
 Crop to the card and check a corner pixel is the card's own colour.
 
+### Repeated close regression
+
+Run `bin/omapager-demo --scene close` inside an isolated omalab session. It
+creates three critical notifications from one source, each with a live default
+action. Hover the front card's close control and click it three times, waiting
+for each animation to settle without moving the pointer. The next card must
+show its close control under the stationary pointer; all three must dismiss,
+with no `default` output from the demo. Clicking a card's body on a fresh run
+should print `default`, confirming that ordinary activation still works.
+
+The deck owns hover, not the cards. Refresh its hit test after scene settlement
+has removed departing rows: pointer events alone miss cards moving beneath a
+stationary pointer and leave the next close control disabled.
+
 ## Things that cost a day to learn
 
 **Qt/QML**

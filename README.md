@@ -244,6 +244,7 @@ bin/omapager-demo                       # the everyday scenes
 bin/omapager-demo --scene interactive   # codes, links, and the sender's buttons
 bin/omapager-demo --scene routing       # where a click sends you, per source
 bin/omapager-demo --scene reply         # inline reply, against a stand-in phone
+bin/omapager-demo --scene close         # dismiss a stack without moving the pointer
 bin/omapager-demo --replay 40           # your own notifications, re-sent
 bin/omapager-demo --list
 ```
@@ -252,6 +253,10 @@ bin/omapager-demo --list
 do before it sends anything, so you can check it against what happens.
 `--scene reply` writes a fixture the daemon treats as a repliable notification
 and logs the reply to a file rather than sending it to a person.
+`--scene close` keeps three cards on screen with live default actions. Repeatedly
+click the front close control without moving the pointer, waiting for each card
+to settle. All three should dismiss; any `default` output means a card opened
+instead.
 
 ## Requirements
 

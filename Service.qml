@@ -1868,6 +1868,20 @@ Item {
             service.hoverKey = found
           }
 
+          // Cards can move under a stationary pointer after a dismissal.
+          // Refresh after the finished handler removes leaving rows, or the
+          // next card keeps its close control disabled and a second click
+          // invokes the card's default action instead.
+          Connections {
+            target: sceneRun
+            function onFinished() {
+              Qt.callLater(function() {
+                if (hoverArea.containsMouse)
+                  hoverArea.hoverAt(hoverArea.mouseX, hoverArea.mouseY)
+              })
+            }
+          }
+
           onContainsMouseChanged: {
             service.pointerIn = containsMouse
             if (containsMouse) {
