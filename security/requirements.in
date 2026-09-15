@@ -1,0 +1,4 @@
+# Development-only scanner, never loaded by the desktop plugin.
+semgrep==1.176.1
+# Optional runtime decoder, installed here to exercise raster validation.
+pillow==12.3.0

@@ -10,23 +10,26 @@
 # then the site itself - which is the one step that touches the network, and so
 # the one step that has to be asked for.
 import argparse
+import base64
 import glob
-import ipaddress
+import hashlib
+import io
 import json
+import math
 import os
 import re
-import socket
+import stat
 import sys
 import time
 import urllib.parse
-import urllib.request
+import warnings
+from omapager_http import fetch as get, parse_url, public_hostname
+from omapager_files import private_dir, write_bytes, write_json, read_json
 
 CONFIG = os.path.expanduser("~/.config/omarchy/omapager/icons")
 CACHE = os.path.expanduser("~/.local/state/omarchy/omapager/icons")
 INDEX = os.path.join(CACHE, "index.json")
 RETRY_AFTER = 7 * 86400          # do not hammer a site that has no icon
-TIMEOUT = 6
-AGENT = "Mozilla/5.0 (X11; Linux x86_64) omapager"
 
 ICON_DIRS = [
     os.path.expanduser("~/.local/share/icons"),
@@ -41,6 +44,18 @@ EXTS = (".png", ".svg", ".jpg", ".jpeg", ".webp", ".ico")
 
 
 NORM = 128          # every icon ends up this size, however it arrived
+PAGE_BYTES = 512 * 1024
+MANIFEST_BYTES = 256 * 1024
+REMOTE_ICON_BYTES = 1024 * 1024
+CACHED_ICON_BYTES = 256 * 1024
+MAX_ICON_LINKS = 16
+MAX_MANIFESTS = 2
+MAX_MANIFEST_ICONS = 16
+MAX_ICON_REQUESTS = 6
+MAX_REMOTE_SIDE = 2048
+MAX_REMOTE_PIXELS = MAX_REMOTE_SIDE * MAX_REMOTE_SIDE
+REMOTE_FORMATS = ("PNG", "JPEG", "WEBP", "ICO")
+SENDER_IMAGE_DATA_URL_CHARS = 131072
 
 
 def is_mono_glyph(im, opaque):
@@ -98,7 +113,10 @@ def normalise(path):
     if path.lower().endswith(".svg"):
         return path                        # left to Qt, which renders SVG well
     try:
-        im = Image.open(path).convert("RGBA")
+        Image.MAX_IMAGE_PIXELS = 2048 * 2048
+        im = Image.open(path)
+        if max(im.size) > 2048: return None
+        im = im.convert("RGBA")
     except Exception:
         # If PIL cannot read it, Qt very likely cannot either - a favicon
         # served as HTML, an .ico in a variant nobody supports. Handing the
@@ -144,14 +162,16 @@ def normalise(path):
                         + ("-mono" if mono else "") + ".png")
     try:
         os.makedirs(CACHE, exist_ok=True)
-        canvas.save(dest)
+        buf = io.BytesIO()
+        canvas.save(buf, format="PNG")
+        write_bytes(dest, buf.getvalue())
     except Exception:
         return None
     return dest
 
 
 def slug(text):
-    return re.sub(r"[^a-z0-9._-]+", "-", str(text or "").lower()).strip("-")
+    return re.sub(r"[^a-z0-9._-]+", "-", str(text or "")[:256].lower()).strip("-.")[:100]
 
 
 # ---------------------------------------------------------------- 1. yours
@@ -160,7 +180,7 @@ def from_config(names):
     for name in names:
         for ext in EXTS:
             path = os.path.join(CONFIG, slug(name) + ext)
-            if os.path.isfile(path):
+            if os.path.isfile(path) and os.path.realpath(path).startswith(os.path.realpath(CONFIG) + os.sep):
                 return path
     return None
 
@@ -174,7 +194,7 @@ def from_icon_theme(names):
         # on a case-sensitive filesystem does not care what the spec says
         # names ought to look like.
         for n in [str(name or "").strip(), slug(name)]:
-            if not n:
+            if not re.fullmatch(r"[A-Za-z0-9_-][A-Za-z0-9_.-]{0,255}", n):
                 continue
             for base in ICON_DIRS:
                 # Biggest first: these get drawn at 38px, and downscaling
@@ -183,7 +203,7 @@ def from_icon_theme(names):
                                 "%s/hicolor/128x128/apps/%s.*", "%s/hicolor/scalable/apps/%s.*",
                                 "%s/hicolor/64x64/apps/%s.*", "%s/*/*/apps/%s.*", "%s/%s.*"):
                     for hit in sorted(glob.glob(pattern % (base, n))):
-                        if hit.lower().endswith(EXTS):
+                        if hit.lower().endswith(EXTS) and os.path.realpath(hit).startswith(os.path.realpath(base) + os.sep):
                             return hit
     return None
 
@@ -200,7 +220,7 @@ def from_desktop_entries(names):
         for path in glob.glob(base + "/*.desktop"):
             try:
                 with open(path, errors="replace") as f:
-                    text = f.read()
+                    text = f.read(65536)
             except OSError:
                 continue
             fields = {}
@@ -221,7 +241,8 @@ def from_desktop_entries(names):
                     found = from_icon_theme([fields["Icon"]])
                     if found:
                         return found
-                    if os.path.isabs(fields["Icon"]) and os.path.isfile(fields["Icon"]):
+                    if (os.path.isabs(fields["Icon"]) and os.path.isfile(fields["Icon"])
+                            and any(os.path.realpath(fields["Icon"]).startswith(os.path.realpath(d) + os.sep) for d in ICON_DIRS)):
                         return fields["Icon"]
     return None
 
@@ -231,196 +252,245 @@ def from_desktop_entries(names):
 # of these lands on whoever happened to register the generic word: "Messages"
 # found messages.dev and came back wearing a stranger's logo, which is worse
 # than the letter M. A phone's built-in apps are all called things like this.
-GENERIC_NAMES = {
-    "messages", "message", "mail", "email", "phone", "dialer", "camera",
-    "clock", "alarm", "calendar", "settings", "files", "photos", "gallery",
-    "music", "notes", "weather", "contacts", "downloads", "screenshot",
-    "recorder", "voice", "browser", "news", "wallet", "health", "home",
-}
-
-
 def load_index():
-    try:
-        with open(INDEX) as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return {}
+    value = read_json(INDEX)
+    return value if isinstance(value, dict) else {}
 
 
 def save_index(data):
-    os.makedirs(CACHE, exist_ok=True)
-    tmp = INDEX + ".part"
-    with open(tmp, "w") as f:
-        json.dump(data, f, separators=(",", ":"))
-    os.replace(tmp, INDEX)
+    write_json(INDEX, data)
 
 
-# Everything below this line is fetched because a notification said so, and a
-# notification is written by whoever sent it. The body of a page we fetch picks
-# the next URL (its <link rel=icon>), and a redirect picks one too, so "we only
-# ever ask the notifying site" has to be enforced at every hop rather than
-# assumed from the first one.
-#
-# Two rules. http(s) only: urllib will happily open file:// and ftp://, and a
-# page that offers <link rel="icon" href="file:///etc/passwd"> should not turn
-# an icon lookup into a local file read. And public addresses only: otherwise a
-# site you allowed notifications from can aim this at 127.0.0.1 or
-# 169.254.169.254 and use the shell as a way to reach things that are only
-# listening because they believed they were unreachable.
-ALLOWED_SCHEMES = ("http", "https")
-
-# A plain dotted hostname and nothing else - no port, no userinfo, no path, no
-# IP literal. Each of those turns "https://" + host + "/" into a URL pointing
-# somewhere other than where it reads as pointing.
-HOSTNAME = re.compile(
-    r"^(?=.{1,253}$)"
-    r"(?!\d+$)"
-    r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
-    r"(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$")
-
-
-def public_hostname(host):
-    """A hostname worth asking, or None."""
-    h = str(host or "").strip().lower().rstrip(".")
-    if not HOSTNAME.match(h):
-        return None
-    if h.split(".")[-1].isdigit():      # a dotted-quad wearing a hostname's shape
-        return None
-    return h
-
-
-def reachable(url):
-    """The URL, if it is one we are allowed to fetch. Otherwise None.
-
-    The address check resolves the name and refuses loopback, private,
-    link-local and reserved space. A name can resolve differently between this
-    check and urllib's own connect, which is a rebinding window we accept: the
-    prize is a GET to a local port, and closing it properly means holding the
-    socket ourselves."""
-    try:
-        parts = urllib.parse.urlsplit(url)
-    except ValueError:
-        return None
-    if parts.scheme not in ALLOWED_SCHEMES:
-        return None
-    if not public_hostname(parts.hostname):
+def https_candidate(raw, base):
+    """Resolve one metadata URL and accept only the hardened HTTPS grammar."""
+    if not isinstance(raw, str):
         return None
     try:
-        infos = socket.getaddrinfo(parts.hostname, parts.port or 0,
-                                   proto=socket.IPPROTO_TCP)
-    except (OSError, ValueError):
+        url = urllib.parse.urljoin(base, raw)
+        parse_url(url)
+    except (TypeError, ValueError):
         return None
-    for info in infos:
-        try:
-            if not ipaddress.ip_address(info[4][0]).is_global:
-                return None
-        except ValueError:
-            return None
     return url
 
 
-class GuardedRedirect(urllib.request.HTTPRedirectHandler):
-    """A redirect is a URL chosen by the server, so it gets the same test.
-    Returning None stops the chain instead of following it."""
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        if not reachable(newurl):
-            return None
-        return super().redirect_request(req, fp, code, msg, headers, newurl)
-
-
-OPENER = urllib.request.build_opener(GuardedRedirect)
-
-
-def get(url):
-    if not reachable(url):
-        raise ValueError("refusing to fetch " + str(url)[:80])
-    req = urllib.request.Request(url, headers={"User-Agent": AGENT})
-    with OPENER.open(req, timeout=TIMEOUT) as r:
-        return r.read(600000), r.geturl()
-
-
 def icon_links(html, base, scheme):
-    """Every icon the page offers, best first.
-
-    A site that ships a light and a dark mark says so with a media query on the
-    link, so the one that suits the current theme is preferred over the one
-    that happens to come first."""
+    """Every valid HTTPS icon the page offers, best first."""
+    if not isinstance(html, str):
+        return []
     out, themed = [], []
     for m in re.finditer(r"<link\s+([^>]+)>", html, re.I):
-        attrs = dict(re.findall(r'(\w[\w-]*)\s*=\s*["\']([^"\']*)["\']', m.group(1)))
-        rel = (attrs.get("rel") or "").lower()
-        href = attrs.get("href")
-        if not href:
+        try:
+            attrs = {key.lower(): value for key, value in
+                     re.findall(r'(\w[\w-]*)\s*=\s*["\']([^"\']*)["\']', m.group(1))}
+            rel = (attrs.get("rel") or "").lower()
+            url = https_candidate(attrs.get("href"), base)
+            if not url:
+                continue
+            media = (attrs.get("media") or "").lower()
+            if "apple-touch-icon" in rel:
+                (themed if scheme in media else out).append((0, url))
+            elif "icon" in rel and "mask" not in rel:
+                size = attrs.get("sizes", "")
+                rank = 1
+                try:
+                    rank = -int(size.split("x", 1)[0])
+                except (TypeError, ValueError):
+                    pass
+                (themed if scheme in media else out).append((rank, url))
+            elif rel == "manifest":
+                out.append((50, ("manifest", url)))
+        except (TypeError, ValueError):
             continue
-        media = (attrs.get("media") or "").lower()
-        url = urllib.parse.urljoin(base, href)
-        if "apple-touch-icon" in rel:
-            (themed if scheme in media else out).append((0, url))
-        elif "icon" in rel and "mask" not in rel:
-            size = attrs.get("sizes", "")
-            n = 1
-            try:
-                n = -int(size.split("x")[0])
-            except Exception:
-                pass
-            (themed if scheme in media else out).append((n, url))
-        elif rel == "manifest":
-            out.append((50, ("manifest", url)))
-    return [u for _, u in sorted(themed)] + [u for _, u in sorted(out)]
+        if len(themed) + len(out) >= MAX_ICON_LINKS:
+            break
+    ordered = ([url for _, url in sorted(themed, key=lambda item: item[0])]
+               + [url for _, url in sorted(out, key=lambda item: item[0])])
+    return ordered[:MAX_ICON_LINKS]
 
 
 def from_manifest(url, base):
     try:
-        raw, _ = get(url)
+        raw, final = get(url, MANIFEST_BYTES)
         data = json.loads(raw.decode("utf-8", "replace"))
     except Exception:
         return []
-    icons = data.get("icons") or []
-    def area(i):
+    if not isinstance(data, dict):
+        return []
+    icons = data.get("icons")
+    if not isinstance(icons, list):
+        return []
+    icons = [item for item in icons[:MAX_MANIFEST_ICONS]
+             if isinstance(item, dict)]
+
+    def area(item):
         try:
-            return -int(str(i.get("sizes", "0x0")).split("x")[0])
-        except Exception:
+            return -int(str(item.get("sizes", "0x0")).split("x", 1)[0])
+        except (TypeError, ValueError):
             return 0
-    return [urllib.parse.urljoin(base, i["src"]) for i in sorted(icons, key=area)
-            if i.get("src")]
+
+    result = []
+    for item in sorted(icons, key=area):
+        candidate = https_candidate(item.get("src"), final or base)
+        if candidate:
+            result.append(candidate)
+    return result
+
+
+def checked_raster(data, formats, max_side):
+    """Fully verify and decode bounded image bytes, returning an RGBA copy."""
+    if not isinstance(data, bytes):
+        raise ValueError("image bytes required")
+    from PIL import Image
+    Image.MAX_IMAGE_PIXELS = MAX_REMOTE_PIXELS
+
+    def metadata(image):
+        if (image.format not in formats or not image.width or not image.height
+                or max(image.size) > max_side
+                or image.width * image.height > MAX_REMOTE_PIXELS
+                or getattr(image, "n_frames", 1) != 1):
+            raise ValueError("unsupported image")
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", Image.DecompressionBombWarning)
+        with Image.open(io.BytesIO(data)) as probe:
+            metadata(probe)
+            probe.verify()
+        with Image.open(io.BytesIO(data)) as image:
+            metadata(image)
+            image.load()
+            return image.convert("RGBA")
+
+
+def normalised_remote_png(data):
+    if not isinstance(data, bytes) or len(data) > REMOTE_ICON_BYTES:
+        raise ValueError("oversized image")
+    image = checked_raster(data, REMOTE_FORMATS, MAX_REMOTE_SIDE)
+    try:
+        if image.width < 8 or image.height < 8:
+            raise ValueError("image too small")
+        image.thumbnail((NORM, NORM))
+        output = io.BytesIO()
+        image.save(output, format="PNG")
+        return output.getvalue()
+    finally:
+        image.close()
+
+
+def sender_image_data_url(stream):
+    """Decode one bounded image stream without persisting or naming its source."""
+    data = stream.read(REMOTE_ICON_BYTES + 1)
+    if len(data) > REMOTE_ICON_BYTES:
+        raise ValueError("oversized image")
+    png = normalised_remote_png(data)
+    encoded = base64.b64encode(png).decode("ascii")
+    result = "data:image/png;base64," + encoded
+    if len(result) > SENDER_IMAGE_DATA_URL_CHARS:
+        raise ValueError("encoded image too large")
+    return result
 
 
 def fetch_site(host, scheme):
-    """Ask the site for its own icon. This is the only step that leaves the
-    machine, which is why it is opt-in: it tells that host you were notified."""
+    """Fetch one site's own HTTPS metadata and icon when the caller allows it."""
+    host = public_hostname(host)
+    if not host or scheme not in ("dark", "light"):
+        return None
     base = "https://" + host + "/"
     candidates = []
+    manifests = 0
     try:
-        raw, final = get(base)
+        raw, final = get(base, PAGE_BYTES)
         html = raw.decode("utf-8", "replace")
         for entry in icon_links(html, final, scheme):
             if isinstance(entry, tuple) and entry[0] == "manifest":
-                candidates.extend(from_manifest(entry[1], final))
+                if manifests < MAX_MANIFESTS:
+                    manifests += 1
+                    candidates.extend(from_manifest(entry[1], final))
             else:
                 candidates.append(entry)
     except Exception:
         pass
-    candidates.append(urllib.parse.urljoin(base, "/favicon.ico"))
+    fallback = https_candidate("/favicon.ico", base)
+    if fallback:
+        candidates.append(fallback)
 
-    os.makedirs(CACHE, exist_ok=True)
-    for url in candidates[:6]:
+    seen = set()
+    for url in candidates:
+        if url in seen:
+            continue
+        seen.add(url)
+        if len(seen) > MAX_ICON_REQUESTS:
+            break
         try:
-            data, _ = get(url)
+            data, _ = get(url, REMOTE_ICON_BYTES)
+            png = normalised_remote_png(data)
+            dest = os.path.join(
+                CACHE, "web-" + hashlib.sha256((host + scheme).encode()).hexdigest() + ".png")
+            # Decoding and all resource checks above are helper-local. They do
+            # not rely on Bubblewrap because the wrapper may deliberately use
+            # its controlled direct mode when sandboxing is unavailable.
+            write_bytes(dest, png)
         except Exception:
-            continue
-        if len(data) < 80:
-            continue
-        ext = os.path.splitext(urllib.parse.urlparse(url).path)[1].lower()
-        if ext not in EXTS:
-            ext = ".png"
-        dest = os.path.join(CACHE, "web-%s-%s%s" % (slug(host), scheme, ext))
-        try:
-            with open(dest, "wb") as f:
-                f.write(data)
-        except OSError:
             continue
         return dest
     return None
+
+
+def remote_cache_path(host, scheme):
+    """Where a validated fetch_site(host, scheme) result would live."""
+    return os.path.join(CACHE, "web-" + hashlib.sha256((host + scheme).encode()).hexdigest() + ".png")
+
+
+def safe_cached_remote_icon(host, scheme, cached):
+    """Return a fully decoded normalized cache entry for this host and theme."""
+    if not isinstance(cached, str):
+        return None
+    expected = os.path.abspath(remote_cache_path(host, scheme))
+    if os.path.abspath(cached) != expected:
+        return None
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+    try:
+        fd = os.open(expected, flags)
+        try:
+            info = os.fstat(fd)
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                    or info.st_nlink != 1 or not 0 < info.st_size <= CACHED_ICON_BYTES):
+                return None
+            os.set_blocking(fd, True)
+            data = bytearray()
+            while len(data) <= CACHED_ICON_BYTES:
+                block = os.read(fd, min(16384, CACHED_ICON_BYTES + 1 - len(data)))
+                if not block:
+                    break
+                data.extend(block)
+        finally:
+            os.close(fd)
+        if len(data) > CACHED_ICON_BYTES:
+            return None
+        image = checked_raster(bytes(data), ("PNG",), NORM)
+        image.close()
+    except Exception:
+        return None
+    return expected
+
+
+def invalidate_cached_remote_icon(host, scheme, cached):
+    """Unlink a rejected web-cache entry without following it anywhere."""
+    if not isinstance(cached, str):
+        return
+    candidate = os.path.abspath(cached)
+    root = os.path.abspath(CACHE)
+    name = os.path.basename(candidate)
+    expected = os.path.basename(remote_cache_path(host, scheme))
+    legacy = ("web-" + slug(host) + "-" + scheme + ".",
+              "web-" + slug(host).replace(".", "-") + "-" + scheme + ".")
+    if (os.path.dirname(candidate) != root
+            or (name != expected and not name.startswith(legacy))):
+        return
+    try:
+        # unlink removes a planted symlink itself; it never touches its target.
+        os.unlink(candidate)
+    except OSError:
+        pass
 
 
 # ---------------------------------------------------------------- resolve
@@ -437,22 +507,6 @@ def host_names(source):
     if labels:
         names.append(labels[0])
     return names
-
-
-# Public-suffix handling, kept deliberately small: enough to know that the
-# owner of "mail.company.co.uk" is "company.co.uk" and not "co.uk".
-SECOND_LEVEL = ("co", "com", "org", "net", "ac", "gov", "edu")
-
-
-def hosts_to_try(host):
-    labels = [l for l in str(host or "").split(".") if l]
-    out = [host]
-    if len(labels) > 2:
-        keep = 3 if labels[-2] in SECOND_LEVEL else 2
-        root = ".".join(labels[-keep:])
-        if root != host:
-            out.append(root)
-    return out
 
 
 def resolve(args):
@@ -486,57 +540,39 @@ def resolve(args):
         if hit:
             return hit, "from_icon_theme:hint"
 
-    # A bare app name has no host to ask. Most of these are products whose
-    # site is the name plus a common suffix, so try a few - once, then cached
-    # forever, including the failure.
-    if args.fetch and not web:
-        bare = slug(args.source) or slug(args.app)
-        if bare and "." not in bare and len(bare) >= 3:
-            index = load_index()
-            note = index.get(bare) or {}
-            cached = note.get(args.scheme)
-            if cached and os.path.isfile(cached):
-                return cached, "cache"
-            if bare in GENERIC_NAMES:
-                pass                      # a description, not a brand
-            elif note.get("failed_at", 0) < time.time() - RETRY_AFTER:
-                # .com first: these are guesses at a brand's home from its
-                # name alone, and .app/.dev are cheap enough that the generic
-                # word usually belongs to somebody else.
-                for tld in (".com", ".io", ".app", ".dev"):
-                    hit = fetch_site(bare + tld, args.scheme)
-                    if hit:
-                        note[args.scheme] = hit
-                        index[bare] = note
-                        save_index(index)
-                        return hit, "guessed:" + bare + tld
-                note["failed_at"] = time.time()
-                index[bare] = note
-                save_index(index)
-
-    if args.fetch and web:
+    if web:
         index = load_index()
-        # The subdomain first, then whatever it is a subdomain of. A workspace
-        # host often serves nothing useful - a login page with a generic mark,
-        # or a 403 - while the root domain has the brand's own icon. Slack is
-        # the one that made this obvious.
-        for host in hosts_to_try(web[0]):
-            note = index.get(host) or {}
-            cached = note.get(args.scheme)
-            if cached and os.path.isfile(cached):
-                return cached, "cache"
-            if note.get("failed_at", 0) > time.time() - RETRY_AFTER:
-                continue
-            hit = fetch_site(host, args.scheme)
-            note.setdefault("failed_at", 0)
-            if hit:
-                note[args.scheme] = hit
-            else:
-                note["failed_at"] = time.time()
+        host = web[0]  # Never guess or contact a parent domain.
+        stored = index.get(host)
+        note = dict(stored) if isinstance(stored, dict) else {}
+        cached = note.get(args.scheme)
+        if cached:
+            safe = safe_cached_remote_icon(host, args.scheme, cached)
+            if safe:
+                # A validated public cache stays useful while fetching is off.
+                return safe, "cache"
+            invalidate_cached_remote_icon(host, args.scheme, cached)
+            note.pop(args.scheme, None)
+            note["failed_at"] = 0
             index[host] = note
             save_index(index)
-            if hit:
-                return hit, "fetched:" + host
+
+        # This is the network boundary: every cache check above is local, and
+        # no metadata, favicon, DNS, proxy, cookie jar, or credential lookup is
+        # attempted unless the caller supplied --fetch.
+        if args.fetch:
+            failed_at = note.get("failed_at", 0)
+            if type(failed_at) not in (int, float) or not math.isfinite(failed_at):
+                failed_at = 0
+            if failed_at <= time.time() - RETRY_AFTER:
+                hit = fetch_site(host, args.scheme)
+                note["failed_at"] = 0 if hit else time.time()
+                if hit:
+                    note[args.scheme] = hit
+                index[host] = note
+                save_index(index)
+                if hit:
+                    return hit, "fetched:" + host
 
     # Whatever delivered it, as a last resort before the letter tile.
     for step in (from_icon_theme, from_desktop_entries):
@@ -546,7 +582,8 @@ def resolve(args):
     return None, "none"
 
 
-def main():
+def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
     ap = argparse.ArgumentParser()
     ap.add_argument("--key", default="")
     ap.add_argument("--app", default="")
@@ -555,7 +592,20 @@ def main():
     ap.add_argument("--scheme", default="dark", choices=["dark", "light"])
     ap.add_argument("--fetch", action="store_true")
     ap.add_argument("--why", action="store_true", help="print where it came from")
-    args = ap.parse_args()
+    ap.add_argument("--sender-image", action="store_true")
+    args = ap.parse_args(argv)
+    if args.sender_image:
+        if argv != ["--sender-image"]:
+            return 2
+        try:
+            result = sender_image_data_url(sys.stdin.buffer)
+        except Exception:
+            return 1
+        sys.stdout.write(result)
+        return 0
+    for field in ("key", "app", "app_icon", "source"):
+        if len(getattr(args, field)) > 256: return 2
+    private_dir(CACHE)
     path, how = resolve(args)
     if path:
         path = normalise(path)

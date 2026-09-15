@@ -12,11 +12,15 @@ import qs.Commons
 import qs.Ui
 
 import "Markup.js" as Markup
+import "Security.js" as Security
 
 Item {
   id: card
 
+  property real fontScale: 1
+  property bool showCountdown: false
   property var row: ({})
+  property string senderImage: "" // helper-validated PNG data URL, never the sender's path
   property var place: ({ y: 0, scale: 1, opacity: 1, z: 1, front: true, hidden: false })
   // The scene that owns the clock. Everything below degrades to a still card
   // rather than breaking if it is not there.
@@ -42,7 +46,7 @@ Item {
     if (yest) return "yesterday"
     return Qt.formatDateTime(then, "ddd")
   }
-  property real cardWidth: Style.space(340)
+  property real cardWidth: Style.space(380)
 
   // The only duration the card owns. Everything it animates is a crossfade
   // inside its own edges; anything that moves the deck belongs to the scene.
@@ -55,6 +59,15 @@ Item {
   signal silenceRequested()
 
   readonly property bool critical: row.urgency === 2
+  readonly property color dimColor: Qt.darker(Color.notifications.text, 1.4)
+  readonly property color bodyColor: Qt.darker(Color.notifications.text, 1.15)
+  readonly property color accentColor: critical ? Color.urgent
+                                               : (row.urgency === 0 ? dimColor : Color.notifications.countdown)
+  readonly property var cardBorderSpec: Border.surfaceSpec(
+      "notifications", "border", Color.notifications.border,
+      Math.max(1, Style.space(2)))
+  readonly property bool hasBody: String(row.body || "").length > 0
+  readonly property real contentPaddingY: hasBody ? Style.space(10) : Style.space(7)
   // A card behind the front one in a collapsed deck is a shape, not a message:
   // the cards are translucent, so its text would otherwise read straight
   // through the card in front of it.
@@ -127,14 +140,51 @@ Item {
     return out
   }
 
-  // Three buttons is what fits across a card without the labels shrinking.
-  // Past that the last slot becomes "More", which opens the lot as a list
-  // rather than a floating menu: this surface is clipped, and a popup that can
-  // be cut off is worse than one more row.
-  readonly property int fits: 3
+  // Measure the actual themed buttons: a fixed count overflows with larger
+  // fonts or longer action labels. Reserve More before admitting each action.
+  readonly property var actionWidths: {
+    var widths = []
+    for (var i = 0; i < deedMeasures.count; i++) {
+      var button = deedMeasures.itemAt(i)
+      if (button) widths.push(button.implicitWidth)
+    }
+    return widths
+  }
+  readonly property int fits: {
+    var widths = actionWidths, gap = deedRow.spacing, available = deedArea.width
+    if (widths.length !== allDeeds.length) return 0
+    var total = 0
+    for (var i = 0; i < widths.length; i++) total += widths[i] + (i ? gap : 0)
+    if (total <= available) return widths.length
+    var used = moreMeasure.implicitWidth, count = 0
+    for (var j = 0; j < widths.length; j++) {
+      if (used + gap + widths[j] > available) break
+      used += gap + widths[j]
+      count++
+    }
+    return count
+  }
   readonly property bool overflows: allDeeds.length > fits
-  readonly property var deeds: allDeeds.slice(0, overflows ? fits - 1 : fits)
-  readonly property var spare: overflows ? allDeeds.slice(fits - 1) : []
+  readonly property var deeds: allDeeds.slice(0, fits)
+  readonly property var spare: allDeeds.slice(fits)
+
+  Item {
+    visible: false
+    Repeater {
+      id: deedMeasures
+      model: card.allDeeds
+      DeedButton {
+        required property var modelData
+        deed: modelData
+        toast: card
+      }
+    }
+    DeedButton {
+      id: moreMeasure
+      deed: ({ kind: "more", label: "More", value: "" })
+      toast: card
+    }
+  }
   property bool deedsOpen: false
   property bool menuOpen: false
   property string actionsAlign: "right"      // right | left
@@ -150,7 +200,7 @@ Item {
     for (var i = 0; i < snoozeOptions.length; i++)
       out.push({ kind: "snooze", label: String(snoozeOptions[i].menuLabel),
                  value: Number(snoozeOptions[i].seconds) })
-    out.push({ kind: "silence", label: "Silence everything", value: 0 })
+    out.push({ kind: "silence", label: "Enable Do Not Disturb", value: 0 })
     return out
   }
 
@@ -180,6 +230,7 @@ Item {
   // put them on the wire. A restored card has none, because the sender that
   // would have to carry them out is gone.
   property var actions: []
+  property string replyError: ""
   signal actionInvoked(string identifier)
 
   // Replying to a message forwarded from the phone.
@@ -223,18 +274,20 @@ Item {
   // the card's - and subtracting it back out is a binding loop.
   // The words, without whatever the deeds are doing underneath them. The card's
   // height is measured from this, so it grows when the body opens.
+  // Item.visible includes ancestor visibility. An inactive output must not
+  // shrink the same notification's measurement on the active output.
   readonly property real textBlock:
-      headline.height + (bodyBox.visible ? column.spacing + bodyBox.height : 0)
+      headline.height + (hasBody ? column.spacing + bodyBox.height : 0)
 
   // The same block at its two-line height, whatever the body is doing now. The
   // icon is centred on this rather than on the live one: a body that opens on
   // hover would otherwise walk the mark down the card exactly as the buttons
   // used to, and the mark is how you recognise the sender before reading.
   readonly property real restingBlock:
-      headline.height + (bodyBox.visible ? column.spacing + bodyBox.restHeight : 0)
+      headline.height + (hasBody ? column.spacing + bodyBox.restHeight : 0)
 
-  readonly property real fixedHeight: Style.space(12) * 2
-      + Math.max(thumb.height, textBlock)
+  readonly property real fixedHeight: plate.borderTop + plate.borderBottom
+      + contentPaddingY * 2 + Math.max(thumb.height, textBlock)
 
   // The height this card's *state* implies. The deck lays out from this and
   // only this: feeding a rendered, mid-animation height back into the layout
@@ -276,89 +329,25 @@ Item {
   // its own without being part of any measurement.
   enabled: !place.hidden
 
-  // The card is drawn in two pieces. This one is the plate: the background,
-  // the border and - crucially - the shadow, with no children at all. A
-  // MultiEffect re-renders its entire blurred source whenever the item it is
-  // attached to repaints, and the countdown ticks ten times a second, so with
-  // the shadow on the card itself every tick re-blurred the whole card. Eight
-  // notifications was enough to peg the shell at 60% of a core.
-  // Two shadows, not one.
-  //
-  // A single blur at a single offset is the giveaway of a drawn shadow: real
-  // light gives an object a wide, weak cast from the room and a small, darker
-  // one where it nearly touches the surface. Two layers cost two static
-  // textures per card and are the whole difference between "there is a shadow
-  // here" and the card sitting on the desktop.
-  Rectangle {
-    id: farShadow
-    x: plate.x
-    y: plate.y
-    width: plate.width
-    height: plate.height
-    radius: plate.radius
-    color: plate.color
-    visible: !card.place.hidden
-
-    layer.enabled: true
-    layer.effect: MultiEffect {
-      shadowEnabled: true
-      shadowColor: Qt.rgba(0, 0, 0, card.place.front ? 0.26 : 0.16)
-      shadowBlur: 1.0
-      shadowVerticalOffset: Style.space(7)
-      shadowHorizontalOffset: 0
-      shadowScale: 1.01
-    }
-  }
-
-  Rectangle {
+  // The surface is the shell's own notification surface. BorderSurface keeps
+  // gradients and per-side border widths intact; content below is inset by
+  // those exact widths so neither measurement nor paint crosses the theme edge.
+  BorderSurface {
     id: plate
     x: body.x
     width: body.width
     height: body.height
-    radius: Math.max(Style.cornerRadius, Style.space(4))
-    antialiasing: true
-    // Solid. Translucency over blur looked good for one card and turned a
-    // stack into something you could not read: the card behind showed through
-    // the one in front of it, and every deck became a smear.
+    radius: Style.cornerRadius
     color: Color.notifications.background
-    border.width: card.place.front && !card.expanded ? 2 : 1
-    // Only the card you are dealing with is outlined: the front one when the
-    // deck is shut, the one under the pointer when it is open. On the rest a
-    // full-strength border just draws a box around something you are not
-    // reading. Critical keeps its edge wherever it sits.
-    readonly property bool outlined: card.critical
-                                     || (card.expanded ? card.hovered : card.place.front)
-    border.color: card.critical
-                  ? Qt.rgba(Color.notifications.countdown.r, Color.notifications.countdown.g,
-                            Color.notifications.countdown.b, 0.85)
-                  : Qt.rgba(Color.notifications.border.r, Color.notifications.border.g,
-                            Color.notifications.border.b, outlined ? 0.38 : 0.10)
-    Behavior on border.color { ColorAnimation { duration: card.fade } }
-
-    layer.enabled: true
-    layer.effect: MultiEffect {
-      // The near shadow: small, tight, and the darkest of the two. This is
-      // the one that says the card is resting just above the desktop rather
-      // than floating somewhere above it.
-      shadowEnabled: true
-      shadowColor: Qt.rgba(0, 0, 0, card.place.front ? 0.34 : 0.22)
-      shadowBlur: 0.34
-      shadowVerticalOffset: Style.space(2)
-      shadowHorizontalOffset: 0
-      shadowScale: 1.0
-    }
+    borderSpec: card.cardBorderSpec
   }
 
-  // And this one is everything that changes: text, icon, countdown. No layer,
-  // so it can repaint as often as it likes.
+  // Everything that changes: text, icon and countdown. It stays offscreen-layer
+  // free so the ticking countdown does not force a cached card repaint.
   Item {
     id: body
     x: 0
     width: parent.width
-    // Twice the inset the row sits at, so the space above the content and the
-    // space below it are the same number. A flat 18 against an inset of 12
-    // left 12 above and 6 below, which is invisible on a one-line card and
-    // obvious on a two-line one.
     height: card.drawnHeight
 
     Row {
@@ -368,9 +357,10 @@ Item {
       // line slides up by half of whatever was added - so the words move while
       // you are reading them.
       anchors { left: parent.left; right: parent.right; top: parent.top
-                leftMargin: Style.space(12); rightMargin: Style.space(12)
-                topMargin: Style.space(12) }
-      spacing: Style.space(11)
+                leftMargin: plate.contentLeftInset + Style.space(12)
+                rightMargin: plate.contentRightInset + Style.space(12)
+                topMargin: plate.contentTopInset + card.contentPaddingY }
+      spacing: Style.space(12)
 
       // Every notification gets a mark, whether or not the sender sent one:
       // the sender's image, else its themed icon, else the first letter of
@@ -378,7 +368,7 @@ Item {
       // reads as broken rather than as minimal.
       Item {
         id: thumb
-        width: Style.space(32)
+        width: Style.space(40)
         height: width
         // Centred against the text beside it: pinned to the top, it floats
         // above nothing on a two-line card. Against the *text*, not against the
@@ -402,7 +392,8 @@ Item {
         // this source. Nothing else: Quickshell.iconPath happily returns a
         // provider URL for an icon that does not exist, and that draws as a
         // checkerboard.
-        readonly property string sent: asUrl(card.row.image)
+        readonly property string sent: /^image:\/\/qsimage\/[0-9]+\/[0-9]+$/.test(String(card.row.image || ""))
+                                       ? String(card.row.image) : card.senderImage
         readonly property string resolved: asUrl(card.row.stored_image)
 
         // The sender's own picture wins while it works - for a message
@@ -413,20 +404,21 @@ Item {
         onSentChanged: sentFailed = false
         readonly property string best: (sent && !sentFailed) ? sent : resolved
 
-        Rectangle {
+        BorderSurface {
           anchors.fill: parent
-          radius: Style.space(4)
+          radius: Style.cornerRadius
           visible: picture.status !== Image.Ready
-          color: Qt.rgba(Color.notifications.text.r, Color.notifications.text.g,
-                         Color.notifications.text.b, 0.10)
+          color: Style.normalFillFor(Color.notifications.text, card.accentColor, Color.urgent)
+          borderSpec: Border.controlSpec("normal", Color.notifications.text,
+                                         card.accentColor, Color.urgent)
 
           Text {
+            textFormat: Text.PlainText
             anchors.centerIn: parent
             text: String(card.row.source || card.row.app || "?").substring(0, 1).toUpperCase()
-            color: Color.notifications.text
-            opacity: 0.55
+            color: card.dimColor
             font.family: Style.font.family
-            font.pixelSize: Style.font.body
+            font.pixelSize: Style.font.body * card.fontScale
             font.weight: Font.DemiBold
           }
         }
@@ -449,8 +441,8 @@ Item {
           source: thumb.best
           onStatusChanged: if (status === Image.Error && source == thumb.sent) thumb.sentFailed = true
           fillMode: Image.PreserveAspectCrop
-          sourceSize.width: Style.space(64)
-          sourceSize.height: Style.space(64)
+          sourceSize.width: thumb.width * Screen.devicePixelRatio
+          sourceSize.height: thumb.height * Screen.devicePixelRatio
           layer.enabled: visible
           layer.effect: MultiEffect { maskEnabled: true; maskSource: mask }
         }
@@ -460,7 +452,7 @@ Item {
           anchors.fill: parent
           visible: false
           layer.enabled: true
-          radius: Style.space(4)
+          radius: Style.cornerRadius
           color: "black"
         }
       }
@@ -476,23 +468,29 @@ Item {
         Item {
           id: headline
           width: parent.width
-          height: title.implicitHeight
+          height: Math.max(title.implicitHeight, rightSide.height,
+                           badge.visible ? badge.height : 0)
           opacity: card.showsContent ? 1 : 0
           Behavior on opacity { NumberAnimation { duration: card.fade } }
 
           Text {
+            textFormat: Text.PlainText
             id: title
             anchors.left: parent.left
-            width: parent.width - rightSide.width
+            anchors.verticalCenter: parent.verticalCenter
+            width: Math.max(1, parent.width - rightSide.width
                    - (badge.visible ? badge.width + Style.space(6) : 0)
                    - (titleMarks.visible ? titleMarks.width + Style.space(7) : 0)
-                   - Style.space(8)
+                   - Style.space(8))
             text: String(card.row.summary || "")
-            color: Color.notifications.text
-            font.family: Style.font.family
-            font.pixelSize: Style.font.body
-            font.weight: Font.DemiBold
-            maximumLineCount: 1
+            color: card.critical ? Color.urgent : Color.notifications.text
+            font.family: "Liberation Sans"
+            font.pixelSize: Style.font.title * card.fontScale
+            font.bold: true
+            // Larger fonts should wrap the summary, not hide it after a few words.
+            // Bound unusually long titles just as we bound the message body.
+            wrapMode: Text.Wrap
+            maximumLineCount: card.bodyOpen ? 8 : 3
             elide: Text.ElideRight
           }
 
@@ -512,17 +510,18 @@ Item {
             Repeater {
               model: card.marks
               Text {
+                textFormat: Text.PlainText
                 required property var modelData
                 text: modelData
                 color: Color.notifications.text
                 opacity: 0.9
                 font.family: Style.font.family
-                font.pixelSize: Style.font.body
+                font.pixelSize: Style.font.body * card.fontScale
               }
             }
           }
 
-          Rectangle {
+          BorderSurface {
             id: badge
             // The row, not the time inside it: anchoring across into another
             // item's children is not a sibling relationship and Qt refuses it.
@@ -530,33 +529,30 @@ Item {
             anchors.rightMargin: Style.space(6)
             anchors.verticalCenter: title.verticalCenter
             visible: card.stands > 1
-            width: badgeText.implicitWidth + Style.space(9)
-            height: badgeText.implicitHeight + Style.space(3)
-            radius: height / 2
-            color: Qt.rgba(Color.notifications.text.r, Color.notifications.text.g,
-                           Color.notifications.text.b, 0.16)
+            readonly property var badgeBorderSpec: Border.controlSpec(
+                "normal", Color.notifications.text, card.accentColor, Color.urgent)
+            width: badgeText.implicitWidth + Style.spacing.sm * 2
+                   + Border.left(badgeBorderSpec) + Border.right(badgeBorderSpec)
+            height: badgeText.implicitHeight + Style.spacing.xxs * 2
+                    + Border.top(badgeBorderSpec) + Border.bottom(badgeBorderSpec)
+            radius: Style.cornerRadius
+            color: Style.normalFillFor(Color.notifications.text, card.accentColor,
+                                       Color.urgent)
+            borderSpec: badgeBorderSpec
 
             Text {
+              textFormat: Text.PlainText
               id: badgeText
               anchors.centerIn: parent
               text: String(card.stands)
-              color: Color.notifications.text
-              opacity: 0.85
+              color: card.dimColor
               font.family: Style.font.family
-              font.pixelSize: Style.font.caption
+              font.pixelSize: Style.font.caption * card.fontScale
             }
-
           }
 
-          // The time slides aside to make room for the dismiss control, and
-          // slides back when the pointer goes. Two things swapping in the same
-          // spot read as one thing changing its mind; moving one out of the
-          // way of the other reads as an offer.
-          // Everything at this end of the title sits in one row on the
-          // title's centre line: the marks for what was found, the time, and
-          // the close control. They used to be anchored separately, one to the
-          // title's baseline and one to its centre, which put them at two
-          // different heights.
+          // Timestamp and dismiss action share one stable slot, so hover can
+          // crossfade between them without moving the headline.
           Row {
             id: rightSide
             anchors.right: parent.right
@@ -568,97 +564,83 @@ Item {
             // thing changing into another reads as a single control, and
             // nothing has to move to make room.
             Item {
-              width: Math.max(stamp.implicitWidth, Style.space(18))
-              height: Style.space(18)
+              width: Math.max(stamp.implicitWidth, shut.implicitWidth)
+              height: Math.max(stamp.implicitHeight, shut.implicitHeight)
               anchors.verticalCenter: parent.verticalCenter
 
               Text {
+                textFormat: Text.PlainText
                 id: stamp
                 anchors.centerIn: parent
                 text: card.ago()
-                color: Color.notifications.text
-                opacity: card.hovered ? 0 : 0.6
+                color: card.dimColor
+                opacity: card.hovered ? 0 : 1
                 visible: opacity > 0.01
                 font.family: Style.font.family
-                font.pixelSize: Style.font.bodySmall
+                font.pixelSize: Style.font.bodySmall * card.fontScale
                 Behavior on opacity { NumberAnimation { duration: card.fade } }
               }
 
-              Rectangle {
+              Button {
                 id: shut
                 anchors.centerIn: parent
-                width: Style.space(18)
-                height: width
-                radius: Math.max(2, Style.cornerRadius - 1)
-                color: Qt.rgba(Color.notifications.text.r, Color.notifications.text.g,
-                               Color.notifications.text.b, shutHit.containsMouse ? 0.22 : 0.12)
+                text: "\u2715"
+                bordered: true
+                horizontalPadding: Style.space(4)
+                verticalPadding: Style.space(2)
+                implicitWidth: implicitHeight
+                foreground: Color.notifications.text
+                fontFamily: Style.font.family
+                fontSize: Style.font.caption * card.fontScale
+                // The deck owns pointer hover; mirror its coordinates into the
+                // shared control state just as action buttons do.
+                hasCursor: {
+                  if (!card.hovered) return false
+                  var origin = mapToItem(card, 0, 0)
+                  return card.localHoverX >= origin.x
+                      && card.localHoverX <= origin.x + width
+                      && card.localHoverY >= origin.y
+                      && card.localHoverY <= origin.y + height
+                }
+                enabled: card.hovered
                 opacity: card.hovered ? 1 : 0
                 visible: opacity > 0.01
                 Behavior on opacity { NumberAnimation { duration: card.fade } }
-                Behavior on color { ColorAnimation { duration: card.fade } }
-
-                Text {
-                  anchors.centerIn: parent
-                  text: "\u2715"
-                  color: Color.notifications.text
-                  opacity: shutHit.containsMouse ? 1.0 : 0.75
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.caption
-                }
-
-                MouseArea {
-                  id: shutHit
-                  anchors.fill: parent
-                  anchors.margins: -Style.space(4)
-                  enabled: card.hovered
-                  hoverEnabled: true
-                  cursorShape: Qt.PointingHandCursor
-                  onClicked: card.dismissed()
-                }
+                onClicked: card.dismissed()
+                onRightClicked: card.menuOpen = !card.menuOpen
               }
             }
           }
         }
 
-        // Two lines, always. Qt only elides plain text - a Text in RichText
-        // mode ignores `elide` entirely - so a marked-up body just kept
-        // growing. When the rich version does not fit, the flattened one is
-        // shown instead, which can elide properly and ends in an ellipsis.
+        // Rich text cannot elide, so bodies beyond the current two-line or
+        // eight-line disclosure are flattened into the bounded plain-text
+        // rendering that can end in an ellipsis.
         FontMetrics {
           id: metrics
-          font.family: Style.font.family
-          font.pixelSize: Style.font.bodySmall
+          font.family: "Liberation Sans"
+          font.pixelSize: Style.font.title * card.fontScale
         }
-
-        // Two lines of a notification body are one sentence that happened to
-        // wrap, not two paragraphs, and the font's default leading makes them
-        // read as further apart than they are.
-        readonly property real bodyLeading: 0.92
 
         Item {
           id: bodyBox
           clip: true
           width: parent.width
-          // As tall as the text actually is, one line or two - not a fixed
-          // two, which left an empty second line under every one-line body and
-          // made those cards read as top-heavy however carefully the padding
-          // above and below was balanced.
+          // Use the text's actual laid-out height so a short body does not
+          // reserve empty lines and a wrapped body keeps every visible pixel.
           //
           // Measured from the laid-out height, never from `lineCount`: in
           // RichText mode lineCount counts paragraphs rather than wrapped
           // lines, so a single sentence that visibly takes two lines still
           // reports one - which sized the box to one line and clipped the rest.
-          readonly property real lineH: Math.max(1, metrics.height * parent.bodyLeading)
+          readonly property real lineH: Math.max(1, metrics.height)
           // The cap the body is being held to right now, and the slack that
           // decides overflow: a body a hair over the cap is not worth
           // flattening, it is worth one more pixel.
           readonly property real cap: lineH * card.bodyLines
           readonly property bool overflow: rich.contentHeight > cap + lineH * 0.4
-          // The height of the text that is actually on screen, capped at two
-          // lines - not a line count derived from it. Rounding a measurement
-          // into 1 or 2 and multiplying back out is where the clipped second
-          // line came from: a body that needed a hair over one line rounded
-          // down, and the rest was cut off inside a clipped box.
+          // The visible height comes from the rendering that is actually on
+          // screen; converting it to a rounded line count clipped descenders.
           readonly property real shown: overflow ? plain.contentHeight : rich.contentHeight
           // Not clamped to `cap`. The line limit is enforced where the lines
           // are - `plain.maximumLineCount` - and its laid-out height is a hair
@@ -671,8 +653,8 @@ Item {
           // it, and only so that it does not move when the body opens.
           readonly property real restHeight:
               Math.min(Math.ceil(lineH * 2), Math.ceil(rich.contentHeight))
-          visible: String(card.row.body || "").length > 0
-          opacity: card.showsContent ? 0.72 : 0
+          visible: card.hasBody
+          opacity: card.showsContent ? 1 : 0
           Behavior on opacity { NumberAnimation { duration: card.fade } }
 
           Text {
@@ -682,36 +664,32 @@ Item {
             textFormat: Text.RichText
             text: Markup.colourLinks(String(card.row.bodyRich || card.row.body || ""),
                                      String(Color.notifications.countdown))
-            color: Color.notifications.text
-            lineHeight: bodyBox.parent.bodyLeading
-            lineHeightMode: Text.ProportionalHeight
-            font.family: Style.font.family
-            font.pixelSize: Style.font.bodySmall
+            color: card.bodyColor
+            font.family: "Liberation Sans"
+            font.pixelSize: Style.font.title * card.fontScale
             wrapMode: Text.Wrap
             // Second gate on the same rule. Markup drops an anchor it will
             // not vouch for, so nothing unsafe should arrive here - but this
             // is one regex away from being wrong, and the cost of the check
             // is a function call.
             onLinkActivated: function(url) {
-              if (Markup.linkable(url)) Qt.openUrlExternally(url)
+              Security.openExternalUrl(url)
             }
           }
 
           Text {
+            textFormat: Text.PlainText
             id: plain
             width: parent.width
             visible: bodyBox.overflow
             text: String(card.row.bodyLine || card.row.body || "")
-            color: Color.notifications.text
-            lineHeight: bodyBox.parent.bodyLeading
-            lineHeightMode: Text.ProportionalHeight
-            font.family: Style.font.family
-            font.pixelSize: Style.font.bodySmall
+            color: card.bodyColor
+            font.family: "Liberation Sans"
+            font.pixelSize: Style.font.title * card.fontScale
             wrapMode: Text.Wrap
             maximumLineCount: card.bodyLines
             elide: Text.ElideRight
           }
-
 
         }
 
@@ -738,7 +716,7 @@ Item {
                                        : card.menuOpen ? "menu"
                                        : card.deedsOpen ? "list"
                                        : (card.hovered && card.expanded
-                                          && card.deeds.length > 0) ? "row" : ""
+                                          && card.allDeeds.length > 0) ? "row" : ""
 
           readonly property real contentHeight: mode === "reply" ? replyBox.height
                                               : mode === "menu" ? menuColumn.implicitHeight
@@ -790,7 +768,7 @@ Item {
             // A step, not an animation. This height is part of what the
             // layout reads, and anything the layout reads must not move
             // between frames - the scene animates the slack around it.
-            height: card.replying ? Style.space(24) : 0
+            height: card.replying ? replyInput.implicitHeight + Style.space(3) : 0
             visible: height > 0
             anchors.bottom: parent.bottom
             clip: true
@@ -803,11 +781,15 @@ Item {
               anchors.fill: parent
               anchors.topMargin: Style.space(3)
               foreground: Color.notifications.text
-              accent: Color.notifications.border
               font.family: Style.font.family
-              font.pixelSize: Style.font.caption
-              verticalPadding: 2
-              placeholderText: "Reply to " + String(card.row.replyTo || card.row.summary || "")
+              font.pixelSize: Style.font.body * card.fontScale
+              leftPadding: horizontalPadding + Border.left(_borderSpec)
+                           + (sendButton.visible && sendButton.isRtl
+                              ? sendButton.width + Style.spacing.controlGap : 0)
+              rightPadding: horizontalPadding + Border.right(_borderSpec)
+                            + (sendButton.visible && !sendButton.isRtl
+                               ? sendButton.width + Style.spacing.controlGap : 0)
+              placeholderText: card.replyError || ("Reply to " + String(card.row.replyTo || card.row.summary || ""))
               onAccepted: { card.replySent(text); text = "" }
               Keys.onEscapePressed: { text = ""; card.replyCancelled() }
 
@@ -817,16 +799,17 @@ Item {
               // right-to-left, so "trailing" means left.
               Button {
                 id: sendButton
-                x: isRtl ? Style.space(4) : parent.width - width - Style.space(4)
+                x: isRtl
+                   ? Border.left(replyInput._borderSpec) + replyInput.horizontalPadding
+                   : parent.width - width - Border.right(replyInput._borderSpec)
+                     - replyInput.horizontalPadding
                 anchors.verticalCenter: parent.verticalCenter
                 visible: replyInput.text.length > 0
                 text: "Send"
                 bordered: false
                 foreground: Color.notifications.text
-                accent: Color.notifications.border
                 fontFamily: Style.font.family
-                fontSize: Style.font.caption
-                verticalPadding: 1
+                fontSize: Style.font.body * card.fontScale
                 onClicked: { card.replySent(replyInput.text); replyInput.text = "" }
 
                 // True when the reply text starts with an RTL script.
@@ -903,19 +886,21 @@ Item {
       }
     }
 
-    // The countdown, barely there. It was a solid line before and every card
-    // had one ticking away in the corner of your eye; the information is worth
-    // almost nothing next to the distraction of watching it move.
-    Rectangle {
-      visible: card.row.duration > 0 && card.place.front && card.remaining > 0
-               && !card.expanded
+    // Optional visual countdown. The expiry clock keeps running when this is
+    // disabled, so hiding the animation never makes a notification permanent.
+    BorderSurface {
+      visible: card.showCountdown && card.row.duration > 0 && card.place.front
+               && card.remaining > 0 && !card.expanded
       anchors { left: parent.left; bottom: parent.bottom
-                leftMargin: Style.space(7); bottomMargin: 1 }
-      height: 1
-      color: Color.notifications.text
-      opacity: 0.12
-      width: Math.max(0, (body.width - Style.space(14))
-                         * (card.remaining / Math.max(1, card.row.duration)))
+                leftMargin: plate.contentLeftInset + Style.space(7)
+                bottomMargin: plate.contentBottomInset }
+      height: Style.spacing.hairline
+      radius: Style.cornerRadius
+      color: card.accentColor
+      borderSpec: Border.none()
+      width: visible ? Math.max(0, (body.width - plate.contentLeftInset
+                                    - plate.contentRightInset - Style.space(14))
+                                   * (card.remaining / Math.max(1, card.row.duration))) : 0
     }
 
     // Clicks on the card. Underneath the card's own content: this covers the

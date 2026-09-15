@@ -1,0 +1,14 @@
+const assert = require('node:assert/strict'), load = require('./js-loader.cjs');
+const M=load('Markup'), D=load('Detect'), S=load('Store');
+const payload='<a href="https://paypal.com@evil.example">paypal.com</a>Your code is 1234';
+assert.notEqual(M.liftSource(payload).source, 'paypal.com');
+assert.notEqual(M.liftSource(payload).source, 'paypal.com@evil.example');
+assert.equal(M.linkable('https://paypal.com@evil.example'), false);
+assert.equal(D.scan('Verification', 'Your code is 938271').code, '938271');
+assert.equal(D.scan('codes', 'your code is 482913, backup code is 771204').codes, '482913 771204');
+assert.equal(D.scan('Build', '412 passed, 0 failed').code, '');
+assert.equal(M.liftSource('<a href="https://app.slack.com">app.slack.com</a>Hello').source, 'app.slack.com');
+assert.equal(M.forwardedApp('KDE Connect', 'WhatsApp').name, 'WhatsApp');
+assert.ok(D.scan('', '+44 7911 123456').phone);
+assert.equal(S.restored({key:'test'}).restored, true);
+console.log('baseline: passed');

@@ -1,0 +1,35 @@
+name: Security scanners
+on:
+  push:
+    branches: [main, hardening/main]
+  pull_request:
+  schedule:
+    - cron: '37 4 * * 1'
+permissions:
+  contents: read
+jobs:
+  semgrep:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: python3 -m venv /tmp/omapager-scanners
+      - run: /tmp/omapager-scanners/bin/pip install --require-hashes -r security/requirements.txt
+      - run: /tmp/omapager-scanners/bin/semgrep scan --config security/semgrep --error --metrics=off .
+      - run: /tmp/omapager-scanners/bin/python -m unittest discover -s tests -v
+      - run: python3 security/check_invariants.py
+  osv:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build verified source (v2.3.8)
+        env:
+          GOBIN: /tmp/omapager-tools
+          GOSUMDB: sum.golang.org
+        run: go install github.com/google/osv-scanner/v2/cmd/osv-scanner@408fcd6f8707999a29e7ba45e15809764cf24f67
+      - run: /tmp/omapager-tools/osv-scanner scan source -r .

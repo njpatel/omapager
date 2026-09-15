@@ -20,11 +20,14 @@ import argparse
 import json
 import os
 import random
+import secrets
+import selectors
 import subprocess
 import sys
 import time
+from omapager_files import write_json
 
-STORE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "omapager-store")
+STORE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "omapager-run-store")
 
 # Chrome puts a link to the origin on the front of every web notification, and
 # that anchor is what tells app.slack.com apart from mail.google.com.
@@ -178,7 +181,52 @@ def scheme():
     return "dark"
 
 
-ICON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "omapager-icon")
+ICON = os.path.join(os.path.dirname(os.path.abspath(__file__)), "omapager-run-icon")
+
+def bounded_output(command, limit=65536, timeout=5, env=None):
+    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env) as proc:
+        data = bytearray()
+        deadline = time.monotonic() + timeout
+        try:
+            with selectors.DefaultSelector() as selector:
+                selector.register(proc.stdout, selectors.EVENT_READ)
+                while True:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0 or not selector.select(remaining):
+                        raise TimeoutError("demo helper deadline")
+                    block = os.read(proc.stdout.fileno(), min(4096, limit + 1 - len(data)))
+                    if not block:
+                        break
+                    data.extend(block)
+                    if len(data) > limit:
+                        raise ValueError("demo helper output limit")
+            if proc.wait(timeout=max(.01, deadline - time.monotonic())) != 0:
+                raise ValueError("demo helper failed")
+            return data.decode("utf-8")
+        finally:
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+
+
+def helper_policy():
+    # The bar owns settings. Ask the daemon rather than independently parsing
+    # shell.json; an unavailable/pending policy must not bypass required mode.
+    fetch, required = False, True
+    try:
+        probe = json.loads(bounded_output(["omarchy-shell", "omapager", "probe"]))
+        security = probe.get("security", {})
+        if (security.get("mode") in ("sandboxed", "direct", "blocked")
+                and isinstance(security.get("required"), bool)
+                and isinstance(probe.get("fetchRemoteIcons"), bool)):
+            fetch, required = probe["fetchRemoteIcons"], security["required"]
+    except (OSError, ValueError, TimeoutError, subprocess.TimeoutExpired):
+        pass
+    return fetch, dict(os.environ, OMAPAGER_REQUIRE_SANDBOX="1" if required else "0")
 
 
 def warm(items):
@@ -199,10 +247,15 @@ def warm(items):
         return
     print("warming %d icons..." % len(wanted), file=sys.stderr)
     for who in wanted:
-        subprocess.run([ICON, "--key", who["key"], "--source", who["source"],
-                        "--app", who["app"], "--app-icon", who["icon"],
-                        "--scheme", scheme(), "--fetch"],
-                       capture_output=True, check=False)
+        fetch, environment = helper_policy()
+        command = [ICON, "--key", who["key"], "--source", who["source"],
+                   "--app", who["app"], "--app-icon", who["icon"], "--scheme", scheme()]
+        if fetch:
+            command.append("--fetch")
+        try:
+            bounded_output(command, timeout=55, env=environment)
+        except (OSError, ValueError, TimeoutError, subprocess.TimeoutExpired):
+            pass
 
 
 # The default run: enough sources to group, enough singles to stack, and one
@@ -242,8 +295,9 @@ def replay(limit, match):
     originating app in the summary, or that a site you have never configured
     has no icon."""
     try:
-        raw = subprocess.run([STORE, "history", str(limit)],
-                             capture_output=True, text=True, check=False).stdout
+        _, environment = helper_policy()
+        raw = bounded_output([STORE, "history", str(limit)], limit=2*1024*1024,
+                             timeout=55, env=environment)
         rows = json.loads(raw or "[]")
     except Exception:
         rows = []
@@ -316,25 +370,19 @@ def routing_scene():
     return items
 
 
-# Where the helper looks for a stand-in phone.
-FAKE = os.path.join(os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state")),
-                    "omarchy", "omapager", "kdeconnect-fake.json")
-FAKE_LOG = FAKE.replace(".json", ".log")
+# Match the helper sandbox's private state root, independently of XDG overrides.
+DEMO_STATE = os.path.join(os.path.expanduser("~/.local/state"),
+                          "omarchy", "omapager", "reply-demo")
+DEMO_FIXTURE = os.path.join(DEMO_STATE, "notification.json")
+DEMO_REPLY = os.path.join(DEMO_STATE, "reply.json")
 
 
 def reply_scene():
-    """A message you can actually answer.
-
-    Inline reply needs a phone holding a conversation open, which cannot be
-    arranged on demand - so this writes a fixture the helper treats as a
-    repliable notification, and sends the matching card. Replies go to a log
-    file rather than to a person, which is what makes it safe to demo."""
+    """Create an explicit, short-lived demo session with no real phone target."""
     who, message = "Seif Lotfy", "did you get the build working in the end?"
-    os.makedirs(os.path.dirname(FAKE), exist_ok=True)
-    with open(FAKE, "w") as fh:
-        json.dump([dict(appName="WhatsApp", title=who, text=message,
-                        isConversation=True)], fh)
-    return [dict(app="KDE Connect", summary="WhatsApp",
+    write_json(DEMO_FIXTURE, dict(token=secrets.token_hex(16), created=time.time(),
+                                 title=who, text=message))
+    return [dict(app="KDE Connect", icon="whatsapp", summary="Omapager reply demo",
                  body="%s: %s" % (who, message))]
 
 
@@ -388,6 +436,8 @@ def main():
     scenes = args.scene or DEFAULT
 
     if "close" in scenes:
+        print("for the default-action check, enable allowDefaultActionOnCardClick "
+              "in the lab's widget settings first.", file=sys.stderr)
         print("hover Close on the front card, then click it three times, waiting "
               "for each move to finish without moving the pointer.", file=sys.stderr)
         print("each card should dismiss; any 'default' output means a card "
@@ -399,7 +449,7 @@ def main():
         scenes.append("reply")
         print("hover the card, press Reply, type something and hit Enter.",
               file=sys.stderr)
-        print("it goes to %s - not to anyone." % FAKE_LOG, file=sys.stderr)
+        print("the latest reply is saved to %s - not sent to anyone." % DEMO_REPLY, file=sys.stderr)
 
     if args.scene and "routing" in args.scene:
         scenes = [n for n in scenes if n != "routing"]

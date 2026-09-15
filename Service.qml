@@ -14,9 +14,11 @@ import Quickshell.Io
 import Quickshell.Wayland
 import Quickshell.Hyprland
 import Quickshell.Services.Notifications
+import Quickshell.Services.Pipewire
 import qs.Commons
 
 import "Store.js" as Store
+import "Security.js" as Security
 import "Layout.js" as Layout
 import "Markup.js" as Markup
 
@@ -27,14 +29,50 @@ Item {
   property var shell: null
 
   readonly property string home: Quickshell.env("HOME")
-  readonly property string storeBin: Qt.resolvedUrl("bin/omapager-store").toString().replace(/^file:\/\//, "")
-  readonly property string iconBin: Qt.resolvedUrl("bin/omapager-icon").toString().replace(/^file:\/\//, "")
+  readonly property string storeBin: Qt.resolvedUrl("bin/omapager-run-store").toString().replace(/^file:\/\//, "")
+  readonly property string iconBin: Qt.resolvedUrl("bin/omapager-run-icon").toString().replace(/^file:\/\//, "")
 
-  // Ask the site for its icon when nothing local matches. On by default: a
-  // notification wearing the wrong logo is the thing people notice first. It
-  // does mean a request to that host the first time it notifies you, which is
-  // why it can be turned off.
+  // Missing website icons are fetched automatically unless the user opts out.
   property bool fetchIcons: true
+  property bool requireSandbox: false
+  property bool helperSettingsReady: false
+  readonly property var helperEnvironment: ({
+    OMAPAGER_REQUIRE_SANDBOX: !helperSettingsReady || requireSandbox ? "1" : "0"
+  })
+  onRequireSandboxChanged: {
+    sandboxStatus = ({ required: requireSandbox, sandboxOperational: false, mode: "pending" })
+    if (helperSettingsReady) {
+      sandboxProbe.running = false
+      sandboxProbeDelay.restart()
+    }
+  }
+  property bool allowDefaultActionOnCardClick: false
+  property int clipboardTimeout: 60
+  property var sandboxStatus: ({ required: false, sandboxOperational: false, mode: "pending" })
+  readonly property string helperBin: Qt.resolvedUrl("bin/omapager-run-helper").toString().replace(/^file:\/\//, "")
+  Process {
+    id: sandboxProbe
+    running: false
+    environment: service.helperEnvironment
+    command: [service.helperBin, "status"]
+    stdout: StdioCollector {
+      onStreamFinished: {
+        try {
+          var result = JSON.parse(text)
+          if (service.helperSettingsReady && result.required === service.requireSandbox)
+            service.sandboxStatus = result
+        } catch (e) {}
+      }
+    }
+  }
+  Timer {
+    id: sandboxProbeDelay
+    interval: 1
+    onTriggered: sandboxProbe.running = true
+  }
+  function setHistoryHours(hours) {
+    Store.write(storeProc, storeBin, "policy", {historyHours: hours})
+  }
 
   // Which variant of a site's icon to ask for. Derived from the theme's own
   // notification background rather than a setting: if the card is light, the
@@ -55,6 +93,7 @@ Item {
   // Which end of a card its buttons sit at. Settings plumbing has not landed
   // for plugins yet, so this is a property with an IPC verb, the same as
   // stacking above.
+  property real fontScale: 1
   property string actionsAlign: "right"  // right | left
 
   // Chrome puts a "Settings" action on every web notification, which opens
@@ -62,6 +101,33 @@ Item {
   // never the thing you wanted, and it crowds out the ones that are - so it
   // is dropped by default and can be put back.
   property bool hideSettingsAction: true
+
+  property string displayMode: "active"
+  property string displayName: ""
+  property string deckDisplayName: ""
+  readonly property var displayNames: Quickshell.screens.map(function(screen) { return screen.name })
+  readonly property string focusedDisplayName: {
+    var name = Hyprland.focusedMonitor ? Hyprland.focusedMonitor.name : ""
+    return displayNames.indexOf(name) >= 0 ? name : (displayNames[0] || "")
+  }
+  readonly property string configuredDisplayName: displayMode === "specific" && displayNames.indexOf(displayName) >= 0
+    ? displayName : focusedDisplayName
+  readonly property string targetDisplayName: {
+    if (displayMode === "specific" && displayNames.indexOf(displayName) >= 0) return configuredDisplayName
+    if (displayNames.indexOf(deckDisplayName) >= 0) return deckDisplayName
+    return focusedDisplayName
+  }
+  // A live deck stays put while focus moves. Losing that display moves it to
+  // a usable one; a configured specific display remains selected for replug.
+  onDisplayNamesChanged: {
+    if (deckDisplayName && displayNames.indexOf(deckDisplayName) < 0)
+      deckDisplayName = configuredDisplayName
+  }
+  onDisplayModeChanged: { if (toasts.count > 0) deckDisplayName = configuredDisplayName }
+  onDisplayNameChanged: { if (displayMode === "specific" && toasts.count > 0) deckDisplayName = configuredDisplayName }
+  function pinDeckDisplay() {
+    if (toasts.count === 0) deckDisplayName = configuredDisplayName
+  }
 
   // A verification code is the one thing quiet cannot afford to swallow: you
   // asked for it thirty seconds ago, it expires in five minutes, and no amount
@@ -84,6 +150,49 @@ Item {
     doNotDisturb = on
     saveQuiet()
   }
+
+  // The Hyprland portal names all its PipeWire video streams alike: monitor,
+  // window and region. Observe their lifetime, not compositor frame activity,
+  // which also includes screenshots and VNC and has no startup snapshot.
+  property bool offerSnoozeWhenSharing: true
+  readonly property var sharingCandidates: {
+    var nodes = Pipewire.nodes.values, out = []
+    for (var i = 0; i < nodes.length && out.length < 64; i++)
+      if (nodes[i].type === PwNodeType.VideoSource) out.push(nodes[i])
+    return out
+  }
+  PwObjectTracker { objects: service.sharingCandidates }
+  readonly property int sharingStreams: {
+    if (!Pipewire.ready) return 0
+    var count = 0
+    for (var i = 0; i < sharingCandidates.length; i++) {
+      var node = sharingCandidates[i]
+      if (!node.ready) continue
+      var props = node.properties
+      if (props["media.class"] === "Video/Source"
+          && String(props["media.name"] || "").indexOf("xdph-streaming-") === 0) count++
+    }
+    return count
+  }
+  readonly property bool sharingActive: sharingStreams > 0
+  property bool sharingOfferHandled: false
+  readonly property bool sharingOfferPending: offerSnoozeWhenSharing && sharingActive
+    && !sharingOfferHandled && !doNotDisturb && !globalSnoozeUntil
+  readonly property string sharingDetectionStatus: !offerSnoozeWhenSharing ? "Screen-sharing suggestions disabled"
+    : !Pipewire.ready ? "Sharing detection unavailable: PipeWire disconnected"
+    : sharingActive ? "Screen sharing detected"
+    : "No screen sharing detected"
+  onSharingActiveChanged: {
+    sharingOfferHandled = sharingActive && (doNotDisturb || globalSnoozeUntil > 0)
+  }
+  onDoNotDisturbChanged: { if (doNotDisturb && sharingActive) sharingOfferHandled = true }
+  onGlobalSnoozeUntilChanged: { if (globalSnoozeUntil > 0 && sharingActive) sharingOfferHandled = true }
+  function dismissSharingOffer() { if (sharingActive) sharingOfferHandled = true }
+  function snoozeSharingOffer(seconds) {
+    if (!sharingOfferPending || [1800, 3600, 14400].indexOf(seconds) < 0) return
+    sharingOfferHandled = true
+    snoozeSource(globalKey, "Everything", seconds, true)
+  }
   readonly property int gap: Style.space(6)
 
   // ------------------------------------------------------------- bar room
@@ -103,18 +212,14 @@ Item {
     if (size > 0) return size
     return barVertical ? Style.bar.sizeVertical : Style.bar.sizeHorizontal
   }
-  // How far the deck sits from the edges it hangs off. One number for both,
-  // because two of them is what you see: the cards were 6 under the bar and 14
-  // in from the screen edge, which reads as a mistake even when you cannot say
-  // which side is wrong.
-  readonly property int deckInset: Style.space(14)
+  readonly property int notificationWidth: Style.space(380)
+  property int edgeSpacing: 12
+  property bool showCountdown: false
 
-  // Where the surface is clipped, which is the bar's own edge - a card
-  // arriving is revealed as it comes out from under the bar rather than seen
-  // sliding across it. The inset is applied to the deck inside the clip, not
-  // here, or cards would pop into existence in the middle of the gap.
-  readonly property int barClearance: (barPosition === "top" ? barThickness : 0) + Style.gapsOut
-  readonly property int edgeClearance: (barPosition === "right" ? barThickness : 0) + deckInset
+  // Clear the bar only on the edge it occupies; keep the configured gap on
+  // both edges of the top-right notification deck.
+  readonly property int barClearance: (barPosition === "top" ? barThickness : 0) + edgeSpacing
+  readonly property int edgeClearance: (barPosition === "right" ? barThickness : 0) + edgeSpacing
 
   readonly property int lowDuration: 5000
   readonly property int normalDuration: 8000
@@ -282,6 +387,46 @@ Item {
                   codesBypassQuiet: codesBypassQuiet })
   }
 
+  // A small session-only reading stack for notifications that were not quietened.
+  // Keep text snapshots, never the live Notification objects or their actions.
+  property var recentRows: []
+  readonly property int recentLimit: 20
+
+  function rememberRecent(row) {
+    var key = String(row.key), rows = []
+    if (!doNotDisturb && !globalSnoozeUntil && !snoozedUntil(row.groupKey)) {
+      // Keep source matching separate from the redacted display text. A digest
+      // avoids retaining a sender-supplied code in a raw source/group label.
+      var sourceKey = Qt.md5(String(row.groupKey || ""))
+      row = Store.sanitiseForPersistence(row)
+      rows.push({
+        key: key, sourceKey: sourceKey,
+        source: String(row.source || row.app || "Notification").slice(0, 120),
+        summary: String(row.summary || "").slice(0, 240),
+        bodyLine: String(row.bodyLine || "").slice(0, 1000),
+        ts: Number(row.ts)
+      })
+    }
+    // A replacement may change to a snoozed source: remove its old entry even
+    // when the new version belongs only in Held Back.
+    for (var i = 0; i < recentRows.length && rows.length < recentLimit; i++) {
+      if (recentRows[i].key !== key) rows.push(recentRows[i])
+    }
+    recentRows = rows
+  }
+
+  function recentForPanel(limit) {
+    snoozeRevision
+    if (doNotDisturb || globalSnoozeUntil) return []
+    var excluded = Object.create(null), snoozed = liveSnoozes()
+    for (var i = 0; i < snoozed.length; i++) excluded[Qt.md5(snoozed[i].key)] = true
+    var rows = []
+    for (var j = 0; j < recentRows.length && rows.length < limit; j++) {
+      if (!excluded[recentRows[j].sourceKey]) rows.push(recentRows[j])
+    }
+    return rows
+  }
+
   // ------------------------------------------------------- what was held
   //
   // A notification that never reached the screen is the one you most want to
@@ -292,10 +437,11 @@ Item {
   property int heldRevision: 0
   property int heldLimit: 80          // read from the store; the panel shows far fewer
 
-  function refreshHeld() { if (!heldProc.running) heldProc.running = true }
+  function refreshHeld() { if (helperSettingsReady && !heldProc.running) heldProc.running = true }
 
   Process {
     id: heldProc
+    environment: service.helperEnvironment
     running: false
     command: [service.storeBin, "held", String(service.heldLimit)]
     stdout: StdioCollector {
@@ -394,7 +540,34 @@ Item {
   property var refs: ({})
   property int keySeed: 0
 
-  ListModel { id: toasts }
+  ListModel {
+    id: toasts
+    onCountChanged: { if (count === 0) service.deckDisplayName = "" }
+  }
+
+  // ------------------------------------------------------ live capacity
+  //
+  // One reservation follows each row through held, deferred and visible states.
+  // Its pending snapshot is replaced in place; callbacks retain the reservation
+  // identity so closing a row cannot resurrect it, even if its key is reused.
+  readonly property int maxLiveNotifications: 100
+  property var liveKeys: Object.create(null)
+
+  function liveCount() { return Object.keys(liveKeys).length }
+
+  function reserveLive(key) {
+    if (!key) return false
+    if (liveKeys[key]) return true
+    if (liveCount() >= maxLiveNotifications) return false
+    liveKeys[key] = { originalId: 0, row: null, scheduled: false, held: false }
+    return true
+  }
+
+  function releaseLive(key) {
+    if (!liveKeys[key]) return
+    delete liveKeys[key]
+    held = held.filter(function(heldKey) { return heldKey !== key })
+  }
 
   // ------------------------------------------------------------- icons
   //
@@ -404,6 +577,24 @@ Item {
   property var iconCache: ({})
   property var iconQueue: []
   property string iconWanted: ""
+
+  function setFetchRemoteIcons(enabled) {
+    if (fetchIcons === enabled) return
+    fetchIcons = enabled
+    // Cancelling the wrapper also stops its child. Do not accept a late result
+    // from a request the user just disabled; retry that source without fetching.
+    if (!enabled && iconProc.running && iconProc.fetchAllowed) {
+      iconProc.cancelled = true
+      iconProc.running = false
+    }
+    if (enabled) {
+      // A local-only lookup may have cached the browser fallback. Resolve again
+      // so enabling fetching can replace it with the website's own icon.
+      iconCache = ({})
+      for (var i = 0; i < toasts.count; i++) wantIcon(toasts.get(i))
+    }
+    pumpIcons()
+  }
 
   function wantIcon(row) {
     // A file the sender handed over is an icon we can keep. A live handle is
@@ -417,6 +608,7 @@ Item {
     if (String(row.image || "").indexOf("image://") !== 0 && String(row.image || "")) return
     var key = String(row.groupKey || row.source || row.app || "")
     if (!key) return
+    if (iconWanted === key) return
     if (iconCache[key] !== undefined) {
       // Write it onto the row in hand as well as onto the model. This is
       // called before the row is inserted, so applyIcon - which walks the
@@ -431,6 +623,7 @@ Item {
       return
     }
     for (var i = 0; i < iconQueue.length; i++) if (iconQueue[i].key === key) return
+    if (iconQueue.length >= 100) return
     iconQueue.push({ key: key, app: String(row.app || ""),
                      appIcon: String(row.appIcon || ""),
                      source: String(row.source || "") })
@@ -438,11 +631,14 @@ Item {
   }
 
   function pumpIcons() {
-    if (iconProc.running || iconQueue.length === 0) return
+    if (!helperSettingsReady || iconProc.running || iconWanted !== "" || iconQueue.length === 0) return
     var job = iconQueue.shift()
     iconWanted = job.key
-    var args = [iconBin, "--key", job.key, "--app", job.app,
-                "--app-icon", job.appIcon, "--source", job.source,
+    iconProc.job = job
+    iconProc.fetchAllowed = fetchIcons
+    iconProc.cancelled = false
+    var args = [iconBin, "--key=" + job.key, "--app=" + job.app,
+                "--app-icon=" + job.appIcon, "--source=" + job.source,
                 "--scheme", service.lightTheme ? "light" : "dark"]
     if (fetchIcons) args.push("--fetch")
     iconProc.command = args
@@ -465,16 +661,102 @@ Item {
 
   Process {
     id: iconProc
+    environment: service.helperEnvironment
+    property var job: null
+    property bool fetchAllowed: false
+    property bool cancelled: false
     running: false
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        var path = String(text || "").trim()
-        service.iconCache[service.iconWanted] = path
-        if (path) service.applyIcon(service.iconWanted, path)
+        var job = iconProc.job
+        var path = iconProc.cancelled ? "" : String(text || "").trim()
+        if (!iconProc.cancelled) {
+          service.iconCache[service.iconWanted] = path
+          if (path) service.applyIcon(service.iconWanted, path)
+        }
+        if (job && (iconProc.cancelled || (!iconProc.fetchAllowed && service.fetchIcons))) {
+          if (service.iconQueue.length < 100) service.iconQueue.unshift(job)
+        }
         service.iconWanted = ""
+        iconProc.job = null
+        iconProc.cancelled = false
         Qt.callLater(service.pumpIcons)
       }
+    }
+  }
+
+  // Sender files are decoded outside the shell. Jobs belong to a particular
+  // snapshot, not a source group: a replacement must not inherit a late image.
+  property var senderImageQueue: []
+  property int senderImageRevision: 0
+
+  function wantSenderImage(row) {
+    var reservation = liveKeys[row.key]
+    if (!reservation) return
+    var source = String(row.image || "")
+    var job = source.indexOf("image://icon//") === 0
+            ? { key: row.key, source: source, image: "" } : null
+    if (!job && !reservation.senderImage) return
+    reservation.senderImage = job
+    senderImageRevision += 1
+    senderImageQueue = senderImageQueue.filter(function(pending) {
+      return liveKeys[pending.key] && liveKeys[pending.key].senderImage === pending
+    })
+    if (job && senderImageQueue.length < maxLiveNotifications) senderImageQueue.push(job)
+    pumpSenderImages()
+  }
+
+  function senderImageFor(key, source, revision) {
+    var job = liveKeys[key] && liveKeys[key].senderImage
+    return job && job.source === source ? job.image : ""
+  }
+
+  function finishSenderImage(job, image) {
+    if (!job || !liveKeys[job.key] || liveKeys[job.key].senderImage !== job) return
+    if (image.length > 131072 || !/^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(image)) return
+    job.image = image
+    senderImageRevision += 1
+  }
+
+  function pumpSenderImages() {
+    if (!helperSettingsReady || senderImageProc.running) return
+    while (senderImageQueue.length) {
+      var job = senderImageQueue.shift()
+      if (!liveKeys[job.key] || liveKeys[job.key].senderImage !== job) continue
+      senderImageProc.job = job
+      senderImageProc.output = ""
+      senderImageProc.overflow = false
+      senderImageProc.stdinEnabled = true
+      senderImageProc.running = true
+      senderImageProc.write(job.source.substring("image://icon/".length))
+      senderImageProc.stdinEnabled = false
+      return
+    }
+  }
+
+  Process {
+    id: senderImageProc
+    environment: service.helperEnvironment
+    command: [service.iconBin, "--sender-image"]
+    property var job: null
+    property string output: ""
+    property bool overflow: false
+    stdout: SplitParser {
+      splitMarker: ""
+      onRead: function(chunk) {
+        if (senderImageProc.overflow) return
+        if (senderImageProc.output.length + chunk.length > 131072) {
+          senderImageProc.overflow = true
+          senderImageProc.output = ""
+        } else senderImageProc.output += chunk
+      }
+    }
+    onExited: function(code, status) {
+      if (code === 0 && !overflow) service.finishSenderImage(job, output)
+      job = null
+      output = ""
+      Qt.callLater(service.pumpSenderImages)
     }
   }
 
@@ -527,7 +809,12 @@ Item {
     if (!held.length) return
     var queue = held
     held = []
-    for (var i = 0; i < queue.length; i++) service.showRow(queue[i])
+    for (var i = 0; i < queue.length; i++) {
+      var pending = liveKeys[queue[i]]
+      if (!pending || !pending.row) continue
+      pending.held = false
+      service.showRow(pending.row)
+    }
   }
 
   // Nothing waits forever: a pointer parked over the deck should not silence
@@ -718,8 +1005,12 @@ Item {
   // Our own identity for a notification. The sender's id is reused (that is
   // what replaces_id is for), so it identifies a slot, not an event.
   function nextKey() {
-    keySeed += 1
-    return "n" + Date.now().toString(36) + keySeed.toString(36)
+    var key
+    do {
+      keySeed += 1
+      key = "n" + Date.now().toString(36) + keySeed.toString(36)
+    } while (liveKeys[key])
+    return key
   }
 
   function rowIndexFor(key) {
@@ -731,25 +1022,30 @@ Item {
   // id 0 means "this is a new notification", not "replace the one with id 0".
   // Matching on it made every notify-send take over whichever restored row
   // happened to have no id.
-  function rowIndexForOriginal(id) {
-    if (!id) return -1
-    for (var i = 0; i < toasts.count; i++)
-      if (toasts.get(i).originalId === id) return i
-    return -1
+  function keyForOriginal(id) {
+    if (!id) return ""
+    for (var key in liveKeys)
+      if (liveKeys[key].originalId === id && refs[key]) return key
+    return ""
   }
 
   // ------------------------------------------------------------- arrival
   function handleNotification(notification) {
+    // Replacements reuse the same slot, including before its first insertion.
+    var key = keyForOriginal(notification.id) || nextKey()
+
     // Without this the object is destroyed as soon as this handler returns,
     // taking the actions and the image with it.
+    if (!reserveLive(key)) {
+      notification.tracked = false
+      return
+    }
+    liveKeys[key].originalId = notification.id || 0
     notification.tracked = true
-
-    // replaces_id: the sender is updating something already on screen.
-    var replacing = rowIndexForOriginal(notification.id)
-    var key = replacing >= 0 ? toasts.get(replacing).key : nextKey()
 
     var row = Store.snapshot(notification, key, NotificationUrgency)
     row.duration = durationFor(notification.urgency, row.expireTimeout)
+    rememberRecent(row)
 
     var previous = refs[key]
     refs[key] = notification
@@ -757,16 +1053,14 @@ Item {
     // card's action buttons are bound through this counter, or they would be
     // read once - before the sender was recorded - and stay empty forever.
     refsRevision += 1
-    notification.closed.connect(function() {
-      if (service.refs[key] === notification) delete service.refs[key]
-    })
+    if (previous !== notification) watchNotification(notification, key)
     if (previous && previous !== notification) {
       try { previous.tracked = false } catch (e) {}
     }
 
     // Silenced or snoozed still means recorded: "what did I miss" is the whole
     // point of a store. It goes straight to history without being on screen.
-    // Critical is never muted - that is what critical means.
+    // A sharing offer never changes delivery; only an explicit snooze does.
     var muted = doNotDisturb ? "silenced"
               : (globalSnoozeUntil || snoozedUntil(row.groupKey)) ? "snoozed" : ""
     if (muted && codesBypassQuiet && String(row.code || "")) muted = ""
@@ -774,37 +1068,98 @@ Item {
       Store.write(storeProc, storeBin, "put", row)
       Store.write(storeProc, storeBin, "close", null, [key, muted])
       release(key)
+      if (rowIndexFor(key) < 0) releaseLive(key)
+      else liveKeys[key].row = null
       return
     }
 
     Store.write(storeProc, storeBin, "put", row)
+    wantSenderImage(row)
     wantIcon(row)
     lookForReply(row)
 
     // An update to something already on screen goes through either way: it
     // changes a card in place rather than moving anything. Only a genuinely
-    // new card waits, and only while the deck is being held.
+    // new card waits, and only while the deck is being held - and it keeps
+    // its reservation the whole time it sits there, unshown.
     if (service.holding() && service.rowIndexFor(key) < 0) {
-      var queue = service.held.slice()
-      queue.push(row)
-      service.held = queue
+      var pending = liveKeys[key]
+      pending.row = row
+      if (!pending.held) {
+        pending.held = true
+        service.held = service.held.concat([key])
+      }
       return
     }
 
     service.showRow(row)
   }
 
+  function watchNotification(notification, key) {
+    var reservation = liveKeys[key]
+    notification.closed.connect(function() {
+      if (service.refs[key] !== notification) return
+      delete service.refs[key]
+      service.refsRevision += 1
+      // Visible snapshots outlive their sender; pending rows must not appear
+      // after the sender withdraws them.
+      if (service.rowIndexFor(key) < 0) service.finishClose(key, "closed")
+    })
+    // NotificationServer emits onNotification only for new objects. A
+    // replaces_id update mutates this QObject and emits its property signals.
+    // Snapshot once after the whole update, not once per changed field.
+    var queued = false
+    var refresh = function() {
+      if (!queued) return
+      queued = false
+      if (reservation.refresh === refresh) reservation.refresh = null
+      if (service.liveKeys[key] !== reservation || service.refs[key] !== notification) return
+      service.handleNotification(notification)
+    }
+    var schedule = function() {
+      if (queued || service.liveKeys[key] !== reservation || service.refs[key] !== notification) return
+      queued = true
+      reservation.refresh = refresh
+      Qt.callLater(refresh)
+    }
+    var signals = [notification.summaryChanged, notification.bodyChanged,
+                   notification.appNameChanged, notification.appIconChanged,
+                   notification.imageChanged, notification.urgencyChanged,
+                   notification.expireTimeoutChanged, notification.hintsChanged,
+                   notification.actionsChanged]
+    for (var i = 0; i < signals.length; i++) signals[i].connect(schedule)
+  }
+
   // Qt.callLater: mutating the model while a Repeater is mid-incubation
   // crashes in QV4::Object::insertMember.
   function showRow(row) {
     var key = String(row.key || "")
+    if (!reserveLive(key)) return
+    var pending = liveKeys[key]
+    pending.row = row
+    pending.originalId = row.originalId || 0
+    if (pending.held) {
+      pending.held = false
+      held = held.filter(function(heldKey) { return heldKey !== key })
+    }
+    if (pending.scheduled) return
+    pending.scheduled = true
     Qt.callLater(function() {
+      if (service.liveKeys[key] !== pending) return
+      // This insertion may have been queued before a replaces_id update.
+      // Consume that update first, including its quiet/cancellation decision.
+      if (pending.refresh) pending.refresh()
+      pending.scheduled = false
+      if (service.liveKeys[key] !== pending || pending.held || !pending.row) return
+      var row = pending.row
+      pending.row = null
       var at = service.rowIndexFor(key)
       var snap = service.snapshot(), deckNow = service.deckHeight
       if (at >= 0) {
         Store.applyTo(toasts, at, row)      // an update, in place
         service.retarget(undefined, undefined, snap, deckNow)
       } else {
+        service.pinDeckDisplay()
         toasts.insert(0, row)
         // Where it comes from: under the bar, transparent. The layout has
         // already made room for it, so this is the only thing the arrival
@@ -822,11 +1177,20 @@ Item {
 
   // Let go of the sender's object. Untracking tells it the notification
   // closed, which is when Chromium deletes the avatar it handed us.
-  function release(key) {
+  function release(key, reason) {
     var ref = refs[key]
     if (!ref) return
-    try { ref.tracked = false } catch (e) {}
+    // Clear identity before invoking the QObject: its close signal can run
+    // synchronously and must not cancel a row or release a newer sender.
     delete refs[key]
+    refsRevision += 1
+    // Untracking itself dismisses the notification. Do exactly one close:
+    // dismiss()/expire() have already destroyed it before they return.
+    try {
+      if (reason === "expired") ref.expire()
+      else if (reason) ref.dismiss()
+      else ref.tracked = false
+    } catch (e) {}
   }
 
   // ------------------------------------------------------------- departure
@@ -840,7 +1204,11 @@ Item {
   // jump - three motions for one event, and the hole was visible in every
   // recording.
   function closeToast(key, reason) {
-    if (rowIndexFor(key) < 0 || leaving[key]) return
+    if (leaving[key]) return
+    if (rowIndexFor(key) < 0) {
+      finishClose(key, reason || "dismissed")
+      return
+    }
     // Where it is *before* the layout stops giving it room. Marking it first
     // and asking afterwards gets the answer the pinned placement invented,
     // which is wherever it happened to come in from.
@@ -858,18 +1226,10 @@ Item {
     for (var k in leaving) if (k !== key) rest[k] = leaving[k]
     leaving = rest
     var at = rowIndexFor(key)
-    if (at < 0) return
-    var ref = refs[key]
-    if (ref) {
-      // Tell the sender which way it went: expired and dismissed are
-      // different events on the bus, and some apps act on the difference.
-      try {
-        if (reason === "expired" && typeof ref.expire === "function") ref.expire()
-        else ref.dismiss()
-      } catch (e) {}
-    }
-    release(key)
-    toasts.remove(at)
+    if (!liveKeys[key]) return
+    releaseLive(key)
+    release(key, reason)
+    if (at >= 0) toasts.remove(at)
     delete heights[key]
     Store.write(storeProc, storeBin, "close", null, [key, reason])
     layoutRevision += 1        // the row is gone; nothing moves, the gap already closed
@@ -883,8 +1243,7 @@ Item {
     // the count stayed put, and the loop spun the main thread at 100% with no
     // error and no log. Every wedge traced back to here, because the demo
     // script clears before it starts.
-    var keys = []
-    for (var i = 0; i < toasts.count; i++) keys.push(toasts.get(i).key)
+    var keys = Object.keys(liveKeys)
     for (var k = 0; k < keys.length; k++) closeToast(keys[k], reason || "cleared")
   }
 
@@ -898,11 +1257,12 @@ Item {
     var out = []
     var ref = refs[key]
     if (!ref || !ref.actions) return out
-    for (var i = 0; i < ref.actions.length; i++) {
+    for (var i = 0; i < Math.min(ref.actions.length, Security.MAX_ACTIONS); i++) {
       var a = ref.actions[i]
       var identifier = String(a.identifier || "")
-      if (identifier === "default" || !identifier) continue
-      var label = String(a.text || identifier)
+      if (identifier.length > Security.MAX_ACTION_ID || !identifier) continue
+      if (identifier === "default") { out.push({id: identifier, text: "Open in app"}); continue }
+      var label = Security.bounded(String(a.text || identifier), Security.MAX_ACTION_LABEL)
       if (hideSettingsAction && (/^settings$/i.test(label) || /^settings$/i.test(identifier)))
         continue
       out.push({ id: identifier, text: label })
@@ -911,9 +1271,10 @@ Item {
   }
 
   function invokeAction(key, identifier) {
+    if (typeof identifier !== "string" || identifier.length > Security.MAX_ACTION_ID) return
     var ref = refs[key]
     if (ref && ref.actions) {
-      for (var i = 0; i < ref.actions.length; i++) {
+      for (var i = 0; i < Math.min(ref.actions.length, Security.MAX_ACTIONS); i++) {
         if (String(ref.actions[i].identifier) === identifier) {
           try { ref.actions[i].invoke() } catch (e) {}
           break
@@ -1103,17 +1464,28 @@ Item {
   // expression rather than the classic `dispatch focuswindow ...` string.
   function focusWindow(win) {
     if (!win) return
-    var target = win.address
-      ? 'hl.get_window("address:' + win.address.replace(/[^0-9a-fx]/gi, "") + '")'
-      : 'hl.get_windows({class = "' + win.wmClass.replace(/"/g, "") + '"})[1]'
-    Hyprland.dispatch("hl.dsp.focus({window = " + target + "})")
+    if (!/^0x[0-9a-f]+$/i.test(String(win.address || ""))) return
+    Hyprland.dispatch('hl.dsp.focus({window = hl.get_window("address:' + win.address + '")})')
+  }
+
+  function runExecArgv(argv) {
+    Quickshell.execDetached(argv[0].charAt(0) === "/" ? argv : ["/usr/bin/env"].concat(argv))
   }
 
   function activate(key) {
+    var at = rowIndexFor(key)
+    var row = at >= 0 ? toasts.get(at) : null
+    var argv = Security.parseOmarchyExecArgv(row ? row.execArgv : "")
+    if (argv) {
+      runExecArgv(argv)
+      closeToast(key, "activated")
+      return
+    }
+
     var ref = refs[key]
     var handled = false
-    if (ref && ref.actions) {
-      for (var i = 0; i < ref.actions.length; i++) {
+    if (allowDefaultActionOnCardClick && ref && ref.actions) {
+      for (var i = 0; i < Math.min(ref.actions.length, Security.MAX_ACTIONS); i++) {
         if (String(ref.actions[i].identifier) === "default") {
           try { ref.actions[i].invoke(); handled = true } catch (e) {}
           break
@@ -1122,8 +1494,6 @@ Item {
     }
 
     if (!handled) {
-      var at = rowIndexFor(key)
-      var row = at >= 0 ? toasts.get(at) : null
       if (row) {
         // Source first, link last. A Slack message quoting a link to
         // somewhere else is still a Slack notification: clicking it should
@@ -1140,8 +1510,8 @@ Item {
         // has to be a hostname by the same test omapager-icon uses before it
         // will fetch anything, not merely a string with a dot in it.
         else if (Markup.hostname(row.source))
-          Qt.openUrlExternally("https://" + Markup.hostname(row.source) + "/")
-        else if (String(row.link || "")) Qt.openUrlExternally(String(row.link))
+          Security.openExternalUrl("https://" + Markup.hostname(row.source) + "/")
+        else if (String(row.link || "")) Security.openExternalUrl(String(row.link))
       }
     }
     closeToast(key, "activated")
@@ -1153,11 +1523,21 @@ Item {
   // keeps an object per phone notification on its own bus carrying a replyId
   // and a sendReply method - the part the freedesktop spec has no room for -
   // and the helper matches our row to it by app name and text.
-  readonly property string kdeBin: Qt.resolvedUrl("bin/omapager-kdeconnect")
+  readonly property string kdeBin: Qt.resolvedUrl("bin/omapager-run-kdeconnect")
                                      .toString().replace(/^file:\/\//, "")
   property string replyingKey: ""        // the card with its reply box open
 
-  Process { id: replyProc; running: false }
+  Process {
+    id: replyProc
+    environment: service.helperEnvironment
+    property string replyKey: ""
+    running: false
+    onExited: function(code, status) {
+      if (code === 0) { service.replyingKey = ""; service.closeToast(replyKey, "activated") }
+      else service.replyError = "Unable to safely identify reply target"
+    }
+  }
+  property string replyError: ""
 
   // A reply box holds the keyboard, so it must not be able to hold it
   // indefinitely - a card that expires or is dismissed while you are typing
@@ -1171,6 +1551,7 @@ Item {
 
   Process {
     id: findProc
+    environment: service.helperEnvironment
     property var job: ({})
     running: false
     stdout: StdioCollector {
@@ -1191,7 +1572,7 @@ Item {
           // Nothing yet. Once more in a moment, in case the phone's side of it
           // had not appeared when we looked.
           job.tries = (job.tries || 0) + 1
-          var queue = service.replyQueue.slice()
+          var queue = service.replyQueue.slice(0, 99)
           queue.push(job)
           service.replyQueue = queue
           replyRetry.restart()
@@ -1217,7 +1598,7 @@ Item {
   }
 
   function pumpReplies() {
-    if (findProc.running || replyQueue.length === 0) return
+    if (!helperSettingsReady || findProc.running || replyQueue.length === 0) return
     var queue = replyQueue.slice()
     var job = queue.shift()
     replyQueue = queue
@@ -1236,12 +1617,12 @@ Item {
     var at = rowIndexFor(key)
     if (at < 0) return
     var path = String(toasts.get(at).replyPath || "")
-    if (!path || !String(text).trim()) return
+    if (!helperSettingsReady || !path || !String(text).trim() || String(text).length > 4096 || replyProc.running) return
     replyProc.running = false
-    replyProc.command = [kdeBin, "reply", path, String(text)]
+    replyProc.replyKey = key
+    replyProc.command = [kdeBin, "reply", path, String(text), String(toasts.get(at).source), String(toasts.get(at).bodyLine)]
     replyProc.running = true
-    replyingKey = ""
-    closeToast(key, "activated")           // answered is dealt with
+
   }
 
   // ------------------------------------------------------------- offers
@@ -1260,7 +1641,7 @@ Item {
   Process {
     id: clipProbe
     running: true
-    command: ["sh", "-c", "command -v wl-copy >/dev/null && command -v wl-paste >/dev/null"]
+    command: [service.helperBin, "capabilities"]
     onExited: function(code, status) { service.hasWlCopy = code === 0 }
   }
 
@@ -1272,7 +1653,7 @@ Item {
 
   function copyText(text, sensitive) {
     var value = String(text || "")
-    if (!value) return
+    if (!value || value.length > (sensitive ? 64 : 4096)) return
 
     // Without wl-copy, Qt holds the selection instead. That loses --sensitive,
     // but it loses nothing real: Omarchy's clipboard history is wl-paste
@@ -1298,7 +1679,7 @@ Item {
 
   Timer {
     id: secretLife
-    interval: 90000
+    interval: service.clipboardTimeout * 1000
     onTriggered: {
       if (service.hasWlCopy) { clipReader.running = true; return }
       if (service.secretHeld && Quickshell.clipboardText === service.secretHeld)
@@ -1327,9 +1708,13 @@ Item {
   }
 
   function takeOffer(kind, value, key) {
-    if (kind === "code") copyText(value, true)
+    if (kind === "code") {
+      var index = rowIndexFor(String(key || ""))
+      if (index < 0 || String(toasts.get(index).codes).split(" ").indexOf(String(value)) < 0) return
+      copyText(value, true)
+    }
     else if (kind === "phone") copyText(value, false)
-    else Qt.openUrlExternally(value)
+    else Security.openExternalUrl(value)
 
     // A copied code is a finished notification: it exists to carry six digits
     // to a login box, and once they are on the clipboard there is nothing left
@@ -1363,33 +1748,48 @@ Item {
   }
 
   // ------------------------------------------------------------- store
-  Process { id: storeProc; running: false }
+  Process {
+    id: storeProc
+    running: false
+    environment: service.helperEnvironment
+    property bool policyReady: service.helperSettingsReady
+  }
+
+  function restoreRows(rows, replay) {
+    // Restore is oldest first; history is newest first. Both insert at zero.
+    for (var i = replay ? rows.length - 1 : 0;
+         replay ? i >= 0 : i < rows.length; i += replay ? -1 : 1) {
+      var row = Store.restored(rows[i])
+      if (!row) continue
+      if (liveKeys[row.key]) {
+        // Startup must not overwrite a newer live arrival. Replaying the same
+        // entry deliberately creates a separate card, even while pending.
+        if (!replay) continue
+        row.key = nextKey()
+      }
+      if (!reserveLive(row.key)) break
+      // Live image handles died with the old shell; restore a durable icon.
+      if (!replay) wantIcon(row)
+      showRow(row)
+    }
+  }
 
   Process {
     id: restoreProc
+    environment: service.helperEnvironment
     running: false
     command: [service.storeBin, "restore"]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        var rows = Store.parseList(text)
-        // Oldest first out of the store, and insert(0) reverses it, so the
-        // deck comes back in the order it was in before the restart.
-        for (var i = 0; i < rows.length; i++) {
-          var row = Store.restored(rows[i])
-          if (!row) continue
-          // Restored rows need an icon too. Their sender is gone and any live
-          // handle it left died with the last shell, so without this every
-          // card that came back wore a letter.
-          service.wantIcon(row)
-          toasts.insert(0, row)
-        }
+        service.restoreRows(Store.parseList(text), false)
       }
     }
   }
 
   Process {
     id: quietRestoreProc
+    environment: service.helperEnvironment
     running: false
     command: [service.storeBin, "quiet"]
     stdout: StdioCollector {
@@ -1415,13 +1815,25 @@ Item {
   // Housekeeping, once, at startup. History trims itself on every close, so
   // this is really for the icon cache - nothing else ever looks at it, and
   // without this it only ever grows.
-  Process { id: tidyProc; running: false; command: [service.storeBin, "tidy"] }
+  Process {
+    id: tidyProc
+    environment: service.helperEnvironment
+    running: false
+    command: [service.storeBin, "tidy"]
+  }
 
-  Component.onCompleted: {
+  // Wait for the bar widget's saved policy before any helper can run. Otherwise
+  // a stored requireSandbox=true could be bypassed during service startup.
+  onHelperSettingsReadyChanged: if (helperSettingsReady) Qt.callLater(function() {
+    sandboxProbe.running = true
     restoreProc.running = true
     quietRestoreProc.running = true
     tidyProc.running = true
-  }
+    Store._pump(storeProc)
+    pumpIcons()
+    pumpSenderImages()
+    pumpReplies()
+  })
 
   // ------------------------------------------------------------- server
   NotificationServer {
@@ -1444,47 +1856,18 @@ Item {
     // asked in anger: where would a click go, did the reply channel resolve,
     // which of the sender's actions survived, how tall is each card.
     function probe(): string {
-      var i, key
-      var route = "nothing"
-      if (toasts.count > 0) {
-        var front = toasts.get(0)
-        var win = service.windowForPid(front.senderPid)
-                  || service.windowForSource(front.source)
-        route = win ? ("focus " + win.wmClass + " [" + win.address + "]")
-              : (Markup.hostname(front.source)
-                 ? ("open https://" + Markup.hostname(front.source) + "/")
-                 : (String(front.link || "") ? ("open " + front.link)
-                    : "sender's default action"))
-      }
-
-      var heights = [], actions = []
-      for (i = 0; i < toasts.count; i++) {
-        key = toasts.get(i).key
-        heights.push(key + "=" + (service.heights[key] || 0))
-        actions.push(String(toasts.get(i).summary).slice(0, 14) + "=" +
-                     JSON.stringify(service.actionsOf(key, service.refsRevision)))
-      }
-      return JSON.stringify({
-        toasts: toasts.count, route: route, actions: actions, heights: heights,
-        replyPath: toasts.count > 0 ? String(toasts.get(0).replyPath || "") : "",
-        replying: service.replyingKey !== "",
-        expanded: service.expanded, pointerIn: service.pointerIn,
-        doNotDisturb: service.doNotDisturb, snoozed: service.liveSnoozes(),
-        snoozeOptions: service.snoozeOptions,
-        decks: service.layout.decks.length, layoutH: service.layout.height,
-        layoutRevision: service.layoutRevision, heightNotes: service.heightNotes,
-        t: service.t, ys: (function() {
-          var out = []
-          for (var i = 0; i < toasts.count; i++) {
-            var k = toasts.get(i).key
-            out.push(Math.round(service.at(k, "y") * 10) / 10)
-          }
-          return out
-        })(),
-        barClearance: service.barClearance, edgeClearance: service.edgeClearance,
-        gapsOut: Style.gapsOut, barThickness: service.barThickness,
-        deckInset: service.deckInset, hasWlCopy: service.hasWlCopy
-      })
+      return JSON.stringify({fontScale: service.fontScale, toasts: toasts.count,
+        doNotDisturb: service.doNotDisturb, expanded: service.expanded,
+        hasWlCopy: service.hasWlCopy, security: service.sandboxStatus,
+        fetchRemoteIcons: service.fetchIcons,
+        allowDefaultActionOnCardClick: service.allowDefaultActionOnCardClick,
+        sharingActive: service.sharingActive, sharingStreams: service.sharingStreams,
+        sharingOfferPending: service.sharingOfferPending, offerSnoozeWhenSharing: service.offerSnoozeWhenSharing,
+        globalSnoozeUntil: service.globalSnoozeUntil,
+        displayMode: service.displayMode, displayName: service.displayName,
+        displays: service.displayNames, focusedDisplay: service.focusedDisplayName,
+        targetDisplay: service.targetDisplayName,
+        notificationDisplays: service.displayMode === "all" ? service.displayNames : [service.targetDisplayName]})
     }
     function clear(): string { service.clearAll("cleared"); return "ok" }
     function dnd(): string {
@@ -1584,7 +1967,7 @@ Item {
                 : String(row.link || "")
       if (!value) return "none"
       service.takeOffer(want, value, String(row.key))
-      return value
+      return "performed"
     }
 
     function align(side: string): string {
@@ -1694,32 +2077,24 @@ Item {
 
   Process {
     id: replayProc
+    environment: service.helperEnvironment
     running: false
     command: [service.storeBin, "history", String(service.replayCount)]
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        var rows = Store.parseList(text)          // newest first out of the store
-        for (var i = rows.length - 1; i >= 0; i--) {
-          var row = Store.restored(rows[i])
-          // A fresh key, or replaying something still on screen would land on
-          // the row that is already there and replace it.
-          if (!row) continue
-          if (service.rowIndexFor(row.key) >= 0) row.key = service.nextKey()
-          service.showRow(row)
-        }
+        service.restoreRows(Store.parseList(text), true)
       }
     }
   }
 
-  function replayHistory() { if (!replayProc.running) replayProc.running = true }
+  function replayHistory() { if (helperSettingsReady && !replayProc.running) replayProc.running = true }
 
   // ------------------------------------------------------------- surface
   //
-  // One full-screen layer per output. Full-screen and fixed: a surface that
-  // resizes as cards come and go lets the compositor scale a stale buffer,
-  // which is visible as the cards briefly stretching. The mask keeps every
-  // pixel outside the deck click-through.
+  // One fixed-width layer per output. Keeping the surface height fixed avoids
+  // compositor rescaling while cards enter or leave; the mask keeps everything
+  // outside the deck click-through.
   Variants {
     model: Quickshell.screens
 
@@ -1727,6 +2102,7 @@ Item {
       id: surface
       required property var modelData
       screen: modelData
+      readonly property bool showingNotifications: service.displayMode === "all" || modelData.name === service.targetDisplayName
       // Always mapped, even with nothing to draw. It used to appear with the
       // first notification and vanish with the last, and a layer surface
       // coming and going makes the compositor re-evaluate focus each time -
@@ -1737,24 +2113,6 @@ Item {
       //
       // Input is unaffected: the mask follows the deck, and an empty deck is a
       // zero-area mask, which is click-through everywhere.
-      // Always mapped, even with nothing to draw. It used to appear with the
-      // first notification and vanish with the last, and a layer surface
-      // coming and going makes the compositor re-evaluate its layer set each
-      // time - which on a scrolling layout drags the viewport somewhere else
-      // the moment you dismiss the last card. The surface is the canvas; the
-      // deck is what gets painted on it.
-      //
-      // Input is unaffected: the mask follows the deck, and an empty deck is a
-      // zero-area mask, which is click-through everywhere.
-      // Always mapped, even with nothing to draw. It used to appear with the
-      // first notification and vanish with the last, and a layer surface
-      // coming and going makes the compositor re-evaluate its layer set each
-      // time - which on a scrolling layout drags the viewport somewhere else
-      // the moment you dismiss the last card. The surface is the canvas; the
-      // deck is what gets painted on it.
-      //
-      // Input is unaffected: the mask follows the deck, so an empty deck is a
-      // zero-area mask and the whole surface is click-through.
       visible: true
       color: "transparent"
 
@@ -1768,14 +2126,14 @@ Item {
       // notification layer holding the keyboard the rest of the time would
       // swallow every keystroke on the desktop, so this is tightly bounded:
       // Escape closes it, so does answering, and so does the timeout below.
-      WlrLayershell.keyboardFocus: service.replyingKey !== ""
+      WlrLayershell.keyboardFocus: surface.showingNotifications && service.replyingKey !== ""
                                    ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
       exclusionMode: ExclusionMode.Ignore
 
       // As wide as the deck needs and no wider. Full-screen was the obvious
       // shape - the deck can sit anywhere in it - but it meant Qt re-rendering
       // a 5120x2880 surface for every frame of every arrival, for a stack
-      // 340pt across. The width is a constant, so the buffer is allocated once
+      // 380px across. The width is a constant, so the buffer is allocated once
       // and never resized under an animation; the height stays full so the
       // deck can grow downwards without the window changing size either.
       anchors { top: true; bottom: true; right: true }
@@ -1784,39 +2142,30 @@ Item {
       // Only the deck takes input; the rest of the surface stays
       // click-through. Tracking the item keeps the region honest as the deck
       // grows and shrinks.
-      mask: Region { item: deck }
+      mask: Region { item: surface.showingNotifications ? deck : null }
 
-      // The notification area proper: it begins at the bar's lower edge and is
-      // clipped there, so a card arriving from above is revealed as it comes
-      // down rather than being seen sliding across the panel. The extra height
-      // is room for the bottom card's shadow, which clipping would otherwise
-      // cut off square.
+      // Clip arrivals at the configured deck edge. Reserve only enough
+      // side/bottom room for their scale animation; native notification
+      // surfaces have no custom drop shadows to accommodate.
       Item {
         id: clipper
+        visible: surface.showingNotifications
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.topMargin: service.barClearance
         anchors.rightMargin: 0
-        // Room for the shadow on both sides. The clip is here to hide a card
-        // dropping in from behind the bar, which is a vertical concern only -
-        // but an item that clips and is exactly as wide as the card cuts the
-        // shadow off flat down both edges. So the clipper is wider than the
-        // card and the deck sits inset within it: left by a comfortable
-        // margin, right by however much room there is between the card and the
-        // screen edge, which is all a shadow can have there anyway.
-        readonly property int shadowRoom: Style.space(30)
+        readonly property int motionInset: Style.spacing.sm
         // In from the screen's right edge - plus the bar's width, if the bar
         // is the thing occupying that edge.
         readonly property int edgeGap: service.edgeClearance
-        width: Style.space(340) + shadowRoom + edgeGap
-        height: deck.y + deck.height + Style.space(30)
+        width: service.notificationWidth + motionInset + edgeGap
+        height: deck.y + deck.height + motionInset
         clip: true
 
         Item {
           id: deck
-          y: service.deckInset
-        x: clipper.shadowRoom
-        width: Style.space(340)
+        x: clipper.motionInset
+        width: service.notificationWidth
         // From the same clock as everything on it, so the clip and its
         // contents can never disagree mid-move.
         height: service.deckHeight
@@ -1919,15 +2268,20 @@ Item {
             id: toast
             required property var model
             row: model
+            senderImage: service.senderImageFor(model.key, model.image, service.senderImageRevision)
             scene: service
             cardWidth: deck.width
             place: service.placements[model.key]
                    || ({ y: 0, scale: 1, opacity: 0, z: 1, front: false, hidden: true })
             hovered: service.hoverKey === model.key
             actions: service.actionsOf(model.key, service.refsRevision)
+            fontScale: service.fontScale
+            showCountdown: service.showCountdown
             actionsAlign: service.actionsAlign
+            replyError: service.replyingKey === model.key ? service.replyError : ""
             replying: service.replyingKey === model.key
             onReplyRequested: {
+              service.replyError = ""
               service.replyingKey = model.key
               service.pointerEntered(Layout.deckKeyFor(model, service.stacking))
               service.hoverKey = String(model.key)
@@ -1953,8 +2307,10 @@ Item {
             // The target height, not the drawn one: a step function of the
             // card's state, so the layout moves on events rather than frames.
             drawnHeight: service.at(model.key, "height")
-            onTargetHeightChanged: service.noteHeight(model.key, targetHeight)
-            Component.onCompleted: service.noteHeight(model.key, targetHeight)
+            // Hidden outputs collapse effective child visibility. Their text
+            // measurements must not overwrite the visible deck's height.
+            onTargetHeightChanged: if (surface.showingNotifications) service.noteHeight(model.key, targetHeight)
+            Component.onCompleted: if (surface.showingNotifications) service.noteHeight(model.key, targetHeight)
 
             onExpired: service.closeToast(model.key, "expired")
             onActivated: service.activate(model.key)
