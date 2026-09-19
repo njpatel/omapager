@@ -453,6 +453,34 @@ Item {
     }
   }
 
+  // ---------------------------------------------------- notification history
+  //
+  // The full log on disk, not the session's memory of it (recentRows above):
+  // every closed notification the store still has, newest first, redacted the
+  // same way on the way in. Read on demand like Held - the panel is the only
+  // thing that ever asks, and it asks when it opens. The store itself already
+  // caps this at 100 and trims by historyHours, so this mirrors that ceiling
+  // rather than inventing a second one.
+  property var historyRows: []
+  property int historyRevision: 0
+  property int historyLimit: 100
+
+  function refreshHistory() { if (helperSettingsReady && !historyProc.running) historyProc.running = true }
+
+  Process {
+    id: historyProc
+    environment: service.helperEnvironment
+    running: false
+    command: [service.storeBin, "history", String(service.historyLimit)]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        service.historyRows = Store.parseList(text)
+        service.historyRevision += 1
+      }
+    }
+  }
+
   // When the quiet that is holding this source began. Everything older than
   // that was held by some earlier decision and is not what you are asking
   // about now.

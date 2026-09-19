@@ -35,6 +35,7 @@ BarWidget {
   // binding below actually depends on.
   readonly property int snoozeRevision: service ? service.snoozeRevision : 0
   readonly property int heldRevision: service ? service.heldRevision : 0
+  readonly property int historyRevision: service ? service.historyRevision : 0
   readonly property var snoozed: {
     snoozeRevision
     return service ? service.liveSnoozes() : []
@@ -145,6 +146,14 @@ BarWidget {
   readonly property var recent: {
     snoozeRevision
     return service ? service.recentForPanel(recentCount) : []
+  }
+
+  // The persisted log, unlike recent above: everything the store still has on
+  // disk, up to its own 100-entry ceiling, regardless of what is currently
+  // snoozed or quiet.
+  readonly property var history: {
+    historyRevision
+    return service ? service.historyRows : []
   }
 
   // ------------------------------------------------------------- settings
@@ -413,6 +422,7 @@ BarWidget {
                               sources: held, expanded: pager.expandedKey,
                               recentCount: pager.recent.length, recentLimit: pager.recentCount,
                               recentExpanded: pager.recentExpanded,
+                              historyCount: pager.history.length, historyExpanded: pager.historyExpanded,
                               cardX: panel.cardOrigin.x, cardY: panel.cardOrigin.y,
                               cw: panel.contentWidth, ch: panel.contentHeight })
     }
@@ -496,6 +506,7 @@ BarWidget {
 
   property string expandedKey: ""
   property bool recentExpanded: false
+  property bool historyExpanded: false
   onQuietChanged: if (quiet) recentExpanded = false
   property int cursorAt: 0
   property bool cursorLive: false
@@ -503,10 +514,13 @@ BarWidget {
   onOpenedChanged: {
     cursorAt = 0; cursorLive = false; expandedKey = ""; globalChoosing = false
     recentExpanded = false
+    historyExpanded = false
     if (!opened) settingsView = false
     // What has been held back, as of now - read on opening rather than kept
     // up to date, because the panel is the only thing that ever asks.
     if (opened && service) service.refreshHeld()
+    // Same story for the persisted log: read fresh each time the panel opens.
+    if (opened && service) service.refreshHistory()
   }
 
   function snoozeEverything(seconds) {
@@ -1310,6 +1324,137 @@ BarWidget {
                         elide: Text.ElideRight
                       }
                     }
+                  }
+                }
+              }
+            }
+          }
+
+          PanelSeparator { visible: !pager.settingsView; foreground: pager.panelFg }
+
+          Item {
+            visible: !pager.settingsView
+            width: parent.width
+            height: Math.max(historyHeading.implicitHeight, historyToggle.implicitHeight)
+
+            PanelSectionHeader {
+              id: historyHeading
+              anchors.left: parent.left
+              anchors.right: historyToggle.left
+              anchors.verticalCenter: parent.verticalCenter
+              text: "HISTORY · " + pager.history.length
+              foreground: pager.panelFg
+              fontFamily: pager.fontFamily
+            }
+
+            MouseArea {
+              anchors.left: parent.left
+              anchors.right: historyToggle.left
+              anchors.top: parent.top
+              anchors.bottom: parent.bottom
+              cursorShape: Qt.PointingHandCursor
+              onClicked: pager.historyExpanded = !pager.historyExpanded
+            }
+
+            PanelActionButton {
+              id: historyToggle
+              anchors.right: parent.right
+              // The scrollbar owns the right-edge hit area even over this row.
+              anchors.rightMargin: panelScrollBar.width
+              anchors.verticalCenter: parent.verticalCenter
+              iconText: pager.historyExpanded ? "\u{f0143}" : "\u{f0140}"
+              tooltipText: pager.historyExpanded ? "Hide notification history" : "Show notification history"
+              foreground: pager.panelFg
+              fontFamily: pager.fontFamily
+              focusable: true
+              onClicked: pager.historyExpanded = !pager.historyExpanded
+            }
+          }
+
+          Text {
+            visible: !pager.settingsView && pager.historyExpanded && pager.history.length === 0
+            width: parent.width
+            text: "No notification history."
+            textFormat: Text.PlainText
+            color: pager.dim
+            font.family: pager.fontFamily
+            font.pixelSize: Style.font.bodySmall
+            wrapMode: Text.WordWrap
+          }
+
+          Column {
+            visible: !pager.settingsView && pager.historyExpanded
+            width: parent.width
+            spacing: Style.spacing.md
+
+            // Collapsed instantiates no delegates, same as Recent - up to 100
+            // cards is real weight to carry only while this is open.
+            Repeater {
+              model: !pager.settingsView && pager.historyExpanded ? pager.history : []
+
+              BorderSurface {
+                id: historyCard
+                required property var modelData
+                property bool expanded: false
+                width: parent.width
+                leftPadding: Style.spacing.controlPaddingX
+                rightPadding: Style.spacing.controlPaddingX
+                topPadding: Style.spacing.md
+                bottomPadding: Style.spacing.md
+                height: historyText.implicitHeight + contentTopInset + contentBottomInset
+                radius: Style.cornerRadius
+                color: Style.normalFillFor(pager.panelFg, Color.accent)
+                borderSpec: Border.controlSpec("normal", pager.panelFg, Color.accent)
+
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: historyCard.expanded = !historyCard.expanded
+                }
+
+                Column {
+                  id: historyText
+                  anchors.left: parent.left
+                  anchors.right: parent.right
+                  anchors.top: parent.top
+                  anchors.leftMargin: historyCard.contentLeftInset
+                  anchors.rightMargin: historyCard.contentRightInset
+                  anchors.topMargin: historyCard.contentTopInset
+                  spacing: Style.spacing.xs
+
+                  Text {
+                    width: parent.width
+                    text: historyCard.modelData.source + " · "
+                          + pager.clockTime(new Date(historyCard.modelData.ts * 1000))
+                    textFormat: Text.PlainText
+                    color: pager.dim
+                    font.family: pager.fontFamily
+                    font.pixelSize: Style.font.caption
+                    elide: Text.ElideRight
+                  }
+
+                  Text {
+                    width: parent.width
+                    text: historyCard.modelData.summary
+                    textFormat: Text.PlainText
+                    color: pager.panelFg
+                    font.family: "Liberation Sans"
+                    font.pixelSize: Style.font.title
+                    font.bold: true
+                    elide: Text.ElideRight
+                  }
+
+                  Text {
+                    visible: text !== ""
+                    width: parent.width
+                    text: historyCard.modelData.bodyLine
+                    textFormat: Text.PlainText
+                    color: Qt.darker(pager.panelFg, 1.15)
+                    font.family: "Liberation Sans"
+                    font.pixelSize: Style.font.title
+                    wrapMode: Text.WordWrap
+                    maximumLineCount: historyCard.expanded ? 200 : 2
+                    elide: historyCard.expanded ? Text.ElideNone : Text.ElideRight
                   }
                 }
               }
