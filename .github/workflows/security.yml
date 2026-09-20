@@ -15,9 +15,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Helper image dependency
-        # Helpers deliberately use /usr/bin/python3, outside the scanner venv.
-        run: sudo apt-get update && sudo apt-get install -y python3-pil
+      # Helpers use /usr/bin/python3, not the scanner virtual environment.
+      - run: sudo apt-get update && sudo apt-get install -y python3-pil
       - run: python3 -m venv /tmp/omapager-scanners
       - run: /tmp/omapager-scanners/bin/pip install --require-hashes -r security/requirements.txt
       - run: /tmp/omapager-scanners/bin/semgrep scan --config security/semgrep --error --metrics=off .

@@ -61,6 +61,13 @@ the panel's Held Back section.
 **Recent notifications.** Review recently dismissed or expired notifications
 by expanding Recent in the panel. The list clears when the shell restarts.
 
+**Notification history.** Expand History to read up to 100 closed notifications,
+newest first, including messages held while snoozed or silenced. Unlike Recent,
+this list survives shell restarts and refreshes each time the panel opens.
+Click a card to expand its message, then scroll to read the rest. `historyHours`
+controls retention; `0` disables disk history. Detected verification codes stay
+redacted.
+
 <img src="assets/native-panel-2x.png" width="420" alt="Notification panel with recent messages from the demo scenes">
 
 **Source icons.** Use local icons or fetch missing website icons automatically.
@@ -242,7 +249,7 @@ waiting. Hover the centre of the bar to reveal it at other times.
 | Dimmed bell | Nothing held back |
 
 Left-click the bell to silence or resume notifications. Right-click to open the
-panel for Recent, held messages and snooze controls.
+panel for Recent, History, held messages and snooze controls.
 
 ## Keybindings
 
