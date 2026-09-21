@@ -3,7 +3,7 @@
   "id": "njpatel.omapager",
   "name": "Omapager",
   "version": "0.1.0",
-  "author": "Neil Patel",
+  "author": "Neil Jagdish Patel",
   "license": "MIT",
   "description": "Notifications for Omarchy: a stacking, grouping replacement for the built-in service, with markup parsing, resolved source icons, inline reply, and per-source snooze.",
   "kinds": [
