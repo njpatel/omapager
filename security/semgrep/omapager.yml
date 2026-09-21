@@ -1,0 +1,32 @@
+rules:
+  - id: no-shell-execution
+    languages: [python]
+    severity: ERROR
+    message: Notification values must remain argv data.
+    pattern-either:
+      - pattern: os.system(...)
+      - pattern: subprocess.$F(..., shell=True, ...)
+  - id: single-url-broker
+    languages: [generic]
+    severity: ERROR
+    message: Route external navigation through Security.openExternalUrl.
+    pattern: Qt.openUrlExternally(...)
+    paths:
+      include: ["*.qml", "*.js"]
+      exclude: [Security.js, /tests/**, /security/**]
+  - id: no-urllib-fetch
+    languages: [python]
+    severity: ERROR
+    message: Use the pinned-address HTTP client.
+    pattern-either:
+      - pattern: urllib.request.urlopen(...)
+      - pattern: urllib.request.build_opener(...)
+  - id: no-http-unbounded-read
+    languages: [python]
+    severity: ERROR
+    message: All HTTP reads require a byte cap.
+    pattern-either:
+      - pattern: $RESP.read()
+      - pattern: $RESP.read1()
+    paths:
+      include: [/bin/omapager_http.py]

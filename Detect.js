@@ -10,6 +10,7 @@
 // to copy "412" out of "412 passed, 0 failed" makes the whole feature feel
 // like a toy.
 .pragma library
+.import "Security.js" as Security
 
 // A code is only a code if the sender says so. Shape alone is hopeless - four
 // to eight digits is also an order number, a port, a build number, a year, an
@@ -60,7 +61,7 @@ function windows(t) {
       out.push([Math.max(0, m.index - NEAR_BEFORE), m.index + m[0].length + NEAR_AFTER])
     if (re.lastIndex === m.index) re.lastIndex++
   }
-  return out
+  return out.slice(0, Security.MAX_CODES)
 }
 
 function harvest(t, re, seen, out, keep) {
@@ -75,7 +76,7 @@ function harvest(t, re, seen, out, keep) {
 }
 
 function codes(text) {
-  var t = String(text || "")
+  var t = Security.bounded(text, Security.MAX_BODY)
   var spans = windows(t)
   if (!spans.length) return []
 
@@ -89,7 +90,7 @@ function codes(text) {
       return value
     })
   }
-  if (out.length) return out
+  if (out.length) return out.slice(0, Security.MAX_CODES)
 
   for (var j = 0; j < spans.length; j++) {
     harvest(t.slice(spans[j][0], spans[j][1]), CODE_ALNUM, seen, out, function (raw) {
@@ -97,7 +98,7 @@ function codes(text) {
       return (/\d/.test(raw) && /[A-Z]/.test(raw)) ? raw : ""
     })
   }
-  return out
+  return out.slice(0, Security.MAX_CODES)
 }
 
 // Trailing punctuation is almost always the sentence's, not the URL's.
@@ -108,13 +109,14 @@ function tidyUrl(url) {
 function links(text) {
   var out = [], seen = {}, m
   var re = /(https?:\/\/[^\s<>"']+)/g
-  while ((m = re.exec(String(text || ""))) !== null) {
-    var url = tidyUrl(m[1])
+  while ((m = re.exec(Security.bounded(text, Security.MAX_BODY))) !== null) {
+    var url = Security.safeHttpUrl(tidyUrl(m[1]))
+    if (!url) continue
     if (seen[url]) continue
     seen[url] = true
     out.push(url)
   }
-  return out
+  return out.slice(0, Security.MAX_CODES)
 }
 
 // A meeting is a link you are late for, so it gets its own name.
@@ -135,7 +137,7 @@ var PHONE_SHAPES = [
 ]
 
 function phones(text) {
-  var t = String(text || "")
+  var t = Security.bounded(text, Security.MAX_BODY)
   var out = [], seen = {}
   for (var i = 0; i < PHONE_SHAPES.length; i++) {
     var re = PHONE_SHAPES[i], m
@@ -149,7 +151,7 @@ function phones(text) {
       out.push(raw)
     }
   }
-  return out
+  return out.slice(0, Security.MAX_CODES)
 }
 
 // Everything a card might offer, from the text it is going to draw. The body

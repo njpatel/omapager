@@ -11,176 +11,249 @@
  ▀█████▀    ▀█   ███   █▀   ███   █▀    ▀█        ███   █▀    ▀█████▀    ▀███████   ███   █▀
 -->
 
-A notification daemon for [Omarchy](https://omarchy.org). It replaces the
-built-in notification service with a stacking deck that groups by source,
-reads what a notification is actually offering you, and lets you act on it
-without leaving the card.
+A notification daemon for [Omarchy](https://omarchy.org) with grouped
+notifications, inline actions and screen-sharing detection. Replaces the built-in
+notification service and follows your Omarchy theme.
 
-<img src="assets/deck.gif" width="440" alt="Notifications landing and stacking in the corner of the screen">
+<img src="assets/native-card-2x.png" width="410" alt="Original demo notifications from Slack, WhatsApp and GitHub with their source icons">
 
-## What it does
+## Features
 
-**Stacks and groups.** Notifications from the same source collect into one
-deck. Hovering expands it. Nothing is hidden behind a "3 more" summary —
-every notification is a real card you can act on.
+**Screen-sharing detection.** When you share a screen, window or area through
+the Hyprland portal, Omapager offers to snooze notifications for 30 minutes,
+1 hour or 4 hours. Nothing is muted until you choose. You can disable these
+suggestions in preferences.
 
-A body is held to two lines while you are scanning a deck, and opens to its
-full length — up to eight lines — once the deck is expanded, or on hover when
-it is the only card on screen. Phone messages are why: a sentence and a half
-arriving as a sentence and an ellipsis is the commonest way to lose the point
-of a message.
+**Grouped notifications.** Messages from the same source stack together. Hover
+to expand the group and read or act on each notification.
 
-**Reads the contents.** A verification code, a link or a phone number in the
-body becomes a labelled button: `Copy code`, `Open link`, `Copy number`. A mark
-on the headline tells you a card is
-carrying something before you hover, because the useful part of a message is
-usually past the ellipsis.
+<img src="assets/deck.gif" width="410" alt="Slack, WhatsApp and GitHub notifications arriving, grouping and expanding, followed by a Google code notification">
 
-<img src="assets/actions.png" width="369" alt="A card showing a Copy code button">
+[Watch the demo video](assets/deck.mp4).
 
-A message carrying two codes gets a button each, labelled with the digits,
-because "Copy code" twice is a coin toss. Detection is deliberately
-conservative: `412 passed, 0 failed` is not a code, and neither is
-`Claude Code build 1841`.
+**Theme support.** Follows your Omarchy theme.
 
-**Shows the sender's own actions.** The freedesktop spec has carried actions
-all along; most desktops draw none of them. Reply, Mark as read, whatever the
-app offered, appear as buttons on hover.
+**Code, link and phone actions.** Copy verification codes and phone numbers, or
+open links, directly from a notification. Multiple codes get separate buttons.
 
-**Replies to your phone.** Phone notifications reach the desktop through KDE
-Connect, and the ones carrying a reply channel grow a text field on the card.
-The answer goes back to the conversation, and the notification is dismissed on
-the phone too. Nothing new lands and nothing expires while you are typing, so
-the field cannot move out from under you mid-sentence.
+<img src="assets/native-actions-2x.png" width="410" alt="Google verification notification with its source icon, Copy code action and compact close button">
 
-<img src="assets/reply.png" width="369" alt="Typing a reply into a notification">
+**Per-notification actions.** Use app-provided actions such as Mark as read
+without opening the app.
 
-**Sends you back where it came from.** Clicking a card focuses the window that
-source is already showing in — a Slack notification lands in the Chrome you
-already have Slack open in, rather than a new tab — and opens something new
-only when there is nothing to go back to. It can only see the tab a browser is
-actually showing, so a site sitting in a background tab opens fresh.
+**Inline replies.** Reply to supported KDE Connect messages without leaving the
+notification.
 
-**Quietens one source at a time.** Right-click a card and pick how long. It is
-the *source* that goes quiet, not the app that relayed it: snoozing a Slack
-notification that arrived through Chrome silences `app.slack.com` and nothing
-else, and snoozing a noisy shopping app on your phone leaves WhatsApp alone.
-Snoozed notifications are still recorded — they go to history without ever
-being on screen.
+<img src="assets/reply.png" width="410" alt="Local reply demo using Seif Lotfy's original message, a WhatsApp icon and the native reply field">
 
-The panel does the same for everything at once. Both offer the lengths in
-`snoozeDurations`, which are yours to change.
+**Window focus.** Click a notification to focus its app or browser window.
+Web notifications open their source URL when no matching window is available.
 
-**Lets the code through anyway.** A snooze or a silence holds everything back
-except a notification carrying a verification code. You asked for that code
-thirty seconds ago and it expires in five minutes — and being locked out of a
-login because you had quietened Slack is exactly the failure that makes people
-stop snoozing anything. The key beside the panel's snooze button closes the
-hole for the times you want nothing at all. Copying a code dismisses its
-notification; there is nothing left in it afterwards.
+**Snooze and Do Not Disturb.** Right-click a notification to snooze its source.
+Use the panel to snooze everything or toggle Do Not Disturb.
 
-**Shows you what quiet cost.** Silence is only tolerable if you can see what it
-kept from you. While anything is being held back, the panel lists the sources
-that caught something and opens each one to show what it caught, newest first —
-capped at both ends, so a fortnight of silence doesn't turn a panel into a log
-file.
+**Verification-code exception.** Let login codes through while notifications
+are snoozed or silenced. Turn this off with the key button in the panel.
 
-<img src="assets/quiet.png" width="404" alt="The bar indicator and the panel behind it">
+**Held notifications.** Read messages received while a source was snoozed in
+the panel's Held Back section.
 
-**Resolves real icons.** Your own icon themes win; web notifications fall back
-to the site's own icon, in dark and light variants to suit the theme.
+**Recent notifications.** Review recently dismissed or expired notifications
+by expanding Recent in the panel. The list clears when the shell restarts.
+
+**Notification history.** Expand History to read up to 100 closed notifications,
+newest first, including messages held while snoozed or silenced. Unlike Recent,
+this list survives shell restarts and refreshes each time the panel opens.
+Click a card to expand its message, then scroll to read the rest. `historyHours`
+controls retention; `0` disables disk history. Detected verification codes stay
+redacted.
+
+<img src="assets/native-panel-2x.png" width="420" alt="Notification panel with recent messages from the demo scenes">
+
+**Source icons.** Use local icons or fetch missing website icons automatically.
+Set `fetchRemoteIcons` to `false` in the config to disable fetching.
+Sender-provided image files are decoded by a bounded helper and kept in memory
+for the live toast. Rejected files fall back to the resolved source icon.
 
 ## Install
 
+Check the [requirements](#requirements), choose one installation method in
+step 1, then enable Omapager in step 2.
+
+### 1. Install
+
+#### Releases via the marketplace
+
+Find Omapager in the [Omarchy Plugin Marketplace](https://omarchyplugins.com/)
+and run its install command:
+
 ```bash
-git clone https://github.com/njpatel/omapager.git \
+omarchy plugin add https://github.com/njpatel/omapager.git
+```
+
+Until the new stable release is approved, the marketplace installs Git HEAD.
+
+#### Edge via Git
+
+Clone `main` for the latest changes between releases:
+
+```bash
+git clone --branch main https://github.com/njpatel/omapager.git \
   ~/.config/omarchy/plugins/njpatel.omapager
 ```
 
-Then in `~/.config/omarchy/shell.json`, turn off the built-in service, add the
-plugin, and put the indicator in the bar beside the other status glyphs, since
-it behaves like one:
+### 2. Enable Omapager
 
-```json
-{
-  "disabledPlugins": ["omarchy.notifications"],
-  "plugins": [{ "id": "njpatel.omapager" }],
-  "bar": { "layout": { "center": ["omarchy.indicators", "njpatel.omapager", "omarchy.clock"] } }
-}
-```
-
-`omarchy-restart-shell` to pick it up. (Not `omarchy-refresh-shell` — that
-resets `shell.json` to defaults.)
-
-### Removing it
+After either installation method, disable the built-in notification service and
+enable Omapager. Only one notification daemon can run at a time.
 
 ```bash
-omarchy plugin remove njpatel.omapager
+omarchy-shell shell rescanPlugins
+omarchy plugin disable omarchy.notifications
+omarchy plugin enable njpatel.omapager --section center --after omarchy.indicators
+omarchy restart shell
 ```
 
-Then undo the three lines above: take `omarchy.notifications` back out of
-`disabledPlugins` so the built-in service can claim the bus again, and drop
-`njpatel.omapager` from the bar layout. `omarchy-restart-shell` to apply.
+### Updates
 
-State is left behind on purpose, in case you are only reinstalling —
-`rm -rf ~/.local/state/omarchy/omapager` clears the history and the resolved
-icons for good.
+Use the marketplace for release updates. For an edge checkout:
+
+```bash
+git -C ~/.config/omarchy/plugins/njpatel.omapager pull --ff-only
+omarchy restart shell
+```
+
+[Release notes](https://github.com/njpatel/omapager/releases) describe each update.
+Do not use `omarchy refresh shell`, which resets your shell configuration.
+
+### Remove Omapager
+
+```bash
+omarchy plugin disable njpatel.omapager
+omarchy plugin remove njpatel.omapager
+omarchy plugin enable omarchy.notifications
+omarchy restart shell
+```
+
+Removal keeps notification history, icon cache and other state in
+`~/.local/state/omarchy/omapager/`. Delete that directory separately if you also
+want to remove the stored data.
 
 ## Settings
 
-| key | default | what it does |
+Open the panel and click the settings cog to choose a notification display,
+toggle countdown animation or control screen-sharing snooze suggestions.
+
+<img src="assets/display-settings-2x.png" width="420" alt="Notification preferences for display, countdown animation and screen-sharing snooze suggestions">
+
+Changes save to the `njpatel.omapager` bar-widget entry in
+`~/.config/omarchy/shell.json`. You can edit the other options there too.
+`edgeSpacing`, `fetchRemoteIcons` and `requireSandbox` are config-only. Defaults
+below apply to new configurations, not choices you have already saved.
+
+### Omapager options
+
+| Option | Default | Purpose |
 | --- | --- | --- |
-| `stacking` | `source` | `source` gives each sender its own deck; `all` puts everything in one |
-| `actionsAlign` | `right` | which end of a card its buttons sit at |
-| `hideSettingsAction` | `true` | drop the browser's "Settings" button, which is on every web notification and is never the one you wanted |
-| `snoozeDurations` | `30, 60, 240, tomorrow` | what the snooze menus offer — minutes, or `tomorrow` |
-| `wakeHour` | `8` | the hour "until tomorrow" wakes a source at |
-| `smartRaise` | `true` | match a site against browser window titles, so a click lands in the window already showing it |
-| `alwaysShow` | `false` | keep the bar slot even when nothing is held back, so the centre of the bar never shifts |
-| `codesBypassQuiet` | `true` | let a notification carrying a verification code through a snooze or a silence |
-| `timeFormat` | `system` | `system` follows `LC_TIME`; `24h` and `12h` pin it |
-| `sourceLimit` | `8` | how many quietened sources the panel lists |
-| `heldPerSource` | `10` | how many held notifications it shows per source |
+| `stacking` | `source` | `source` gives each sender a deck. `all` uses one deck. |
+| `displayMode` | `active` | `active` follows focus for new decks. `specific` uses `displayName`. `all` mirrors notifications. Visible decks stay put in active mode. |
+| `displayName` | empty | Output for specific mode, such as `DP-1`. Omapager keeps the selection while disconnected and falls back to a connected display. |
+| `edgeSpacing` | `12` | Gap from the bar and screen edges, in logical pixels from 0 to 64. Config-only. |
+| `showCountdown` | `false` | Show the time-remaining animation. Turning it off does not change expiry. |
+| `offerSnoozeWhenSharing` | `true` | Suggest a timed snooze when portal sharing starts. Never mute automatically. |
+| `fontScale` | `100` | Notification text size as a percentage, from 75 to 200. Does not resize bar or panel text. |
+| `actionsAlign` | `right` | Align action buttons to the `right` or `left`. |
+| `hideSettingsAction` | `true` | Hide the browser's repeated Settings action. |
+| `snoozeDurations` | `30, 60, 240, tomorrow` | Offer `15`, `30`, `60`, `120`, `240` or `480` minutes, or `tomorrow`. An empty selection uses the defaults. |
+| `wakeHour` | `8` | Wake hour for `tomorrow`, from 0 to 23. Currently `0` falls back to `8`. |
+| `smartRaise` | `true` | Match notification websites against browser window titles when focusing a window. |
+| `alwaysShow` | `false` | Keep the bar indicator visible when nothing is held back. |
+| `codesBypassQuiet` | `true` | Let verification codes through snooze and Do Not Disturb. |
+| `timeFormat` | `system` | Use the `LC_TIME` locale, or choose `24h` or `12h`. |
+| `sourceLimit` | `8` | Number of quietened sources listed in the panel, from 2 to 20. |
+| `heldPerSource` | `10` | Held notifications shown per source, from 3 to 25. |
+| `recentCount` | `5` | Recent notifications shown in the panel, from 1 to 20. Clears on shell restart. |
+| `fetchRemoteIcons` | `true` | Fetch missing website icons. Turning it off keeps local and validated cached icons. Requires Pillow. Config-only. |
+| `requireSandbox` | `false` | Require Bubblewrap instead of allowing helpers to run directly when it is unavailable. Config-only. |
+| `allowDefaultActionOnCardClick` | `false` | Allow the app's default action on a card click. Explicit action buttons remain available when off. |
+| `historyHours` | `24` | Keep disk history for `1`, `24` or `168` hours, with a 100-entry cap. `0` disables it. |
+| `clipboardTimeout` | `60` | Clear copied codes after `30`, `60` or `90` seconds, unless the clipboard has changed. |
 
-Every history entry is the text of a message somebody sent you, so it is
-trimmed by age as well as count: **7 days or 200 entries**, whichever comes
-first. Resolved icons are dropped after 60 days unused, and nothing is ever
-written to the system log.
-
-Settings live on the bar widget's entry in `shell.json`, all in one place
-next to `id`:
+Add options to the existing widget entry. This example is not a complete
+`shell.json` file:
 
 ```json
-{ "id": "njpatel.omapager", "snoozeDurations": ["60", "480"], "wakeHour": 9 }
+{
+  "id": "njpatel.omapager",
+  "edgeSpacing": 12,
+  "showCountdown": false,
+  "fontScale": 100,
+  "historyHours": 24
+}
 ```
+
+### Appearance inherited from Omarchy
+
+Theme overrides belong in `~/.config/omarchy/shell.toml`, not the plugin's
+`shell.json` entry. Your overrides take precedence over the active theme and
+apply to other Omarchy components that use the same settings.
+
+| Appearance | Omarchy setting |
+| --- | --- |
+| Notification colours | `[notifications]` background, text, border and countdown colours |
+| Card border width | `[notifications] border-width`, including per-side overrides. The fallback is 2 logical pixels at the default scale, as in stock notifications. |
+| Panel colours and border | `[popups]` |
+| Corner rounding | Hyprland's `decoration:rounding` |
+| Text sizes | `[font]`. Titles and message text use Liberation Sans. Controls use the shared UI font. |
+| Button and switch states | `[controls]` |
+| Internal spacing and padding | `[spacing]` |
+
+For example, set the notification border width in `~/.config/omarchy/shell.toml`:
+
+```toml
+[notifications]
+border-width = 2
+```
+
+The `edgeSpacing` option is separate from Omarchy's outer gaps. It keeps the
+configured distance regardless of the theme's spacing scale or Hyprland's
+`general:gaps_out`. At 2x display scaling, 12 logical pixels occupy 24 physical
+pixels.
+
+### Sharing detection
+
+Omapager detects screen, window and area sharing through the Hyprland portal.
+It uses stream metadata, not your screen content. Click the sharing indicator
+to snooze for 30 minutes, 1 hour or 4 hours, or choose Not now.
+
+An existing global snooze or Do Not Disturb suppresses the offer. Each sharing
+period gets one offer, even with multiple streams. A chosen snooze lasts for its
+selected duration, regardless of when sharing ends. Critical alerts and the
+configured verification-code exception still apply.
+
+Portal-based recording can trigger detection. Screenshots, direct VNC capture and
+apps that bypass the portal do not. Omapager tracks up to 64 video-source nodes.
+Restarting the shell during a share can show the offer again. Disable suggestions
+in preferences or set `offerSnoozeWhenSharing` to `false`.
 
 ## The bar
 
-omapager takes a slot in the bar only while it is keeping something from you,
-and nothing at all the rest of the time. Hovering the centre of the bar reveals
-it, the way Omarchy reveals its own inactive indicators — that is the way back
-into silence when nothing is showing.
+The indicator appears while notifications are held back or a sharing offer is
+waiting. Hover the centre of the bar to reveal it at other times.
 
-| | |
+| Indicator | Meaning |
 | --- | --- |
-| crossed-out bell, in the theme's urgent colour | silenced |
-| bell with a `z` in it, in amber | snoozed — everything, or a source |
-| crossed-out bell, dimmed | nothing held back |
+| Crossed-out bell in the urgent colour | Do Not Disturb |
+| Sleeping bell in the accent colour | A source or all notifications are snoozed |
+| Sharing icon in the accent colour | Sharing detected. Click to choose a snooze. |
+| Dimmed bell | Nothing held back |
 
-Same crossed-out bell as Omarchy's own indicator, so a silenced desktop looks
-the same whichever service is running. Amber rather than red for a snooze,
-because a snooze ends by itself.
-
-**Left-click** silences and unsilences. **Right-click** opens the panel: the
-switch, a button beside it that snoozes everything for a while, and the list of
-what is being kept from you — when each source comes back, how much it has
-caught, and the messages themselves when you open one.
+Left-click the bell to silence or resume notifications. Right-click to open the
+panel for Recent, History, held messages and snooze controls.
 
 ## Keybindings
 
-Omarchy's five stock bindings on the comma key keep working unchanged.
-omapager answers the same IPC target the built-in service did, so there is
-nothing to rebind and nothing to configure:
+Omarchy's existing comma-key shortcuts work without configuration:
 
 | | |
 | --- | --- |
@@ -190,31 +263,28 @@ nothing to rebind and nothing to configure:
 | `SUPER` `ALT` `,` | invoke the newest one, as clicking it would |
 | `SUPER` `SHIFT` `ALT` `,` | put the last few back on screen |
 
-### Worth adding
+Omarchy screenshot toasts carry `omarchy-exec-argv`. Click and Super+Alt+, run that editor.
 
-Three things the stock bindings have no key for. All three are free on a stock
-install — check yours with `omarchy menu keybindings --print`, and `hl.unbind`
-first if you have moved things around.
+### Optional bindings
 
-In `~/.config/hypr/bindings.lua`:
+Check for conflicts with `omarchy menu keybindings --print` before adding these
+to `~/.config/hypr/bindings.lua`. Use `hl.unbind` to remove a conflicting binding.
 
 ```lua
--- Copy a code without touching the mouse. The notification takes itself away.
+-- Copy the newest code and dismiss its notification.
 o.bind("SUPER + ALT + C", "Copy code from newest notification",
        "omarchy-shell omapager offer code")
 
--- Next to SUPER + CTRL + comma, which silences. Quiet for an hour, rather
--- than quiet until you remember you turned it off.
+-- Snooze all sources for an hour.
 o.bind("SUPER + CTRL + ALT + comma", "Snooze all notifications for an hour",
        "omarchy-shell omapager snoozeAll 60")
 
--- What is snoozed, what it has held, and the way back. Worth a key: the bar
--- icon is not there at all when nothing is being held back.
+-- Toggle the notification panel.
 o.bind("SUPER + CTRL + SHIFT + comma", "Notification options",
        "omarchy-shell omapager.panel toggle")
 ```
 
-## Driving it from a script
+## Scripting
 
 ```
 omarchy-shell omapager count            how many are on screen
@@ -231,48 +301,115 @@ omarchy-shell omapager unsnooze ""      wake everything ("" for all, or a source
 omarchy-shell omapager snoozes          what is snoozed, and until when
 omarchy-shell omapager stack source     switch stacking mode
 omarchy-shell omapager align right      switch which end the buttons sit at
-omarchy-shell omapager probe            what the daemon believes, as JSON
+omarchy-shell omapager probe            show runtime configuration and helper status as JSON
 
 omarchy-shell omapager.panel toggle     the panel
 omarchy-shell omapager.panel expand x   open a source's held list, as clicking it would
+omarchy-shell omapager.panel openSettings  notification preferences
 ```
 
-## Seeing it work
+## Demo
 
 ```bash
 bin/omapager-demo                       # the everyday scenes
 bin/omapager-demo --scene interactive   # codes, links, and the sender's buttons
 bin/omapager-demo --scene routing       # where a click sends you, per source
-bin/omapager-demo --scene reply         # inline reply, against a stand-in phone
+bin/omapager-demo --scene reply --keep --timeout 30000  # local inline-reply demo
+bin/omapager-demo --scene close         # dismiss a stack without moving the pointer
 bin/omapager-demo --replay 40           # your own notifications, re-sent
 bin/omapager-demo --list
 ```
 
-`--scene routing` reads your open windows and prints what each card *should*
-do before it sends anything, so you can check it against what happens.
-`--scene reply` writes a fixture the daemon treats as a repliable notification
-and logs the reply to a file rather than sending it to a person.
+The demos use the original named conversations and source icons. Add `--keep`
+to leave existing notifications on screen.
+
+The routing scene lists the window or URL each notification should open. The
+reply scene lets you type and send a reply without contacting a phone. It saves
+the latest reply in `~/.local/state/omarchy/omapager/reply-demo/reply.json`.
+Each run creates a new demo session, which expires after 30 minutes.
+
+`--scene close` keeps three cards on screen with live default actions. Repeatedly
+click the front close control without moving the pointer, waiting for each card
+to settle. All three should dismiss; any `default` output means a card opened
+instead.
+For the default-action check, enable `allowDefaultActionOnCardClick` in the
+lab's widget settings first; strict mode does not invoke default actions on
+card-body clicks.
+
+## Security
+
+### Automatic website icons
+
+Omapager checks local icons and its cache before fetching from a website.
+Website-icon fetching is on by default. Set `"fetchRemoteIcons": false` in the
+widget's `shell.json` entry to stop requests and cancel the active lookup.
+Local and validated cached icons still work. Saved opt-outs survive upgrades.
+
+Requests expose your IP and request time to the source website and its icon
+hosts. They contain no notification text, verification codes, browser cookies or
+authentication headers. Omapager does not use a third-party favicon service or
+guess parent domains.
+
+These protections apply with or without Bubblewrap:
+
+- HTTPS on port 443 with TLS 1.2 or newer. Omapager rejects URL credentials,
+  IP literals and local or private destinations.
+- Every DNS answer must be public. Connections use those checked addresses,
+  with certificate validation for the original hostname.
+- Redirects and icon URLs receive the same checks. Proxy environment variables
+  cannot bypass them.
+- Downloads have redirect, byte and time limits. Pillow validates image formats
+  and dimensions, then re-encodes icons as small PNGs. Remote SVGs are rejected.
+
+Keep Python, Pillow and the system libraries updated. These checks do not protect
+against another process running as your user and modifying the local cache.
+
+### Optional helper sandbox
+
+Storage, icon and KDE Connect helpers use Bubblewrap when its startup check
+succeeds. Otherwise they run directly as your user, with your account's normal
+filesystem and network access. Input validation and resource limits still apply.
+
+Set `"requireSandbox": true` in the widget's `shell.json` entry to block helpers
+when sandboxing is unavailable. This affects persistence, icon lookup and phone
+replies. The saved policy applies before startup helpers run. A failed helper
+is never retried without its sandbox.
+
+Sandboxed helpers receive access to the files they need. Remote icons still need
+network access, and KDE Connect receives the session bus without destination
+filtering. Bubblewrap does not isolate the QML shell itself.
+
+Run `omarchy-shell omapager probe` to check whether helpers use `sandboxed`,
+`direct` or `blocked` mode. See [the security architecture](docs/SECURITY_ARCHITECTURE.md)
+for the exact limits and access rules.
+
+### Stored notifications and clipboard
+
+Disk history defaults to 24 hours and 100 entries. Omapager redacts detected
+verification-code notifications before saving them, but detection cannot identify
+every secret. Copied codes clear after the configured timeout only if the
+clipboard still contains the same code.
+
+State lives in `~/.local/state/omarchy/omapager/`. See [settings](#settings) for
+retention and clipboard options, and [SECURITY.md](SECURITY.md) to report a
+vulnerability.
 
 ## Requirements
 
-Omarchy (Quickshell 0.3.x, Hyprland), and Python 3 for the helpers in `bin/`.
+- Omarchy with Quickshell 0.3.x and Hyprland.
+- Python 3 for the helpers.
+- Pillow, packaged as `python-pillow`, for remote website icons and sender-provided
+  image files. Without it, sender files fall back to local theme icons.
+- Bubblewrap, packaged as `bubblewrap`, is optional unless `requireSandbox` is on.
+- `wl-clipboard` is recommended for sensitive clipboard handling.
+- KDE Connect and its phone app are required for phone notifications and replies.
 
-Two more things are worth having, and they are not the same kind of thing.
+See [Security](#security) for icon-fetching and sandbox behaviour.
 
-**`wl-clipboard` — recommended.** Not an Omarchy dependency, so check before you
-assume it: `command -v wl-copy`. The copy buttons work either way, but with it a
-copied verification code is marked sensitive and Omarchy's clipboard history
-skips it. Either way the code is cleared again 90 seconds later, unless you have
-copied something else since — that stays.
+## Contributing
 
-**KDE Connect — the whole phone half.** Without it there are no phone
-notifications at all: it is the bridge that puts them on the bus in the first
-place, so the reply field, `Mark as read` and the grouping by the app a message
-really came from all go with it.
-
-```bash
-sudo pacman -S wl-clipboard kdeconnect   # kdeconnect also needs the phone app
-```
+See [how we review contributions](docs/DEVELOPING.md#how-we-review-contributions)
+and the [development guide](docs/DEVELOPING.md) for working on omapager.
 
 ## Licence
 

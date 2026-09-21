@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "njpatel.omapager",
   "name": "Omapager",
-  "version": "0.1.0",
+  "version": "1.1.1",
   "author": "Neil Jagdish Patel",
   "license": "MIT",
   "description": "Notifications for Omarchy: a stacking, grouping replacement for the built-in service, with markup parsing, resolved source icons, inline reply, and per-source snooze.",
@@ -18,7 +18,7 @@
   },
   "barWidget": {
     "displayName": "Notification state",
-    "description": "Appears only when notifications are being held back: crossed-out bell when silenced, zzz when a source is snoozed. Click silences, right-click opens a panel to wake sources or snooze them for longer.",
+    "description": "Appears when notifications are being held back or a detected share is waiting for a snooze decision. Click the sharing indicator to choose a timed snooze; notification delivery is never changed automatically.",
     "category": "Status",
     "aliases": [
       "notifications",
@@ -41,48 +41,77 @@
       "wakeHour": 8,
       "sourceLimit": 8,
       "heldPerSource": 10,
+      "recentCount": 5,
       "alwaysShow": false,
       "codesBypassQuiet": true,
       "timeFormat": "system",
-      "smartRaise": true
+      "smartRaise": true,
+      "displayMode": "active",
+      "displayName": "",
+      "edgeSpacing": 12,
+      "showCountdown": false,
+      "offerSnoozeWhenSharing": true,
+      "fetchRemoteIcons": true,
+      "requireSandbox": false,
+      "allowDefaultActionOnCardClick": false,
+      "historyHours": 24,
+      "clipboardTimeout": 60,
+      "fontScale": 100
     },
     "schema": [
       {
         "key": "stacking",
         "type": "enum",
-        "label": "Live notifications stack",
+        "label": "Notification grouping",
         "options": [
           "all",
           "source"
         ],
         "defaultValue": "source",
-        "description": "all = one deck in the corner, same-source notifications grouped inside it; source = a separate deck per source, each expanding on its own."
+        "description": "Use one notification group or a separate group for each source."
       },
       {
         "key": "actionsAlign",
         "type": "enum",
-        "label": "Notification buttons",
+        "label": "Action button alignment",
         "options": [
           "right",
           "left"
         ],
         "defaultValue": "right",
-        "description": "Which end of a card its action buttons sit at."
+        "description": "Align action buttons to the left or right."
+      },
+      {
+        "key": "showCountdown",
+        "type": "boolean",
+        "label": "Show countdown animation",
+        "description": "Animate the time remaining along the bottom of notifications. Notifications still expire normally when this is off.",
+        "defaultValue": false
+      },
+      {
+        "key": "fontScale",
+        "type": "integer",
+        "label": "Notification font size (%)",
+        "description": "Scale notification text, action buttons and inline replies relative to the theme. 100 follows the theme; the bar and panel keep their usual sizes.",
+        "min": 75,
+        "max": 200,
+        "step": 5,
+        "defaultValue": 100
       },
       {
         "key": "hideSettingsAction",
         "type": "boolean",
         "label": "Hide the browser's Settings button",
         "defaultValue": true,
-        "description": "Chrome puts a Settings action on every web notification. It is the same button on every card and it crowds out the ones that are worth pressing."
+        "description": "Hide the repeated Settings action on browser notifications."
       },
       {
         "key": "snoozeDurations",
         "type": "multiselect",
-        "label": "Snooze lengths",
-        "description": "What the snooze menus offer, on a card and in the panel. A desktop where half an hour is the useful unit and one where half a day is are both real.",
+        "label": "Snooze durations",
+        "description": "Choose the durations available in notification and panel snooze menus.",
         "noSelectionText": "30 minutes, 1 hour, 4 hours, until tomorrow",
-        "placeholderText": "Search lengths...",
+        "placeholderText": "Search durations...",
         "options": [
           {
             "value": "15",
@@ -134,7 +163,7 @@
         "key": "sourceLimit",
         "type": "integer",
         "label": "Sources listed in the panel",
-        "description": "How many quietened sources the panel lists at once. A fortnight of silence should not turn it into a log file.",
+        "description": "Maximum number of snoozed sources listed in the panel.",
         "min": 2,
         "max": 20,
         "step": 1,
@@ -144,44 +173,112 @@
         "key": "heldPerSource",
         "type": "integer",
         "label": "Held notifications shown per source",
-        "description": "How many of the notifications a source held back the panel will show when you open it.",
+        "description": "Maximum number of held notifications shown for each source.",
         "min": 3,
         "max": 25,
         "step": 1,
         "defaultValue": 10
       },
       {
+        "key": "recentCount",
+        "type": "integer",
+        "label": "Recent notifications in the panel",
+        "description": "Number of recent notifications shown when Recent is expanded. Clears on shell restart.",
+        "min": 1,
+        "max": 20,
+        "step": 1,
+        "defaultValue": 5
+      },
+      {
         "key": "alwaysShow",
         "type": "boolean",
-        "label": "Always show",
-        "description": "Keep the slot in the bar even when nothing is being held back. The icon appearing is the one moment the bar's centre shifts; this trades a permanently dim bell for a clock that never moves.",
+        "label": "Always show indicator",
+        "description": "Keep the bar indicator visible when no notifications are held.",
         "defaultValue": false
       },
       {
         "key": "codesBypassQuiet",
         "type": "boolean",
-        "label": "Let verification codes through",
-        "description": "A snooze or a silence holds everything back except a notification carrying a verification code. You asked for that code thirty seconds ago and it expires in five minutes, so \"I'll look later\" does not apply to it.",
+        "label": "Allow verification codes during quiet mode",
+        "description": "Allow verification-code notifications during snooze and Do Not Disturb.",
         "defaultValue": true
       },
       {
         "key": "timeFormat",
         "type": "enum",
-        "label": "Clock",
+        "label": "Time format",
         "options": [
           "system",
           "24h",
           "12h"
         ],
         "defaultValue": "system",
-        "description": "How wake times are written. system follows LC_TIME; Omarchy's own clock widget takes an explicit format string instead, so pin this if the two disagree."
+        "description": "Use the system time format, 24-hour time or 12-hour time."
       },
       {
         "key": "smartRaise",
         "type": "boolean",
-        "label": "Raise the window a site is open in",
-        "description": "Match a notification's site against browser window titles, so a Slack notification lands in the browser already showing Slack rather than opening a new tab. Off, only a window whose class carries the site is raised.",
+        "label": "Match browser window titles",
+        "description": "Match notification websites to browser window titles when focusing a window.",
         "defaultValue": true
+      },
+      {
+        "key": "displayMode",
+        "type": "enum",
+        "label": "Notification display",
+        "options": [
+          "active",
+          "specific",
+          "all"
+        ],
+        "defaultValue": "active",
+        "description": "Use the active display, a selected output or all displays."
+      },
+      {
+        "key": "displayName",
+        "type": "string",
+        "label": "Specific monitor output name",
+        "defaultValue": "",
+        "description": "Output name for specific-display mode. The selection is retained while disconnected."
+      },
+      {
+        "key": "offerSnoozeWhenSharing",
+        "type": "boolean",
+        "label": "Suggest snooze during screen sharing",
+        "defaultValue": true,
+        "description": "Offer a timed snooze when screen sharing starts. Notifications are not muted automatically."
+      },
+      {
+        "key": "allowDefaultActionOnCardClick",
+        "type": "boolean",
+        "label": "Invoke app action on card click",
+        "description": "Compatibility option. Strict mode focuses a known window or opens a validated source URL; app actions have explicit buttons.",
+        "defaultValue": false
+      },
+      {
+        "key": "historyHours",
+        "type": "enum",
+        "label": "History retention",
+        "description": "0 disables history; otherwise 1, 24 or 168 hours. Maximum 100 entries.",
+        "defaultValue": 24,
+        "options": [
+          0,
+          1,
+          24,
+          168
+        ]
+      },
+      {
+        "key": "clipboardTimeout",
+        "type": "enum",
+        "label": "Clear copied codes after",
+        "description": "Seconds, only when the clipboard still contains the copied code.",
+        "defaultValue": 60,
+        "options": [
+          30,
+          60,
+          90
+        ]
       }
     ]
   }
