@@ -276,4 +276,4 @@ sudo pacman -S wl-clipboard kdeconnect   # kdeconnect also needs the phone app
 
 ## Licence
 
-Apache-2.0.
+MIT. See [LICENSE](LICENSE).
