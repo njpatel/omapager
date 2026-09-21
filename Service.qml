@@ -113,9 +113,10 @@ Item {
   readonly property string configuredDisplayName: displayMode === "specific" && displayNames.indexOf(displayName) >= 0
     ? displayName : focusedDisplayName
   readonly property string targetDisplayName: {
-    if (displayMode === "specific" && displayNames.indexOf(displayName) >= 0) return configuredDisplayName
-    if (displayNames.indexOf(deckDisplayName) >= 0) return deckDisplayName
-    return focusedDisplayName
+    var wanted = focusedDisplayName
+    if (displayMode === "specific" && displayNames.indexOf(displayName) >= 0) wanted = configuredDisplayName
+    else if (displayNames.indexOf(deckDisplayName) >= 0) wanted = deckDisplayName
+    return routeAround(wanted)
   }
   // A live deck stays put while focus moves. Losing that display moves it to
   // a usable one; a configured specific display remains selected for replug.
@@ -126,7 +127,7 @@ Item {
   onDisplayModeChanged: { if (toasts.count > 0) deckDisplayName = configuredDisplayName }
   onDisplayNameChanged: { if (displayMode === "specific" && toasts.count > 0) deckDisplayName = configuredDisplayName }
   function pinDeckDisplay() {
-    if (toasts.count === 0) deckDisplayName = configuredDisplayName
+    if (toasts.count === 0) deckDisplayName = routeAround(configuredDisplayName)
   }
 
   // A verification code is the one thing quiet cannot afford to swallow: you
@@ -215,6 +216,102 @@ Item {
   readonly property int notificationWidth: Style.space(380)
   property int edgeSpacing: 12
   property bool showCountdown: false
+
+  // Fullscreen windows and the always-mapped surface (see the surface below).
+  // Hyprland refuses direct scanout while any overlay-layer surface exists on a
+  // monitor, whether or not it draws anything (CMonitor::isSolitaryBlocked), so
+  // the idle canvas makes every fullscreen game composite each frame.
+  //   "off"        - keep the canvas mapped, as before
+  //   "all"        - step aside under any fullscreen window; come back for a card
+  //   "steam"      - the same, only under Steam games (class steam_app_<id>)
+  //   "all-away"   - step aside under any fullscreen window and stay away: cards
+  //                  go to another display, or wait in Recent if there is none
+  //   "steam-away" - the same, only under Steam games
+  property string fullscreenOverlay: "off"
+  readonly property string fullscreenScope: fullscreenOverlay.indexOf("steam") === 0 ? "steam"
+    : fullscreenOverlay.indexOf("all") === 0 ? "all" : ""
+  readonly property bool fullscreenAway: fullscreenScope !== "" && /-away$/.test(fullscreenOverlay)
+  // Bumped once Hyprland's window snapshot has been refreshed, so bindings that
+  // read it through fullscreenOn() re-evaluate.
+  property int hyprRevision: 0
+  onFullscreenOverlayChanged: hyprRefresh.restart()
+
+  // Per output, for `probe`: is the canvas mapped, stepping aside, showing cards?
+  function surfaceStates() {
+    var out = []
+    var list = surfaceVariants.instances
+    for (var i = 0; i < list.length; i++) {
+      var s = list[i]
+      out.push({ display: s.modelData ? String(s.modelData.name) : "", mapped: s.visible === true,
+                 stepAside: s.stepAside === true, showing: s.showingNotifications === true,
+                 lingering: s.lingering === true })
+    }
+    return out
+  }
+
+  // Is this display showing a fullscreen window the current scope cares about?
+  function fullscreenOn(name) {
+    var revision = hyprRevision
+    if (fullscreenScope === "" || !name) return false
+    var screen = null
+    for (var s = 0; s < Quickshell.screens.length; s++)
+      if (String(Quickshell.screens[s].name) === name) screen = Quickshell.screens[s]
+    var monitor = screen ? Hyprland.monitorFor(screen) : null
+    var workspace = monitor ? monitor.activeWorkspace : null
+    if (!workspace || !workspace.hasFullscreen) return false
+    var windows = workspace.toplevels ? workspace.toplevels.values : []
+    for (var i = 0; i < windows.length; i++) {
+      var ipc = windows[i].lastIpcObject || {}
+      // A workspace also reports maximized windows as fullscreen. Only a real
+      // fullscreen (mode bit 2) can be scanned out, and stepping aside for a
+      // maximized window would only hide notifications for nothing.
+      if ((Number(ipc.fullscreen) & 2) === 0) continue
+      if (fullscreenScope === "all") return true
+      var appClass = String(ipc["class"] || "")
+      if (appClass === "" && windows[i].wayland) appClass = String(windows[i].wayland.appId || "")
+      if (/^steam_app_\d+$/.test(appClass)) return true
+    }
+    return false
+  }
+
+  function stepsAsideOn(screen) { return screen ? fullscreenOn(String(screen.name)) : false }
+
+  // The "-away" modes never put a card on a display showing a qualifying
+  // fullscreen window. routeAround() returns the display to use instead: the
+  // focused one if it is clear, else the first clear one, else "" - and a card
+  // with no display waits in Recent.
+  function awayFrom(name) { return fullscreenAway && fullscreenOn(name) }
+  function routeAround(name) {
+    if (!awayFrom(name)) return name
+    if (focusedDisplayName !== name && !awayFrom(focusedDisplayName)) return focusedDisplayName
+    for (var i = 0; i < displayNames.length; i++)
+      if (!awayFrom(displayNames[i])) return displayNames[i]
+    return ""
+  }
+
+  Connections {
+    target: Hyprland
+    function onRawEvent(event) {
+      if (service.fullscreenOverlay === "off") return
+      switch (event.name) {
+      case "fullscreen": case "openwindow": case "closewindow": case "movewindowv2":
+      case "activewindowv2": case "workspacev2": case "focusedmonv2": case "changefloatingmode":
+        hyprRefresh.restart()
+      }
+    }
+  }
+  // A game going fullscreen emits a burst of events: refresh once, then let the
+  // IPC answer land before bindings look at it again.
+  Timer {
+    id: hyprRefresh
+    interval: 100
+    onTriggered: { Hyprland.refreshToplevels(); hyprSettle.restart() }
+  }
+  Timer {
+    id: hyprSettle
+    interval: 250
+    onTriggered: service.hyprRevision++
+  }
 
   // Clear the bar only on the edge it occupies; keep the configured gap on
   // both edges of the top-right notification deck.
@@ -1895,9 +1992,13 @@ Item {
         displayMode: service.displayMode, displayName: service.displayName,
         displays: service.displayNames, focusedDisplay: service.focusedDisplayName,
         targetDisplay: service.targetDisplayName,
-        notificationDisplays: service.displayMode === "all" ? service.displayNames : [service.targetDisplayName]})
+        notificationDisplays: service.displayMode === "all" ? service.displayNames : [service.targetDisplayName],
+        fullscreenOverlay: service.fullscreenOverlay, surfaces: service.surfaceStates(),
+        avoidedDisplays: service.displayNames.filter(function(n) { return service.awayFrom(n) })})
     }
     function clear(): string { service.clearAll("cleared"); return "ok" }
+    // Re-reads Hyprland's window list now, for a test that cannot wait on events.
+    function refreshFullscreen(): string { hyprRefresh.restart(); return "ok" }
     function dnd(): string {
       service.doNotDisturb = !service.doNotDisturb
       return service.doNotDisturb ? "on" : "off"
@@ -2126,13 +2227,15 @@ Item {
   // compositor rescaling while cards enter or leave; the mask keeps everything
   // outside the deck click-through.
   Variants {
+    id: surfaceVariants
     model: Quickshell.screens
 
     PanelWindow {
       id: surface
       required property var modelData
       screen: modelData
-      readonly property bool showingNotifications: service.displayMode === "all" || modelData.name === service.targetDisplayName
+      readonly property bool showingNotifications: (service.displayMode === "all" && !service.awayFrom(String(modelData.name)))
+        || modelData.name === service.targetDisplayName
       // Always mapped, even with nothing to draw. It used to appear with the
       // first notification and vanish with the last, and a layer surface
       // coming and going makes the compositor re-evaluate focus each time -
@@ -2143,7 +2246,23 @@ Item {
       //
       // Input is unaffected: the mask follows the deck, and an empty deck is a
       // zero-area mask, which is click-through everywhere.
-      visible: true
+      //
+      // Except under a fullscreen window when `fullscreenOverlay` asks it to step
+      // aside: any overlay-layer surface blocks Hyprland's direct scanout, so the
+      // canvas unmaps while there is nothing to draw and maps again for the next
+      // card. The focus re-evaluation above only moves a scrolling viewport, and
+      // a fullscreen window has none to move.
+      readonly property bool stepAside: service.stepsAsideOn(modelData)
+      readonly property bool hasSomethingToShow: showingNotifications
+        && (toasts.count > 0 || service.replyingKey !== "")
+      // Holds the canvas for the last card's exit animation.
+      property bool lingering: false
+      onHasSomethingToShowChanged: {
+        if (hasSomethingToShow) lingering = false
+        else { lingering = true; lingerTimer.restart() }
+      }
+      Timer { id: lingerTimer; interval: 800; onTriggered: surface.lingering = false }
+      visible: !stepAside || hasSomethingToShow || lingering
       color: "transparent"
 
       // The name the Hyprland layer_rule matches on for blur.

@@ -50,6 +50,7 @@
       "displayName": "",
       "edgeSpacing": 12,
       "showCountdown": false,
+      "fullscreenOverlay": "off",
       "offerSnoozeWhenSharing": true,
       "fetchRemoteIcons": true,
       "requireSandbox": false,

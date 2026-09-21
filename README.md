@@ -142,7 +142,8 @@ want to remove the stored data.
 ## Settings
 
 Open the panel and click the settings cog to choose a notification display,
-toggle countdown animation or control screen-sharing snooze suggestions.
+choose when to step aside for fullscreen windows, toggle countdown animation or
+control screen-sharing snooze suggestions.
 
 <img src="assets/display-settings-2x.png" width="420" alt="Notification preferences for display, countdown animation and screen-sharing snooze suggestions">
 
@@ -158,6 +159,7 @@ below apply to new configurations, not choices you have already saved.
 | `stacking` | `source` | `source` gives each sender a deck. `all` uses one deck. |
 | `displayMode` | `active` | `active` follows focus for new decks. `specific` uses `displayName`. `all` mirrors notifications. Visible decks stay put in active mode. |
 | `displayName` | empty | Output for specific mode, such as `DP-1`. Omapager keeps the selection while disconnected and falls back to a connected display. |
+| `fullscreenOverlay` | `off` | Step aside for fullscreen windows so the compositor can scan them out directly. `all` steps aside for any fullscreen window, `steam` only for Steam games (`steam_app_*`); both come back to show a notification. `all-away` and `steam-away` never cover the fullscreen display and send notifications to another display, or to history when there is none. |
 | `edgeSpacing` | `12` | Gap from the bar and screen edges, in logical pixels from 0 to 64. Config-only. |
 | `showCountdown` | `false` | Show the time-remaining animation. Turning it off does not change expiry. |
 | `offerSnoozeWhenSharing` | `true` | Suggest a timed snooze when portal sharing starts. Never mute automatically. |

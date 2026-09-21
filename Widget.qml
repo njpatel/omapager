@@ -70,6 +70,26 @@ BarWidget {
   readonly property string configuredDisplayName: String(setting("displayName", "") || "")
   readonly property bool configuredOfferSnoozeWhenSharing: setting("offerSnoozeWhenSharing", true) !== false
   readonly property bool configuredShowCountdown: setting("showCountdown", false) === true
+  readonly property string configuredFullscreenOverlay: {
+    var mode = String(setting("fullscreenOverlay", "off"))
+    return ["all", "steam", "all-away", "steam-away"].indexOf(mode) >= 0 ? mode : "off"
+  }
+  readonly property var fullscreenOverlayOptions: [
+    { value: "off", label: "Nothing" },
+    { value: "all", label: "Fullscreen windows" },
+    { value: "steam", label: "Fullscreen Steam games" },
+    { value: "all-away", label: "Fullscreen windows, never over them" },
+    { value: "steam-away", label: "Fullscreen Steam games, never over them" }
+  ]
+  readonly property string fullscreenOverlayExplanation: {
+    switch (configuredFullscreenOverlay) {
+    case "all": return "Get out of the way of fullscreen windows, so they go straight to the display. A new notification still appears over them, then it steps aside again."
+    case "steam": return "Get out of the way of fullscreen Steam games, so they go straight to the display. A new notification still appears over them, then it steps aside again."
+    case "all-away": return "Never appear over a fullscreen window. New notifications go to another display instead, or wait in Recent if there is no other display."
+    case "steam-away": return "Never appear over a fullscreen Steam game. New notifications go to another display instead, or wait in Recent if there is no other display."
+    default: return "Stay over fullscreen windows. Hyprland then has to redraw every frame of a fullscreen game."
+    }
+  }
   readonly property bool configuredFetchRemoteIcons: setting("fetchRemoteIcons", true) !== false
   readonly property bool configuredRequireSandbox: setting("requireSandbox", false) === true
   readonly property int configuredEdgeSpacing: {
@@ -171,6 +191,7 @@ BarWidget {
     service.fontScale = isFinite(fontScale) ? Math.max(75, Math.min(200, fontScale)) / 100 : 1
     service.edgeSpacing = configuredEdgeSpacing
     service.showCountdown = configuredShowCountdown
+    service.fullscreenOverlay = configuredFullscreenOverlay
     var align = String(setting("actionsAlign", "right"))
     if (align === "left" || align === "right") service.actionsAlign = align
     service.setFetchRemoteIcons(configuredFetchRemoteIcons)
@@ -257,7 +278,7 @@ BarWidget {
   readonly property bool opened: controller.open
   property bool settingsView: false
   onSettingsViewChanged: {
-    if (!settingsView) displayDropdown.close()
+    if (!settingsView) { displayDropdown.close(); fullscreenDropdown.close() }
     // The shared panel focuses its target only when it opens. A view switch
     // inside an already-open panel must transfer focus after bindings settle.
     Qt.callLater(function() {
@@ -614,7 +635,8 @@ BarWidget {
               width: parent.width
               spacing: Style.spacing.lg
 
-              Dropdown {
+              // Picker, not the kit's Dropdown: see Picker.qml for why.
+              Picker {
                 id: displayDropdown
                 width: parent.width
                 label: "Notification display"
@@ -622,17 +644,40 @@ BarWidget {
                 options: pager.displayOptions
                 foreground: pager.panelFg
                 fontFamily: pager.fontFamily
-                onChanged: function(value) {
-                  pager.selectDisplay(value)
-                  // Dropdown assigns its own value when choosing. Restore the
-                  // binding so config edits and hotplug still update the label.
-                  displayDropdown.value = Qt.binding(function() { return pager.displayChoice })
-                }
+                onPicked: function(value) { pager.selectDisplay(value) }
               }
 
               Text {
                 width: parent.width
                 text: pager.displayExplanation
+                textFormat: Text.PlainText
+                color: Qt.darker(pager.panelFg, 1.4)
+                font.family: pager.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                wrapMode: Text.WordWrap
+              }
+            }
+
+            PanelSeparator { foreground: pager.panelFg }
+
+            Column {
+              width: parent.width
+              spacing: Style.spacing.lg
+
+              Picker {
+                id: fullscreenDropdown
+                width: parent.width
+                label: "Step aside for"
+                value: pager.configuredFullscreenOverlay
+                options: pager.fullscreenOverlayOptions
+                foreground: pager.panelFg
+                fontFamily: pager.fontFamily
+                onPicked: function(value) { pager.persistSettings({ fullscreenOverlay: value }) }
+              }
+
+              Text {
+                width: parent.width
+                text: pager.fullscreenOverlayExplanation
                 textFormat: Text.PlainText
                 color: Qt.darker(pager.panelFg, 1.4)
                 font.family: pager.fontFamily
