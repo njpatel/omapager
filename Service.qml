@@ -1275,6 +1275,21 @@ Item {
     for (var k = 0; k < keys.length; k++) closeToast(keys[k], reason || "cleared")
   }
 
+  // One stack's worth of clearAll: the deck the pointer has open, or else the
+  // one the newest card sits in. The keybinding used to sweep every deck, so a
+  // chat thread you were done with took an unrelated build failure with it.
+  // In "all" mode there is only one deck, so this is still everything.
+  function clearDeck(reason) {
+    if (toasts.count === 0) return 0
+    var deck = expanded && openDeck !== "" ? openDeck
+             : Layout.deckKeyFor(toasts.get(0), stacking)
+    var keys = []
+    for (var i = 0; i < toasts.count; i++)
+      if (Layout.deckKeyFor(toasts.get(i), stacking) === deck) keys.push(toasts.get(i).key)
+    for (var k = 0; k < keys.length; k++) closeToast(keys[k], reason || "cleared")
+    return keys.length
+  }
+
   // What the sender said can be done with this notification. Not a guess - the
   // app put these on the wire itself, and until now the daemon accepted them
   // (actionsSupported: true), invoked "default" on a click, and drew none of
@@ -2057,7 +2072,8 @@ Item {
       return dndState()
     }
 
-    function dismissAll(): string { service.clearAll("dismissed"); return "ok" }
+    // One stack, not the screen: the open deck, else the newest card's.
+    function dismissAll(): string { service.clearDeck("dismissed"); return "ok" }
 
     function dismissOne(): string {
       if (toasts.count === 0) return "none"
