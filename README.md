@@ -258,7 +258,7 @@ Omarchy's existing comma-key shortcuts work without configuration:
 | | |
 | --- | --- |
 | `SUPER` `,` | dismiss the newest notification |
-| `SUPER` `SHIFT` `,` | dismiss all of them |
+| `SUPER` `SHIFT` `,` | dismiss the whole stack the newest one is in (or the one you have open) |
 | `SUPER` `CTRL` `,` | toggle silencing |
 | `SUPER` `ALT` `,` | invoke the newest one, as clicking it would |
 | `SUPER` `SHIFT` `ALT` `,` | put the last few back on screen |
